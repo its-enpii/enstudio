@@ -1,0 +1,20 @@
+{
+  "name": "enpiistudio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal agentic coding workspace — enpii on your own endpoint",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @enpiistudio/desktop",
+    "dev:devtools": "npm run dev:devtools -w @enpiistudio/desktop",
+    "build": "npm run build -w @enpiistudio/agent-core && npm run build -w @enpiistudio/desktop",
+    "dev:agent": "npm run dev -w @enpiistudio/agent-core",
+    "typecheck": "npm run typecheck -w @enpiistudio/agent-core && npm run typecheck -w @enpiistudio/desktop"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

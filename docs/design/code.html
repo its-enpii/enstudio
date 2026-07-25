@@ -1,0 +1,285 @@
+<!DOCTYPE html><html class="h-full" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Enpii Studio - AI Agent Interface</title>
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts for Sans and Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'studio-dark': '#040303',
+            'studio-card': '#141414',
+            'studio-panel': '#0C0C0C',
+            'studio-purple': '#3D348B',
+            'studio-gold': '#E6AF2E',
+            'studio-grey': '#1F1F1F',
+            'studio-text-dim': '#8E8E8E',
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          borderRadius: {
+            'xl': '12px',
+            '2xl': '16px',
+            '3xl': '24px',
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="custom-layout">
+    body {
+      background-color: #040303;
+      color: #E2E2E2;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 10px;
+    }
+    /* Precise glow for tool dots */
+    .glow-yellow {
+      box-shadow: 0 0 8px #E6AF2E;
+    }
+    .glow-green {
+      box-shadow: 0 0 8px #10B981;
+    }
+    /* Floating Pill Navigation */
+    .pill-nav-container {
+      background: rgba(20, 20, 20, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col p-4 box-border bg-studio-dark">
+<!-- BEGIN: MainContainer -->
+<main class="flex h-full w-full gap-4 overflow-hidden">
+<!-- BEGIN: LeftSidebar -->
+<aside class="w-64 bg-studio-panel border border-white/5 rounded-2xl flex flex-col p-4 shrink-0" data-purpose="sidebar-left">
+<div class="flex items-center gap-2 mb-6 px-1">
+<div class="w-5 h-5 bg-studio-purple rounded-md flex items-center justify-center">
+<span class="text-[10px] font-bold text-white">E</span>
+</div>
+<h1 class="text-sm font-semibold">enpiistudio</h1>
+</div>
+<!-- Search Box -->
+<div class="relative mb-6">
+<svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-studio-text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<input class="w-full bg-studio-dark border border-white/5 rounded-lg py-2 pl-9 pr-3 text-xs text-studio-text-dim placeholder:text-studio-text-dim/50 focus:ring-1 focus:ring-studio-purple/50 outline-none" placeholder="Search projects..." type="text">
+</div>
+<!-- Project List -->
+<nav class="space-y-1 flex-1 overflow-y-auto custom-scrollbar">
+<!-- Project Item: Active -->
+<div class="p-3 bg-studio-purple/10 border border-studio-purple/20 rounded-xl relative">
+<div class="flex justify-between items-start mb-1">
+<span class="text-sm font-medium">enpii-core</span>
+<div class="w-2 h-2 bg-studio-gold rounded-full glow-yellow mt-1"></div>
+</div>
+<span class="text-[10px] text-studio-text-dim font-mono">~/dev/enpii</span>
+</div>
+<!-- Project Item -->
+<div class="p-3 hover:bg-white/5 rounded-xl transition-colors cursor-pointer relative group">
+<div class="flex justify-between items-start mb-1">
+<span class="text-sm font-medium text-studio-text-dim group-hover:text-white">enmarket</span>
+<div class="w-2 h-2 bg-studio-gold rounded-full opacity-60 mt-1"></div>
+</div>
+<span class="text-[10px] text-studio-text-dim font-mono">~/dev/enmarket</span>
+</div>
+<!-- Project Item -->
+<div class="p-3 hover:bg-white/5 rounded-xl transition-colors cursor-pointer relative group">
+<div class="flex justify-between items-start mb-1">
+<span class="text-sm font-medium text-studio-text-dim group-hover:text-white">portfolio</span>
+<div class="w-2 h-2 bg-studio-gold rounded-full opacity-60 mt-1"></div>
+</div>
+<span class="text-[10px] text-studio-text-dim font-mono">~/projects/portfolio</span>
+</div>
+<!-- Project Item -->
+<div class="p-3 hover:bg-white/5 rounded-xl transition-colors cursor-pointer relative group">
+<div class="flex justify-between items-start mb-1">
+<span class="text-sm font-medium text-studio-text-dim group-hover:text-white">sidbm</span>
+<div class="w-2 h-2 bg-studio-gold rounded-full opacity-60 mt-1"></div>
+</div>
+<span class="text-[10px] text-studio-text-dim font-mono">~/workspace/projects/sidbm</span>
+</div>
+</nav>
+</aside>
+<!-- END: LeftSidebar -->
+<!-- BEGIN: CenterColumn -->
+<section class="flex-1 flex flex-col min-w-0 gap-4" data-purpose="main-chat-area">
+<!-- Top Navigation: Isolated Floating Card -->
+<header class="h-14 flex items-center justify-between px-6 shrink-0 pill-nav-container rounded-2xl">
+<button class="text-studio-text-dim hover:text-white">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10 19l-7-7m0 0l7-7m-7 7h18" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<div class="flex p-1 rounded-full text-xs font-medium bg-black/30 border border-white/5">
+<button class="px-4 py-1 bg-studio-purple rounded-full text-white">Agent</button>
+<button class="px-4 py-1 text-studio-text-dim hover:text-white">Code</button>
+<button class="px-4 py-1 text-studio-text-dim hover:text-white">Terminal</button>
+</div>
+<div class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center border border-white/5">
+<div class="w-3 h-3 bg-studio-text-dim rounded-full"></div>
+</div>
+</header>
+<!-- Main Chat Content: Independent Card -->
+<div class="flex-1 bg-studio-panel border border-white/5 rounded-3xl flex flex-col overflow-hidden">
+<!-- Chat History -->
+<div class="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+<!-- User Message -->
+<div class="flex justify-end">
+<div class="max-w-[70%] bg-studio-card/80 border border-white/5 p-4 rounded-2xl rounded-tr-none text-sm leading-relaxed shadow-sm">
+            Can you help me update the <code class="bg-white/10 px-1 rounded font-mono text-xs">src/app.ts</code> file? I need to integrate the new validation schema we discussed yesterday.
+          </div>
+</div>
+<!-- Agent Response -->
+<div class="flex gap-4">
+<!-- Agent Avatar -->
+<div class="w-8 h-8 rounded-full bg-studio-purple flex items-center justify-center shrink-0">
+<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<div class="flex-1 space-y-4">
+<div class="text-sm leading-relaxed text-studio-text-dim">
+              I'll analyze the current structure of <code class="text-studio-purple font-mono">src/app.ts</code> first to ensure compatibility. Then, I'll apply the validation schema updates.
+            </div>
+<!-- Tool Card 1 -->
+<div class="bg-studio-dark/40 border-l-2 border-studio-gold rounded-r-lg p-4 font-mono text-xs flex justify-between items-center">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 bg-studio-gold rounded-full glow-yellow"></div>
+<span class="text-studio-gold font-bold">tool:read_file</span>
+<span class="text-studio-text-dim">src/app.ts</span>
+</div>
+<span class="text-[10px] tracking-widest text-studio-text-dim uppercase">Completed</span>
+</div>
+<div class="text-sm leading-relaxed text-studio-text-dim">
+              I found the mount point for the middleware. Now, I need to inject the schema. I'll run a quick test to verify the schema imports work.
+            </div>
+<!-- Tool Card 2 -->
+<div class="bg-studio-dark/40 border-l-2 border-emerald-500 rounded-r-lg p-4 font-mono text-xs flex justify-between items-center">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 bg-emerald-500 rounded-full glow-green"></div>
+<span class="text-emerald-500 font-bold">tool:run_shell</span>
+<span class="text-studio-text-dim">"npm run test:schema"</span>
+</div>
+<span class="text-[10px] tracking-widest text-studio-text-dim uppercase">Exit Code 0</span>
+</div>
+<!-- Action Required Card -->
+<div class="bg-studio-dark border border-studio-gold/30 rounded-2xl overflow-hidden shadow-2xl">
+<div class="bg-studio-gold/10 px-4 py-2 flex justify-between items-center border-b border-studio-gold/20">
+<div class="flex items-center gap-2">
+<svg class="w-4 h-4 text-studio-gold" fill="currentColor" viewBox="0 0 20 20"><path clip-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" fill-rule="evenodd"></path></svg>
+<span class="text-[10px] font-bold text-studio-gold uppercase tracking-wider">Action Required</span>
+</div>
+<span class="text-[9px] font-bold text-studio-gold/60 uppercase tracking-widest">Write Permission</span>
+</div>
+<div class="p-5">
+<p class="text-xs mb-6"><span class="font-bold text-studio-purple">enpii</span> wants to edit <code class="bg-studio-grey px-2 py-1 rounded text-studio-purple font-mono mx-1">src/app.ts</code> to insert the validation logic.</p>
+<div class="grid grid-cols-2 gap-4">
+<button class="py-3 px-4 bg-studio-grey hover:bg-studio-grey/80 rounded-xl text-sm font-medium transition-colors">Deny</button>
+<button class="py-3 px-4 bg-studio-gold text-studio-dark hover:bg-studio-gold/90 rounded-xl text-sm font-bold transition-colors">Allow Edit</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Composer Area: Contained within Chat Card -->
+<footer class="p-6 pt-2">
+<div class="bg-studio-dark/50 border border-white/5 rounded-3xl p-4 flex flex-col gap-4">
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-sm resize-none placeholder:text-studio-text-dim min-h-[60px] custom-scrollbar" placeholder="Message the agent... (Use @ to reference files)"></textarea>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-4 text-studio-text-dim">
+<button class="hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg></button>
+<button class="hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg></button>
+<button class="hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg></button>
+</div>
+<button class="bg-studio-gold text-studio-dark pl-5 pr-4 py-2 rounded-full flex items-center gap-2 font-bold text-sm hover:bg-studio-gold/90 transition-colors">
+              Send
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path></svg>
+</button>
+</div>
+</div>
+</footer>
+</div>
+</section>
+<!-- END: CenterColumn -->
+<!-- BEGIN: RightSidebar -->
+<aside class="w-72 bg-studio-panel border border-white/5 rounded-2xl flex flex-col p-5 gap-6 shrink-0" data-purpose="sidebar-right">
+<!-- Run Status Section -->
+<section>
+<h3 class="text-[10px] font-bold text-studio-text-dim uppercase tracking-widest mb-4">Run Status</h3>
+<div class="bg-studio-gold/10 border border-studio-gold/20 rounded-xl p-3 flex items-center gap-3">
+<div class="w-2 h-2 bg-studio-gold rounded-full glow-yellow"></div>
+<span class="text-sm font-medium text-studio-gold">Agent Busy</span>
+</div>
+</section>
+<!-- Token Usage Section -->
+<section>
+<div class="flex justify-between items-center mb-3">
+<h3 class="text-[10px] font-bold text-studio-text-dim uppercase tracking-widest">Token Usage</h3>
+<span class="text-[10px] text-studio-text-dim font-mono">1.2k / 4.5k</span>
+</div>
+<div class="h-1.5 w-full bg-studio-grey rounded-full overflow-hidden">
+<div class="h-full bg-studio-purple w-[28%] rounded-full"></div>
+</div>
+</section>
+<!-- Recent Diffs Section -->
+<section class="flex-1">
+<h3 class="text-[10px] font-bold text-studio-text-dim uppercase tracking-widest mb-4">Recent Diffs</h3>
+<div class="space-y-2">
+<div class="bg-studio-card p-3 rounded-xl border border-white/5 flex items-center justify-between hover:border-studio-purple/40 cursor-pointer transition-colors">
+<div class="flex items-center gap-3">
+<svg class="w-3.5 h-3.5 text-studio-text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="text-xs font-mono">auth.ts</span>
+</div>
+<div class="text-[10px] font-bold">
+<span class="text-emerald-500">+12</span>
+<span class="text-red-500 ml-1">-3</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Sessions Section -->
+<section>
+<h3 class="text-[10px] font-bold text-studio-text-dim uppercase tracking-widest mb-4">Sessions</h3>
+<div class="space-y-3">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-4 h-4 bg-studio-purple/30 rounded flex items-center justify-center">
+<svg class="w-2.5 h-2.5 text-studio-purple" fill="currentColor" viewBox="0 0 20 20"><path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z"></path></svg>
+</div>
+<span class="text-xs font-medium">Current Session</span>
+</div>
+<span class="text-[10px] text-studio-text-dim">2m ago</span>
+</div>
+<div class="flex items-center justify-between opacity-50">
+<div class="flex items-center gap-3">
+<div class="w-4 h-4 bg-white/10 rounded flex items-center justify-center">
+<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-xs">Setup Middleware</span>
+</div>
+<span class="text-[10px] text-studio-text-dim">1h ago</span>
+</div>
+</div>
+</section>
+</aside>
+<!-- END: RightSidebar -->
+</main>
+<!-- END: MainContainer -->
+
+
+</body></html>
