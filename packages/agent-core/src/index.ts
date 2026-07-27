@@ -39,6 +39,23 @@ export { runTool } from './tools/run.js'
 export { TOOL_DEFS } from './tools/defs.js'
 export { webFetch, webSearch, ensurePublicHttpUrl, validateHttpUrl } from './web.js'
 export {
+  taskCreate,
+  taskGet,
+  taskList,
+  taskUpdate,
+  taskStop,
+  taskClearBoard,
+} from './tasks.js'
+export type { BoardTask, TaskStatus } from './tasks.js'
+export {
+  spawnSubAgent,
+  messageSubAgent,
+  stopSubAgent,
+  listSubAgents,
+  clearLiveSubAgents,
+} from './subagent.js'
+export type { SubAgentRecord } from './subagent.js'
+export {
   ensureMcpConfigScaffold,
   loadMcpConfig,
   mcpCallTool,

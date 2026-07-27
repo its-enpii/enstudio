@@ -35,6 +35,7 @@ import {
 import { memoryDelete, memorySearch, memoryWrite } from '../context.js'
 import { mcpCallTool, mcpListTools } from '../mcp.js'
 import { webFetch, webSearch } from '../web.js'
+import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from '../tasks.js'
 
 const DEFAULT_READ = 120_000
 const DEFAULT_GLOB = 200
@@ -226,6 +227,48 @@ export async function runTool(
           homeDir,
         })
         return result.ok ? ok(result.summary, result.content) : fail(result.summary)
+      }
+      case 'task_create': {
+        const r = taskCreate(root, {
+          title: typeof args.title === 'string' ? args.title : undefined,
+          subject: typeof args.subject === 'string' ? args.subject : undefined,
+          detail: typeof args.detail === 'string' ? args.detail : undefined,
+          description: typeof args.description === 'string' ? args.description : undefined,
+          status: typeof args.status === 'string' ? args.status : undefined,
+          blockedBy: Array.isArray(args.blockedBy) ? args.blockedBy.map(String) : undefined,
+          activeForm: typeof args.activeForm === 'string' ? args.activeForm : undefined,
+        })
+        return r.ok ? ok(`task ${r.task.id} created`, r.content) : fail(r.content)
+      }
+      case 'task_get': {
+        const r = taskGet(root, String(args.taskId ?? args.id ?? ''))
+        return r.ok ? ok(`task ${r.task.id}`, r.content) : fail(r.content)
+      }
+      case 'task_list': {
+        const r = taskList(root, {
+          status: typeof args.status === 'string' ? args.status : undefined,
+        })
+        return ok(`tasks ${r.tasks.length}`, r.content)
+      }
+      case 'task_update': {
+        const r = taskUpdate(root, {
+          taskId: typeof args.taskId === 'string' ? args.taskId : undefined,
+          id: typeof args.id === 'string' ? args.id : undefined,
+          title: typeof args.title === 'string' ? args.title : undefined,
+          subject: typeof args.subject === 'string' ? args.subject : undefined,
+          detail: typeof args.detail === 'string' ? args.detail : undefined,
+          description: typeof args.description === 'string' ? args.description : undefined,
+          status: typeof args.status === 'string' ? args.status : undefined,
+          note: typeof args.note === 'string' ? args.note : undefined,
+          progress: typeof args.progress === 'number' ? args.progress : undefined,
+          addBlockedBy: Array.isArray(args.addBlockedBy) ? args.addBlockedBy.map(String) : undefined,
+          activeForm: typeof args.activeForm === 'string' ? args.activeForm : undefined,
+        })
+        return r.ok ? ok(`task ${r.task.id} updated`, r.content) : fail(r.content)
+      }
+      case 'task_stop': {
+        const r = taskStop(root, String(args.taskId ?? args.id ?? ''))
+        return r.ok ? ok(`task ${r.task.id} stopped`, r.content) : fail(r.content)
       }
       case 'web_fetch': {
         const r = await webFetch({

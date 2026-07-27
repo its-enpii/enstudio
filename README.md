@@ -123,6 +123,7 @@ Run focused checks before broad checks.
 - [x] TOML config · deny globs · memory toggle · layout per project · auto `.enpii/`
 - [x] Packaging scaffold (`electron-builder` + multi-target dist + signing env hooks)
 - [x] v1 agent: `web_fetch` / `web_search` (OpenHarness patterns, SSRF guard)
-- [ ] v1 agent: in-loop `task_*` + `agent` / worktree sub-agent
+- [x] v1 agent: in-loop durable `task_*` board
+- [x] v1 agent: `agent` / worktree sub-agent + `send_message`
 - [ ] v1 agent: plan/ask, parallel tools, cron (later)
 - [ ] Signed installers when certs available (codesign / notarize / Authenticode)
