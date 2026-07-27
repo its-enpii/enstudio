@@ -1291,7 +1291,6 @@
   class="relative col-start-1 row-span-full grid h-full min-h-0 {agentPane !== 'enpii'
     ? 'grid-rows-[auto_minmax(0,1fr)_0fr]'
     : 'grid-rows-[auto_minmax(0,1fr)_auto]'}"
-  class:is-dragging={draggingFiles}
   role="region"
   aria-label="Agent stage"
   ondragenter={onDragEnter}
@@ -1488,30 +1487,85 @@
       </div>
     {/if}
     {#if app.run}
-      <section class="agent-task-panel">
-        <div class="agent-task-head"><div><strong>Task</strong><span class="task-run-status {app.run.status}">{app.run.status}</span><span class="task-progress">{app.run.tasks.filter((task) => task.status === 'completed').length}/{app.run.tasks.length} steps · {app.run.toolCount ?? 0} tools</span></div><div class="agent-task-actions">{#if app.busy}<button type="button" class="danger" onclick={() => void stopAgentTurn()}>Stop</button>{:else}<button type="button" disabled={!lastUserPrompt()} onclick={() => void retryRun()}>Retry</button><button type="button" onclick={() => void continueRun()}>Continue</button>{/if}</div></div>
-        {#if app.run.lastEvent}<div class="agent-task-last-event">{app.run.lastEvent}</div>{/if}
-        <div class="agent-task-list">
+      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-[10px] border border-white/7 bg-[rgba(18,18,24,0.96)] p-2">
+        <div class="flex items-center justify-between px-1 pb-1.5 pt-0.5">
+          <div class="flex items-center gap-1.5">
+            <strong class="text-[10px] text-studio-text">Task</strong>
+            <span class="text-[9px] capitalize text-studio-text-dim">{app.run.status}</span>
+            <span class="text-[9px] text-studio-text-dim">{app.run.tasks.filter((task) => task.status === 'completed').length}/{app.run.tasks.length} steps · {app.run.toolCount ?? 0} tools</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            {#if app.busy}
+              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-[#ff9b9b] hover:bg-white/10" onclick={() => void stopAgentTurn()}>Stop</button>
+            {:else}
+              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text disabled:opacity-45" disabled={!lastUserPrompt()} onclick={() => void retryRun()}>Retry</button>
+              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text" onclick={() => void continueRun()}>Continue</button>
+            {/if}
+          </div>
+        </div>
+        {#if app.run.lastEvent}
+          <div class="truncate border-t border-white/5 px-1 py-1.5 font-mono text-[8px] text-white/35">{app.run.lastEvent}</div>
+        {/if}
+        <div class="grid gap-0.5">
           {#each app.run.tasks as task (task.id)}
-            <div class="agent-task-row {task.status}"><span class="task-dot"></span><div class="agent-task-copy"><span>{task.title}</span>{#if task.detail}<small>{task.detail}</small>{/if}</div>{#if task.toolCount}<small class="task-tool-count">{task.toolCount} tools</small>{/if}<small class="task-status">{task.status}</small></div>
+            <div class="flex min-h-[25px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] {task.status === 'running' ? 'bg-violet-500/7 text-studio-text' : task.status === 'completed' ? 'text-white/34' : 'text-white/50'}">
+              <span class="size-1.5 shrink-0 rounded-full {task.status === 'running' ? 'bg-[#9e83ff] shadow-[0_0_0_3px_rgba(143,106,255,0.12)]' : task.status === 'completed' ? 'bg-[#69ce9b]' : 'bg-white/20'}"></span>
+              <div class="flex min-w-0 flex-col">
+                <span class="truncate">{task.title}</span>
+                {#if task.detail}<small class="truncate text-[8px] text-white/32 normal-case opacity-55">{task.detail}</small>{/if}
+              </div>
+              {#if task.toolCount}<small class="opacity-55">{task.toolCount} tools</small>{/if}
+              <small class="capitalize opacity-55">{task.status}</small>
+            </div>
           {/each}
         </div>
         {#if app.approvals.length > 0}
-          <details class="approval-history"><summary>Approval history · {app.approvals.length}</summary>{#each app.approvals.slice(0, 8) as approval (`${approval.ts}-${approval.name}`)}<details class="approval-entry"><summary><span class="approval-decision {approval.decision}">{approval.decision}</span><span>{approval.summary}</span><time>{new Date(approval.ts).toLocaleTimeString()}</time></summary>{#if approval.preview}<pre>{approval.preview}</pre>{/if}{#if approval.args}<code>{approval.args}</code>{/if}</details>{/each}</details>
+          <details class="mt-1.5 border-t border-white/5 pt-1">
+            <summary class="cursor-pointer px-1 py-1 text-[9px] text-white/38">Approval history · {app.approvals.length}</summary>
+            {#each app.approvals.slice(0, 8) as approval (`${approval.ts}-${approval.name}`)}
+              <details class="border-t border-white/[0.035]">
+                <summary class="flex min-h-[23px] cursor-pointer list-none items-center gap-1.5 px-1.5 py-0.5 text-[8px] text-white/44 [&::-webkit-details-marker]:hidden">
+                  <span class="rounded px-1 py-0.5 uppercase {approval.decision === 'allow' ? 'text-[#79d9a7]' : 'text-[#ff9b9b]'}">{approval.decision}</span>
+                  <span class="min-w-0 flex-1 truncate">{approval.summary}</span>
+                  <time class="ml-auto opacity-45">{new Date(approval.ts).toLocaleTimeString()}</time>
+                </summary>
+                {#if approval.preview}<pre class="mx-1.5 mb-1.5 max-h-[100px] overflow-auto bg-black/22 p-1.5 font-mono text-[8px] text-white/46 whitespace-pre-wrap break-words">{approval.preview}</pre>{/if}
+                {#if approval.args}<code class="mx-1.5 mb-1.5 block max-h-[100px] overflow-auto bg-black/22 p-1.5 font-mono text-[8px] text-white/46 whitespace-pre-wrap break-words">{approval.args}</code>{/if}
+              </details>
+            {/each}
+          </details>
         {/if}
       </section>
     {/if}
     {#if app.checkpoints.length > 0}
-      <section class="agent-checkpoints">
-        <div class="agent-checkpoints-head"><strong>Agent Checkpoints</strong><button type="button" disabled={checkpointBusy} onclick={() => void loadCheckpoints()}>Refresh</button></div>
+      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-[10px] border border-white/7 bg-[rgba(18,18,24,0.92)] p-2">
+        <div class="flex items-center justify-between px-1 pb-1.5 pt-0.5 text-[10px] text-studio-text-dim">
+          <strong>Agent Checkpoints</strong>
+          <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void loadCheckpoints()}>Refresh</button>
+        </div>
         {#each app.checkpoints as checkpoint (checkpoint.id)}
-          <details class="agent-checkpoint">
-            <summary><span>{new Date(checkpoint.createdAt).toLocaleTimeString()}</span><span>{checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'}</span></summary>
-            <div class="agent-checkpoint-files">
+          <details class="border-t border-white/5">
+            <summary class="flex cursor-pointer items-center justify-between px-1 py-1.5 text-[9px] text-white/45">
+              <span>{new Date(checkpoint.createdAt).toLocaleTimeString()}</span>
+              <span>{checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'}</span>
+            </summary>
+            <div class="grid gap-1 px-1 pb-1.5">
               {#each checkpoint.files as file (file.path)}
-                <div><span>{file.path}</span><span class="checkpoint-file-actions"><button type="button" disabled={checkpointBusy} onclick={() => void acceptCheckpoint(checkpoint.id, file.path)}>Accept</button><button type="button" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id, file.path)}>Revert</button></span></div>
+                <div class="flex items-center justify-between gap-2 rounded bg-white/[0.025] px-2 py-1 font-mono text-[9px] text-studio-text-dim">
+                  <span class="min-w-0 truncate">{file.path}</span>
+                  <span class="flex shrink-0 gap-1">
+                    <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void acceptCheckpoint(checkpoint.id, file.path)}>Accept</button>
+                    <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id, file.path)}>Revert</button>
+                  </span>
+                </div>
               {/each}
-              <div class="checkpoint-turn-actions"><button type="button" disabled={checkpointBusy} onclick={() => void acceptCheckpoint(checkpoint.id)}>Accept turn</button>{#if checkpoint.prompt}<button type="button" disabled={checkpointBusy || app.busy} onclick={() => requestRetryCheckpoint(checkpoint.id, checkpoint.prompt)}>Retry</button>{/if}<button type="button" class="checkpoint-revert-all" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id)}>Revert turn</button></div>
+              <div class="flex flex-wrap items-center justify-end gap-1">
+                <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void acceptCheckpoint(checkpoint.id)}>Accept turn</button>
+                {#if checkpoint.prompt}
+                  <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy || app.busy} onclick={() => requestRetryCheckpoint(checkpoint.id, checkpoint.prompt)}>Retry</button>
+                {/if}
+                <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-[#ff9b9b] disabled:opacity-45" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id)}>Revert turn</button>
+              </div>
             </div>
           </details>
         {/each}
@@ -1773,22 +1827,55 @@
       </button>
     </div>
     {#if activeMention && (mentionResults.length > 0 || mentionLoading)}
-      <div class="slash-suggestions mention-suggestions" role="listbox" aria-label="File references">
+      <div
+        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-white/12 bg-[rgba(27,27,29,0.98)] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        role="listbox"
+        aria-label="File references"
+      >
         {#if mentionLoading && mentionResults.length === 0}
-          <div class="mention-empty">Searching…</div>
+          <div class="px-2.5 py-2 text-[11px] text-studio-text-dim">Searching…</div>
         {:else}
           {#each mentionResults as path, index (path)}
-            <button type="button" class:active={index === mentionActive} onclick={() => applyMention(path)} onmouseenter={() => (mentionActive = index)}>
-              <span><strong>{mentionLabel(path)}</strong><small>{path === '__selection__' ? 'Current Code selection' : 'Project file'}</small></span>
+            <button
+              type="button"
+              class="block w-full rounded-md px-2.5 py-2 text-left {index === mentionActive
+                ? 'bg-studio-purple/20'
+                : 'hover:bg-studio-purple/20'}"
+              onclick={() => applyMention(path)}
+              onmouseenter={() => (mentionActive = index)}
+            >
+              <span class="flex flex-col gap-0.5">
+                <strong class="font-mono text-[10px] text-studio-text">{mentionLabel(path)}</strong>
+                <small class="text-[9px] text-studio-text-dim"
+                  >{path === '__selection__' ? 'Current Code selection' : 'Project file'}</small
+                >
+              </span>
             </button>
           {/each}
         {/if}
       </div>
     {:else if slashSuggestions.length > 0}
-      <div class="slash-suggestions" role="listbox" aria-label="Slash commands">
+      <div
+        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-white/12 bg-[rgba(27,27,29,0.98)] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        role="listbox"
+        aria-label="Slash commands"
+      >
         {#each slashSuggestions as command, index (command.name)}
-          <button type="button" class:active={index === slashActive} onclick={() => { app.composer = `${command.name} `; composerEl?.focus() }} onmouseenter={() => (slashActive = index)}>
-            <span><strong>{command.usage}</strong><small>{command.description}</small></span>
+          <button
+            type="button"
+            class="block w-full rounded-md px-2.5 py-2 text-left {index === slashActive
+              ? 'bg-studio-purple/20'
+              : 'hover:bg-studio-purple/20'}"
+            onclick={() => {
+              app.composer = `${command.name} `
+              composerEl?.focus()
+            }}
+            onmouseenter={() => (slashActive = index)}
+          >
+            <span class="flex flex-col gap-0.5">
+              <strong class="font-mono text-[10px] text-studio-text">{command.usage}</strong>
+              <small class="text-[9px] text-studio-text-dim">{command.description}</small>
+            </span>
           </button>
         {/each}
       </div>
@@ -1796,7 +1883,33 @@
     {#if attachmentPreviewId}
       {@const preview = app.attachments.find((file) => file.id === attachmentPreviewId)}
       {#if preview}
-        <section class="attachment-preview"><header><strong>{preview.name}</strong><span>{preview.kind} · {(preview.size / 1024).toFixed(1)} KB{#if preview.images?.length} · {preview.images.length} image{/if}</span><button type="button" aria-label="Close attachment preview" onclick={() => (attachmentPreviewId = null)}>×</button></header>{#if preview.error}<div class="attachment-preview-error">{preview.error}</div>{:else}<pre>{preview.content.slice(0, 4_000) || '[vision image]'}</pre>{/if}</section>
+        <section
+          class="absolute bottom-[74px] left-4 z-16 w-[min(500px,calc(100%-32px))] overflow-hidden rounded-[9px] border border-white/11 bg-[rgba(23,23,25,0.99)] shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        >
+          <header class="flex items-center gap-2 border-b border-white/7 px-2.5 py-2">
+            <strong class="min-w-0 truncate text-[10px] text-studio-text">{preview.name}</strong>
+            <span class="ml-auto whitespace-nowrap text-[8px] text-studio-text-dim">
+              {preview.kind} · {(preview.size / 1024).toFixed(1)} KB{#if preview.images?.length}
+                · {preview.images.length} image{/if}
+            </span>
+            <button
+              type="button"
+              class="px-0.5 text-sm text-studio-text-dim hover:text-studio-text"
+              aria-label="Close attachment preview"
+              onclick={() => (attachmentPreviewId = null)}>×</button
+            >
+          </header>
+          {#if preview.error}
+            <div class="max-h-60 overflow-auto p-2.5 font-mono text-[9px] text-[#e8c66e] whitespace-pre-wrap break-words">
+              {preview.error}
+            </div>
+          {:else}
+            <pre
+              class="m-0 max-h-60 overflow-auto p-2.5 font-mono text-[9px] text-white/50 whitespace-pre-wrap break-words"
+              >{preview.content.slice(0, 4_000) || '[vision image]'}</pre
+            >
+          {/if}
+        </section>
       {/if}
     {/if}
   </div>
