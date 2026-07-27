@@ -1161,8 +1161,14 @@ export async function applyWorktreeSession(opts: {
   keepBranch?: boolean
 } = {}): Promise<{ conflicts?: WorktreeConflict[] } | void> {
   const session = state.session
-  if (!session?.baseProjectRoot && !session?.worktreeBranch) {
-    state.notify('error', 'Apply failed', 'Active session is not a worktree session')
+  if (!session?.baseProjectRoot) {
+    state.notify(
+      'error',
+      'Apply failed',
+      session?.worktreeBranch
+        ? 'Session missing base project — open the Worktree session from the list (not a normal chat)'
+        : 'Switch to a worktree session first (WT tag)',
+    )
     return
   }
   if (state.busy) {
@@ -1199,8 +1205,14 @@ export async function applyWorktreeSession(opts: {
 
 export async function discardWorktreeSession(opts: { confirmed?: boolean } = {}): Promise<void> {
   const session = state.session
-  if (!session?.baseProjectRoot && !session?.worktreeBranch) {
-    state.notify('error', 'Discard failed', 'Active session is not a worktree session')
+  if (!session?.baseProjectRoot) {
+    state.notify(
+      'error',
+      'Discard failed',
+      session?.worktreeBranch
+        ? 'Session missing base project — open the Worktree session from the list (not a normal chat)'
+        : 'Switch to a worktree session first (WT tag)',
+    )
     return
   }
   if (!opts.confirmed) return
@@ -1237,17 +1249,57 @@ export async function openSession(sessionId: string): Promise<void> {
     state.pushLog(`[session] open ${sessionId.slice(0, 8)}…`)
 
     // Prefer in-memory live runtime (background concurrent run).
+    // Meta identity comes from session list / disk only — never previous session.
     if (state.restoreLiveSession(sessionId)) {
       const live = state.getLive(sessionId)
-      const listed = state.sessionList.find((s) => s.id === sessionId)
+      let listed = state.sessionList.find((s) => s.id === sessionId)
+      if (!listed) {
+        try {
+          const loaded = (await window.enpiistudio.enpii.request('session.get', {
+            sessionId,
+          })) as {
+            meta: {
+              id: string
+              title: string
+              status: string
+              model: string
+              projectRoot?: string
+              baseProjectRoot?: string
+              worktreeBranch?: string
+              loadMemory?: boolean
+              usage?: { prompt?: number; completion?: number; total?: number }
+            }
+          }
+          listed = {
+            id: loaded.meta.id,
+            title: loaded.meta.title,
+            status: loaded.meta.status,
+            model: loaded.meta.model,
+            projectRoot: loaded.meta.projectRoot,
+            baseProjectRoot: loaded.meta.baseProjectRoot,
+            worktreeBranch: loaded.meta.worktreeBranch,
+            usage: loaded.meta.usage
+              ? {
+                  prompt: loaded.meta.usage.prompt ?? 0,
+                  completion: loaded.meta.usage.completion ?? 0,
+                  total: loaded.meta.usage.total ?? 0,
+                }
+              : undefined,
+          }
+        } catch {
+          /* fall through with sparse meta */
+        }
+      }
       state.session = {
         id: sessionId,
-        title: listed?.title ?? state.session?.title ?? 'Session',
+        title: listed?.title ?? 'Session',
         status: live.status || listed?.status || (live.busy ? 'running' : 'idle'),
-        model: listed?.model ?? state.session?.model ?? 'enpii',
-        projectRoot: listed?.projectRoot ?? state.session?.projectRoot,
-        baseProjectRoot: listed?.baseProjectRoot ?? state.session?.baseProjectRoot,
-        worktreeBranch: listed?.worktreeBranch ?? state.session?.worktreeBranch,
+        model: listed?.model ?? state.provider?.model ?? 'enpii',
+        projectRoot: listed?.projectRoot,
+        baseProjectRoot: listed?.baseProjectRoot,
+        worktreeBranch: listed?.worktreeBranch,
+        loadMemory: listed ? (listed as { loadMemory?: boolean }).loadMemory : undefined,
+        usage: listed?.usage,
       }
       state.pushLog(`[session] restored live msgs=${state.messages.length} busy=${state.busy}`)
       await refreshSessionList()

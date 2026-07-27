@@ -149,13 +149,12 @@
     }
   }
 
-  const isWorktreeSession = $derived(
-    Boolean(app.session?.baseProjectRoot || app.session?.worktreeBranch),
-  )
+  /** Server gates apply/discard on baseProjectRoot only — match that, not title/branch alone. */
+  const isWorktreeSession = $derived(Boolean(app.session?.baseProjectRoot))
 
   $effect(() => {
     const id = app.session?.id
-    const worktree = Boolean(app.session?.baseProjectRoot || app.session?.worktreeBranch)
+    const worktree = Boolean(app.session?.baseProjectRoot)
     if (!id || !worktree) {
       wtPreview = null
       wtError = ''

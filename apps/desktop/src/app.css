@@ -5893,8 +5893,10 @@ textarea {
   padding: 6px 10px 0;
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(16, 16, 17, 0.6);
-  overflow-x: auto;
+  overflow: visible;
   flex-shrink: 0;
+  position: relative;
+  z-index: 30;
 }
 
 .agent-model-tab-shell {
@@ -5949,8 +5951,9 @@ textarea {
 
 .agent-model-add-wrap {
   position: relative;
-  margin-left: 4px;
+  margin-left: auto;
   align-self: center;
+  flex: 0 0 auto;
 }
 
 .agent-model-add {
@@ -5983,12 +5986,10 @@ textarea {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   display: grid;
   gap: 2px;
-  min-width: 180px;
+  min-width: 200px;
   padding: 6px;
-  position: absolute;
-  left: 0;
-  top: calc(100% + 4px);
-  z-index: 20;
+  position: fixed;
+  z-index: 200;
 }
 
 .agent-model-menu button {

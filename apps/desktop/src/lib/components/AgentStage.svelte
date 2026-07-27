@@ -25,6 +25,7 @@
   let vendorTabs = $state<string[]>([])
   let vendorMenuOpen = $state(false)
   let vendorMenuEl = $state<HTMLDivElement>()
+  let vendorMenuStyle = $state('')
   const vendorTerms = new Map<string, { ptyId: string; term: Terminal; fit: FitAddon; size: { cols: number; rows: number } }>()
   const vendorPending = new Map<string, string>()
   let vendorResizeTimer: ReturnType<typeof setTimeout> | undefined
@@ -182,6 +183,21 @@
       agentPane = 'enpii'
       vendorHost?.replaceChildren()
       void tick().then(focusComposer)
+    }
+  }
+
+  function placeVendorMenu(): void {
+    const el = vendorMenuEl
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    vendorMenuStyle = `top:${Math.round(r.bottom + 4)}px;right:${Math.round(window.innerWidth - r.right)}px`
+  }
+
+  function toggleVendorMenu(e?: Event): void {
+    e?.stopPropagation()
+    vendorMenuOpen = !vendorMenuOpen
+    if (vendorMenuOpen) {
+      void tick().then(placeVendorMenu)
     }
   }
 
@@ -1306,21 +1322,27 @@
         aria-haspopup="menu"
         aria-expanded={vendorMenuOpen}
         title="Add vendor agent"
-        disabled={!app.activeProject || vendorAvailable.length === 0}
-        onclick={() => (vendorMenuOpen = !vendorMenuOpen)}
+        onclick={(e) => toggleVendorMenu(e)}
+        onpointerdown={(e) => e.stopPropagation()}
       >+</button>
       {#if vendorMenuOpen}
-        <div class="agent-model-menu" role="menu">
-          {#each vendorAvailable as cli (cli.id)}
-            <button
-              type="button"
-              role="menuitem"
-              onclick={() => void addVendorTab(cli.id)}
-            >
-              {cli.label}
-              <code>{cli.command}</code>
-            </button>
-          {/each}
+        <div class="agent-model-menu" role="menu" style={vendorMenuStyle}>
+          {#if !app.activeProject}
+            <p class="agent-model-menu-hint">Open a project first.</p>
+          {:else if vendorAvailable.length === 0}
+            <p class="agent-model-menu-hint">All vendor agents already open.</p>
+          {:else}
+            {#each vendorAvailable as cli (cli.id)}
+              <button
+                type="button"
+                role="menuitem"
+                onclick={() => void addVendorTab(cli.id)}
+              >
+                {cli.label}
+                <code>{cli.command}</code>
+              </button>
+            {/each}
+          {/if}
           <p class="agent-model-menu-hint">
             Model/base URL dari Settings
             {#if app.provider}

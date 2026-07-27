@@ -915,7 +915,11 @@ async function main(): Promise<void> {
     if (!p.sessionId) throw new Error('sessionId is required')
     const meta = sessions.get(p.sessionId)
     if (!meta) throw new Error(`session not found: ${p.sessionId}`)
-    if (!meta.baseProjectRoot) throw new Error('session is not a worktree session')
+    if (!meta.baseProjectRoot) {
+      throw new Error(
+        'not a worktree session (missing baseProjectRoot) — open a session created via Worktree / ×2',
+      )
+    }
     return gitWorktreePreview(meta.baseProjectRoot, meta.projectRoot)
   })
 
@@ -924,7 +928,11 @@ async function main(): Promise<void> {
     if (!p.sessionId) throw new Error('sessionId is required')
     const meta = sessions.get(p.sessionId)
     if (!meta) throw new Error(`session not found: ${p.sessionId}`)
-    if (!meta.baseProjectRoot) throw new Error('session is not a worktree session')
+    if (!meta.baseProjectRoot) {
+      throw new Error(
+        'not a worktree session (missing baseProjectRoot) — open a session created via Worktree / ×2',
+      )
+    }
     if (meta.status === 'running' || meta.status === 'awaiting_approval') {
       throw new Error('session is busy')
     }
@@ -1025,7 +1033,11 @@ async function main(): Promise<void> {
     if (!p.sessionId) throw new Error('sessionId is required')
     const meta = sessions.get(p.sessionId)
     if (!meta) throw new Error(`session not found: ${p.sessionId}`)
-    if (!meta.baseProjectRoot) throw new Error('session is not a worktree session')
+    if (!meta.baseProjectRoot) {
+      throw new Error(
+        'not a worktree session (missing baseProjectRoot) — open a session created via Worktree / ×2',
+      )
+    }
     if (meta.status === 'running' || meta.status === 'awaiting_approval') {
       stopTurn(getRuntime(p.sessionId)!)
       sessions.setStatus(p.sessionId, 'idle')
