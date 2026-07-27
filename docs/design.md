@@ -4,6 +4,30 @@ Status: draft v0
 Product: **enpiistudio** · Agent: **enpii**  
 Scope: personal daily driver UI/UX
 
+## Current design direction
+
+The active preference is **macOS-inspired dark workspace chrome**: calm, compact, rounded, and reviewable. The UI should feel like a focused desktop tool, not a web dashboard and not a dense VS Code clone.
+
+### Non-negotiables
+
+- Near-black canvas, lifted panels, deep purple interaction, gold attention/running state.
+- Compact spacing inside controls; breathable spacing only between major regions.
+- Rounded cards and pills; avoid unnecessary borders, padding, and vertical gaps.
+- Themed controls over native browser controls: use `SmartSelect`, `Switch`, and app dialogs.
+- Destructive dialogs use explicit `Batal` / confirm actions; `Batal` receives initial focus.
+- Never steal focus from an active input, select, modal, or attachment control.
+- Agent composer stays usable and regains focus after a dialog closes when Agent mode remains active.
+- One intentional scroll region per panel; avoid nested page/panel scrolling.
+
+### Current interaction language
+
+- Composer mode picker: `Manual`, `Accept Edits`, `Plan`, `Full Auto`.
+- `Shift+Tab` cycles composer modes. `Alt+Tab` remains reserved for the operating system.
+- Attachments support button, OS drag-and-drop, and copied files via `Ctrl/Cmd+V`.
+- File navigation uses a collapsible tree with the active path visible.
+- Worktree is presented as an isolated workspace; closing it clearly means discard after confirmation.
+- Inspector contains contextual run/session/worktree information, not duplicate global settings.
+
 ---
 
 ## 0. Design authority

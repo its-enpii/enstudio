@@ -1,0 +1,5 @@
+# Project enpii config (optional overrides; no API keys)
+# model = "enpii"
+# dialect = "openai"
+# permissionMode = "ask"
+# denyGlobs = [".env", "**/*secret*"]

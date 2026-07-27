@@ -28,6 +28,7 @@ export class StdioJsonRpcServer {
       process.stdin.resume()
     }
     this.rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+    // Fire-and-forget per line so concurrent session.prompt handlers can overlap.
     this.rl.on('line', (line) => {
       void this.onLine(line)
     })

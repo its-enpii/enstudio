@@ -100,9 +100,19 @@ spacing:
 
 ## Brand & Style
 
-This design system is built for a calm, professional, and high-performance AI coding workspace. The aesthetic merges **Modern Corporate** reliability with a **Subtle Glassmorphism** overlay to manage depth in a dark-first environment. 
+This design system is built for a calm, professional, and high-performance AI coding workspace. The current direction is **macOS-inspired dark desktop chrome**: compact, rounded, tactile, and clear about state.
 
-The system prioritizes "Reviewability" and "Local-first" confidence. It avoids the clutter of traditional IDEs by using generous whitespace within a dense grid, ensuring the interface feels tool-like but approachable. The emotional goal is "Focused Flow"—where the AI assists without distracting, and the UI provides a stable, high-contrast canvas for logic and creativity.
+The system prioritizes "Reviewability" and "Local-first" confidence. It avoids both dashboard clutter and a dense VS Code clone. The emotional goal is "Focused Flow"—where the AI assists without distracting, and the UI provides a stable, high-contrast canvas for logic and creativity.
+
+### Current preference rules
+
+- Dark-first, mac-style, compact but not cramped.
+- Tight internal control spacing; larger gaps reserved for major layout regions.
+- Rounded surfaces, restrained shadows, subtle borders, no decorative glass effects.
+- Reuse themed controls instead of browser-native `select`, checkbox, or destructive `confirm` UI.
+- Keep focus predictable: modal cancel first, composer restored after modal close, no focus theft from controls.
+- Keep the right inspector contextual. Global settings belong in the settings surface.
+- Use one scroll owner per visual region; nested scrolling requires a clear reason.
 
 ## Colors
 
@@ -124,7 +134,7 @@ The typography system uses a clean, contemporary Grotesque for the UI and a tech
 This design system employs a **strict 8px grid**. All margins, paddings, and component heights must be multiples of 8px (or 4px for fine-grained internal alignments).
 
 - **Layout Model**: A 3-pane layout is standard (Sidebar / Main Editor / Inspector). 
-- **Density**: The interface is "Dense but not Cramped." This is achieved by using generous external margins (24px+) around the main container, while keeping internal component padding tight (8px or 12px).
+- **Density**: The interface is "Compact but not Cramped." Use tight internal padding (4px–12px); reserve generous spacing for separation between sidebar, stage, inspector, and major cards.
 - **Responsiveness**: On smaller screens, the Inspector and Sidebar collapse into drawers. The Editor maintains a minimum width of 600px before introducing horizontal scrolling for code preservation.
 
 ## Elevation & Depth
@@ -152,3 +162,19 @@ The shape language is **Generously Rounded**, contrasting with the rigid, square
 - **Input Fields**: Soft-edged (8px) with a subtle purple-lifted background. On focus, the border transitions to 100% opacity Deep Purple.
 - **Cards (Code Review)**: Feature a slightly thicker border on the left side (4px) in either Purple or Gold to indicate the status of the AI suggestion.
 - **Scrollbars**: Minimalist, "ghost" style. 4px wide, dark purple with 20% opacity, increasing to 50% on hover.
+
+### Interaction components
+
+- **SmartSelect**: Required for themed mode, branch, and settings selection. Native browser select popups are not the visual reference.
+- **Switch**: Required for binary settings such as Git stash `Untracked`. Track, thumb, label, and baseline stay vertically centered.
+- **Confirmation dialog**: App-styled modal with `Batal` as the safe default focus. Backdrop click may cancel only when the action is not ambiguous.
+- **Composer**: Large rounded input at the bottom of Agent mode. Supports attachments, drag-and-drop, paste, mode selection, and visible send state.
+- **Worktree card**: Label as an isolated workspace. Show branch, ahead/dirty state, refresh, apply, and explicit close/discard affordance.
+- **Tree view**: Show hierarchy, active path, collapse state, and enough indentation to explain location without excessive whitespace.
+
+### Keyboard behavior
+
+- `Shift+Tab`: cycle Agent composer mode.
+- `Ctrl/Cmd+L`: focus Agent composer.
+- `Ctrl/Cmd+Enter`: send when supported by the active surface.
+- `Alt+Tab`: never override; it belongs to the operating system.

@@ -17,10 +17,14 @@ export class EnpiiClient extends EventEmitter {
   private pending = new Map<JsonRpcId, Pending>()
   private nextId = 1
   private started = false
+  private stopping = false
+  private restartAttempts = 0
+  private restartTimer: ReturnType<typeof setTimeout> | null = null
 
   start(): void {
-    if (this.started) return
+    if (this.started || this.child) return
     this.started = true
+    this.stopping = false
 
     const { command, args, cwd, env } = resolveSpawn()
     this.emit('log', `[enpii] spawn ${command} ${args.join(' ')}`)
@@ -45,6 +49,7 @@ export class EnpiiClient extends EventEmitter {
       this.emit('exit', { code: -1, signal: null, error: err.message })
       this.started = false
       this.child = null
+      this.scheduleRestart()
     })
 
     this.child.on('exit', (code, signal) => {
@@ -55,7 +60,30 @@ export class EnpiiClient extends EventEmitter {
       this.pending.clear()
       this.child = null
       this.started = false
+      if (!this.stopping) this.scheduleRestart()
     })
+
+    this.restartAttempts = 0
+  }
+
+  private scheduleRestart(): void {
+    if (this.stopping || this.restartTimer) return
+    if (this.restartAttempts >= 5) {
+      this.emit('log', '[enpii] auto-restart gave up after 5 attempts')
+      return
+    }
+    const delay = Math.min(8_000, 500 * 2 ** this.restartAttempts)
+    this.restartAttempts++
+    this.emit('log', `[enpii] restart in ${delay}ms (attempt ${this.restartAttempts})`)
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      try {
+        this.start()
+      } catch (err) {
+        this.emit('log', `[enpii] restart failed: ${err instanceof Error ? err.message : String(err)}`)
+        this.scheduleRestart()
+      }
+    }, delay)
   }
 
   async request(method: string, params?: unknown): Promise<unknown> {
@@ -77,7 +105,15 @@ export class EnpiiClient extends EventEmitter {
   }
 
   stop(): void {
-    if (!this.child) return
+    this.stopping = true
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    if (!this.child) {
+      this.started = false
+      return
+    }
     try {
       this.child.kill()
     } catch {
@@ -122,6 +158,14 @@ function monorepoRootFromElectron(): string {
   return path.resolve(here, '../../..')
 }
 
+/** Packaged electron-builder puts agent-core under process.resourcesPath/agent-core. */
+function packagedCliEntry(): string | null {
+  const resources = process.resourcesPath
+  if (!resources) return null
+  const entry = path.join(resources, 'agent-core', 'cli.js')
+  return fs.existsSync(entry) ? entry : null
+}
+
 /** process.execPath inside Electron is electron.exe — not a Node runtime unless ELECTRON_RUN_AS_NODE=1. */
 function resolveNodeRuntime(): { command: string; env: Record<string, string> } {
   const exec = process.execPath
@@ -157,11 +201,22 @@ function resolveSpawn(): {
   cwd: string
   env: Record<string, string>
 } {
+  const { command, env } = resolveNodeRuntime()
+  const development = Boolean(process.env.VITE_DEV_SERVER_URL)
+
+  const packaged = packagedCliEntry()
+  if (!development && packaged) {
+    return { command, args: [packaged], cwd: path.dirname(packaged), env }
+  }
+
   const root = monorepoRootFromElectron()
   const jsEntry = path.join(root, 'packages/agent-core/dist/cli.js')
   const tsEntry = path.join(root, 'packages/agent-core/src/cli.ts')
   const tsxCli = path.join(root, 'node_modules/tsx/dist/cli.mjs')
-  const { command, env } = resolveNodeRuntime()
+
+  if (development && fs.existsSync(tsEntry) && fs.existsSync(tsxCli)) {
+    return { command, args: [tsxCli, tsEntry], cwd: root, env }
+  }
 
   if (fs.existsSync(jsEntry)) {
     return { command, args: [jsEntry], cwd: root, env }

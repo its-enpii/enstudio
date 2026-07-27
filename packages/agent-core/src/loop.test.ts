@@ -1,0 +1,150 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import test from 'node:test'
+import {
+  compactionTranscript,
+  isCasualPrompt,
+  runDirectEdit,
+  runPromptTurn,
+  shouldAutoCompact,
+  splitForCompaction,
+  undoCompactRuntime,
+  type SessionRuntime,
+} from './loop.js'
+
+test('compaction transcript preserves roles and truncates older context', () => {
+  const transcript = compactionTranscript([
+    { role: 'user', content: 'goal' },
+    { role: 'assistant', content: 'answer' },
+  ], 20)
+  assert.match(transcript, /\[assistant\]/)
+  assert.match(transcript, /older context truncated/)
+})
+
+test('shouldAutoCompact thresholds', () => {
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'hi' }]), false)
+  const many = Array.from({ length: 36 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
+  assert.equal(shouldAutoCompact(many), true)
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 800 }, 1000), true)
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 100 }, 1000), false)
+})
+
+test('splitForCompaction keeps recent tail raw', () => {
+  const msgs = Array.from({ length: 12 }, (_, i) => ({
+    role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+    content: `m${i}`,
+  }))
+  const { toSummarize, keep } = splitForCompaction(msgs, 8)
+  assert.equal(toSummarize.length, 4)
+  assert.equal(keep.length, 8)
+  assert.equal(keep[0]?.content, 'm4')
+  assert.equal(keep[7]?.content, 'm11')
+  const short = splitForCompaction(msgs.slice(0, 3), 8)
+  assert.equal(short.toSummarize.length, 0)
+  assert.equal(short.keep.length, 3)
+})
+
+test('undoCompactRuntime restores pre-compact snapshot', () => {
+  const runtime: SessionRuntime = {
+    meta: {
+      id: 'compact-undo',
+      contractVersion: '0.1.0',
+      projectRoot: process.cwd(),
+      title: 'test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'test',
+      dialect: 'openai',
+      permissionMode: 'ask',
+      status: 'idle',
+    },
+    messages: [{ role: 'system', content: 'summary only' }],
+    preCompactMessages: [
+      { role: 'user', content: 'goal' },
+      { role: 'assistant', content: 'work' },
+    ],
+  }
+  const out = undoCompactRuntime(runtime)
+  assert.equal(out.messageCount, 2)
+  assert.equal(runtime.messages[0]?.content, 'goal')
+  assert.equal(runtime.preCompactMessages, undefined)
+  assert.throws(() => undoCompactRuntime(runtime))
+})
+
+test('casual greetings do not need project tools', () => {
+  assert.equal(isCasualPrompt('halo'), true)
+  assert.equal(isCasualPrompt('Hello enpii!'), true)
+  assert.equal(isCasualPrompt('cari string halo'), false)
+})
+
+test('casual greetings bypass the provider and tools', async () => {
+  const runtime: SessionRuntime = {
+    meta: {
+      id: 'casual-test',
+      contractVersion: '0.1.0',
+      projectRoot: process.cwd(),
+      title: 'test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'test',
+      dialect: 'openai',
+      permissionMode: 'ask',
+      status: 'idle',
+    },
+    messages: [],
+  }
+  const events: string[] = []
+  const result = await runPromptTurn({
+    runtime,
+    text: 'hai',
+    config: {
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: '',
+      model: 'test',
+      dialect: 'openai',
+      permissionMode: 'ask',
+    },
+    emit: (event) => events.push(event.type),
+  })
+  assert.equal(result.content, 'Hai. Ada yang bisa dibantu?')
+  assert.equal(events.includes('tool_start'), false)
+})
+
+test('manual editor save bypasses agent approval in ask mode', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'enpii-direct-edit-'))
+  const file = path.join(root, 'example.txt')
+  fs.writeFileSync(file, 'before\n', 'utf8')
+  const runtime: SessionRuntime = {
+    meta: {
+      id: 'manual-edit-test',
+      contractVersion: '0.1.0',
+      projectRoot: root,
+      title: 'test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'test',
+      dialect: 'openai',
+      permissionMode: 'ask',
+      status: 'idle',
+    },
+    messages: [],
+  }
+  const events: string[] = []
+  try {
+    const result = await runDirectEdit({
+      runtime,
+      path: 'example.txt',
+      expectedContent: 'before\n',
+      content: 'after\n',
+      emit: (event) => events.push(event.type),
+    })
+    assert.equal(result.ok, true)
+    assert.equal(fs.readFileSync(file, 'utf8'), 'after\n')
+    assert.equal(events.includes('approval_request'), false)
+    assert.equal(runtime.messages.length, 0)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

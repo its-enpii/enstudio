@@ -12,7 +12,14 @@
     "dev:devtools": "npm run dev:devtools -w @enpiistudio/desktop",
     "build": "npm run build -w @enpiistudio/agent-core && npm run build -w @enpiistudio/desktop",
     "dev:agent": "npm run dev -w @enpiistudio/agent-core",
-    "typecheck": "npm run typecheck -w @enpiistudio/agent-core && npm run typecheck -w @enpiistudio/desktop"
+    "typecheck": "npm run typecheck -w @enpiistudio/agent-core && npm run typecheck -w @enpiistudio/desktop",
+    "test": "npm run test -w @enpiistudio/agent-core",
+    "pack:check": "npm run build && npm run typecheck && npm run test",
+    "pack": "npm run pack -w @enpiistudio/desktop",
+    "dist": "npm run dist -w @enpiistudio/desktop",
+    "dist:linux": "npm run dist:linux -w @enpiistudio/desktop",
+    "dist:win": "npm run dist:win -w @enpiistudio/desktop",
+    "dist:mac": "npm run dist:mac -w @enpiistudio/desktop"
   },
   "engines": {
     "node": ">=20"

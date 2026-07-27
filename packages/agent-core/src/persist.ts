@@ -4,14 +4,19 @@ import os from 'node:os'
 import path from 'node:path'
 import type { SessionMeta } from './types.js'
 import type { ChatMessage } from './provider/openai.js'
+import { indexList, indexUpsert } from './session-index.js'
 
 export interface PersistedSession {
   meta: SessionMeta
   messages: ChatMessage[]
 }
 
+function enpiiHome(): string {
+  return process.env.ENPII_HOME?.trim() || path.join(os.homedir(), '.enpiistudio')
+}
+
 function sessionsRoot(): string {
-  return path.join(os.homedir(), '.enpiistudio', 'sessions', 'projects')
+  return path.join(enpiiHome(), 'sessions', 'projects')
 }
 
 /** Canonical path for hashing + equality (Windows-safe). */
@@ -31,6 +36,11 @@ function projectDir(projectRoot: string): string {
   return path.join(sessionsRoot(), projectHash(projectRoot))
 }
 
+/** Persist under main project hash when session runs in a worktree. */
+export function storageRoot(meta: Pick<SessionMeta, 'projectRoot' | 'baseProjectRoot'>): string {
+  return meta.baseProjectRoot ?? meta.projectRoot
+}
+
 function sessionPath(projectRoot: string, sessionId: string): string {
   return path.join(projectDir(projectRoot), `${sessionId}.json`)
 }
@@ -40,18 +50,21 @@ function ensureDir(dir: string): void {
 }
 
 export function saveSession(meta: SessionMeta, messages: ChatMessage[]): void {
-  const dir = projectDir(meta.projectRoot)
+  const root = storageRoot(meta)
+  const dir = projectDir(root)
   ensureDir(dir)
   const payload: PersistedSession = {
     meta: {
       ...meta,
       projectRoot: path.resolve(meta.projectRoot),
-      status: meta.status === 'running' ? 'idle' : meta.status,
+      baseProjectRoot: meta.baseProjectRoot ? path.resolve(meta.baseProjectRoot) : undefined,
+      status: meta.status === 'running' || meta.status === 'awaiting_approval' ? 'idle' : meta.status,
     },
     messages: sanitizeMessages(messages),
   }
-  const file = sessionPath(meta.projectRoot, meta.id)
+  const file = sessionPath(root, meta.id)
   fs.writeFileSync(file, JSON.stringify(payload), 'utf8')
+  indexUpsert(payload.meta, payload.messages.length)
 }
 
 export function loadSession(
@@ -92,6 +105,14 @@ export function loadSessionById(sessionId: string): PersistedSession | null {
 }
 
 export function listPersisted(projectRoot?: string): SessionMeta[] {
+  // Prefer SQLite index (FR-D2); fall back to directory scan when empty/unavailable.
+  try {
+    const indexed = indexList(projectRoot)
+    if (indexed.length) return indexed
+  } catch {
+    /* fall through */
+  }
+
   const root = sessionsRoot()
   if (!fs.existsSync(root)) return []
 
@@ -112,10 +133,9 @@ export function listPersisted(projectRoot?: string): SessionMeta[] {
         const raw = fs.readFileSync(path.join(dir, f), 'utf8')
         const data = JSON.parse(raw) as PersistedSession
         if (!data?.meta?.id) continue
-        if (projectRoot && !sameProject(data.meta.projectRoot, projectRoot)) {
-          // hash folder match is enough; keep
-        }
+        // hash folder is storage root (main project); keep all including worktree sessions
         out.push(data.meta)
+        indexUpsert(data.meta, data.messages?.length ?? 0)
       } catch {
         /* skip corrupt */
       }
@@ -138,6 +158,9 @@ export function loadLatest(projectRoot: string): PersistedSession | null {
 
 function sanitizeMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
+    if (Array.isArray(m.content)) {
+      return { ...m, content: m.content.map((part) => part.type === 'image_url' ? { type: 'text' as const, text: '[image omitted from persisted session]' } : part) }
+    }
     if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > 40_000) {
       return { ...m, content: m.content.slice(0, 40_000) + '\n… truncated for storage' }
     }

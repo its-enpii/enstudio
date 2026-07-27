@@ -33,9 +33,11 @@ R3. **Own the personality**
 R4. **Local-first**  
 - No mandatory cloud account, sync, or telemetry for core features.
 
-R5. **Scope lock v0**  
-- Personal daily driver only: agent + editor + terminal + git basics.  
-- Out: SSH, tunnel, embedded browser, swarm orchestration, multi-tenant, marketplace.
+R5. **Scope lock**  
+- Personal local-first daily driver.  
+- v0 core: agent + editor + terminal + git (shipped; some “later” shell extras landed early).  
+- v1 agent may absorb **patterns** from `reference/OpenHarness|ClawTeam|loop-engineering` (web, tasks, sub-agent, plan/ask, schedule) without cloning vendor CLI UX or requiring those runtimes.  
+- Still out: multi-tenant, marketplace, mobile, mandatory cloud control plane.
 
 ---
 
@@ -43,7 +45,8 @@ R5. **Scope lock v0**
 
 R10. **Contract over framework**  
 - `schema.md` types are the source of truth.  
-- Borrow OpenHarness/ClawTeam *patterns*; do not import their product assumptions wholesale.
+- Borrow OpenHarness / ClawTeam / loop-engineering *patterns* from `reference/`; do not vend their code as a dependency or import product assumptions wholesale.  
+- New agent tools mirror enpii naming + JSON-RPC events; map mentally to OH tool names in docs only.
 
 R11. **Layering**  
 ```

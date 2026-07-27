@@ -4,7 +4,7 @@ Status: draft v0
 Product name: **enpiistudio**  
 Agent name: **enpii**  
 Owner: personal / private product  
-Last updated: 2026-07-24
+Last updated: 2026-07-27
 
 ---
 
@@ -112,11 +112,30 @@ v0 success = **author uses it daily instead of CLI host + vendor CLIs for most t
 
 ### Later (explicit backlog)
 
-- Worktree-isolated multi-agent (ClawTeam patterns)  
-- MCP client  
-- Host vendor CLIs as optional panes  
-- SSH / tunnel / embedded browser  
-- Block terminal UX  
+Shipped early (beyond original Later list; still personal-scale):
+
+- Worktree-isolated multi-agent board (ClawTeam *isolation* patterns)  
+- MCP client (stdio + HTTP tools/list|call)  
+- Host vendor CLIs as optional Terminal panes  
+- SSH / tunnel + embedded browser  
+- Block-ish terminal UX for shell/MCP tool cards  
+
+### v1 agent surface (from `reference/` — see `docs/progress.md`)
+
+Target = OpenHarness-class **tool surface** on enpii’s own contract, not a CLI clone:
+
+| Priority | Capability | Primary reference |
+|---|---|---|
+| P0 | `web_fetch` + `web_search` | OpenHarness web tools |
+| P1 | In-loop task board (`task_*`) | OpenHarness task tools |
+| P1 | In-loop sub-agent + messaging | OH `agent` / ClawTeam spawn |
+| P2 | Formal plan mode + ask-user | OH plan + ask_user |
+| P2 | Parallel read-only tool exec | OH engine parallel tools |
+| P2 | MCP resources (+ OAuth if needed) | OH MCP resources/auth |
+| P3 | Schedule / cron durable fires | OH cron + loop-engineering automations |
+| P3 | Swarm mailbox / templates | ClawTeam team layer |
+
+Non-goals remain: marketplace, multi-tenant, mobile, full Warp redesign.
 
 ---
 
@@ -130,8 +149,12 @@ v0 success = **author uses it daily instead of CLI host + vendor CLIs for most t
 | **M3** Mutating | write/edit + approvals + diff | Agent implements small change safely |
 | **M4** Shell tool | run_shell + multi session + resume | Real tasks end-to-end |
 | **M5** Git + polish | git panel, reliability, packaging | Author daily driver |
+| **M6** Agent web + tasks | `web_*` + durable task board in-loop | Agent researches + tracks multi-step without leaving chat |
+| **M7** Sub-agent | `agent` tool → worktree session + message | Model spawns isolated helper; user can still use board |
+| **M8** Loop ops | plan/ask polish, parallel tools, cron optional | Unattended-friendly loops without leaving local-first model |
 
-v0 product = **M5 complete**.
+v0 product = **M5 complete** (2026-07).  
+v1 agent = **M6–M8** guided by `reference/OpenHarness`, `reference/ClawTeam`, `reference/loop-engineering`.
 
 ---
 

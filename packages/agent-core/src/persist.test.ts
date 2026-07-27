@@ -2,16 +2,33 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, it } from 'node:test'
+import { after, before, describe, it } from 'node:test'
 import { listPersisted, loadSession, projectHash, saveSession } from './persist.js'
+import { closeSessionIndex, indexGet, rebuildIndex } from './session-index.js'
 import type { SessionMeta } from './types.js'
 
 describe('persist', () => {
-  it('round-trips session json under project hash', () => {
+  const home = path.join(os.tmpdir(), `enpii-home-${Date.now()}`)
+  const prevHome = process.env.ENPII_HOME
+
+  before(() => {
+    fs.mkdirSync(home, { recursive: true })
+    process.env.ENPII_HOME = home
+    closeSessionIndex()
+  })
+
+  after(() => {
+    closeSessionIndex()
+    if (prevHome === undefined) delete process.env.ENPII_HOME
+    else process.env.ENPII_HOME = prevHome
+    fs.rmSync(home, { recursive: true, force: true })
+  })
+
+  it('round-trips session json under project hash + SQLite index', () => {
     const root = path.join(os.tmpdir(), `enpii-persist-${Date.now()}`)
     fs.mkdirSync(root, { recursive: true })
     const meta: SessionMeta = {
-      id: 'sess-test-1',
+      id: `sess-test-${Date.now()}`,
       contractVersion: '0.1.0',
       projectRoot: root,
       title: 't',
@@ -34,5 +51,30 @@ describe('persist', () => {
     assert.equal(loaded.messages.length, 2)
     const listed = listPersisted(root)
     assert.ok(listed.some((s) => s.id === meta.id))
+    const idx = indexGet(meta.id)
+    assert.ok(idx)
+    assert.equal(idx!.title, 't')
+    assert.equal(idx!.model, 'enpii')
+  })
+
+  it('rebuildIndex rescans JSON sessions', () => {
+    const root = path.join(os.tmpdir(), `enpii-rebuild-${Date.now()}`)
+    fs.mkdirSync(root, { recursive: true })
+    const meta: SessionMeta = {
+      id: `sess-rebuild-${Date.now()}`,
+      contractVersion: '0.1.0',
+      projectRoot: root,
+      title: 'rebuild-me',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'enpii',
+      dialect: 'openai',
+      permissionMode: 'ask',
+      status: 'idle',
+    }
+    saveSession(meta, [{ role: 'user', content: 'x' }])
+    const n = rebuildIndex()
+    assert.ok(n >= 1)
+    assert.equal(indexGet(meta.id)?.title, 'rebuild-me')
   })
 })

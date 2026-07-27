@@ -1,23 +1,46 @@
 <script lang="ts">
-  import { state } from '../store.svelte'
+  import { state as app } from '../store.svelte'
   import { hydrateProjectSession } from '../enpii'
 
-  async function openProject() {
+  let opening = $state(false)
+  let openError = $state('')
+  let filter = $state('')
+
+  const filtered = $derived.by(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return app.projects
+    return app.projects.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q),
+    )
+  })
+
+  async function openProject(): Promise<void> {
+    if (opening) return
+    opening = true
+    openError = ''
     const api = window.enpiistudio
-    if (!api?.dialog) {
-      state.pushLog('[ui] dialog API missing — preload failed?')
-      return
-    }
-    const dir = await api.dialog.openDirectory()
-    if (dir) {
-      state.addProject(dir)
-      void hydrateProjectSession()
+    try {
+      if (!api?.dialog) throw new Error('dialog API missing — restart the desktop app')
+      const dir = await api.dialog.openDirectory()
+      if (!dir) return
+      app.addProject(dir)
+      await hydrateProjectSession()
+    } catch (err) {
+      openError = err instanceof Error ? err.message : String(err)
+      app.pushLog(`[project] open failed: ${openError}`)
+    } finally {
+      opening = false
     }
   }
 
   function onSelect(id: string) {
-    state.selectProject(id)
+    app.selectProject(id)
     void hydrateProjectSession()
+  }
+
+  function onPin(e: MouseEvent, id: string) {
+    e.stopPropagation()
+    app.toggleProjectPin(id)
   }
 </script>
 
@@ -37,7 +60,12 @@
           stroke-width="2"
         ></path>
       </svg>
-      <input type="text" placeholder="Search projects..." disabled title="Soon" />
+      <input
+        type="text"
+        placeholder="Search projects..."
+        bind:value={filter}
+        aria-label="Search projects"
+      />
     </div>
     <button
       type="button"
@@ -45,6 +73,7 @@
       title="Open folder"
       aria-label="Open folder"
       onclick={openProject}
+      disabled={opening}
     >
       <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path
@@ -56,15 +85,18 @@
       </svg>
     </button>
   </div>
+  {#if openError}<div class="sidebar-error">{openError}</div>{/if}
 
   <nav class="sidebar-nav custom-scrollbar">
-    {#if state.projects.length === 0}
+    {#if app.projects.length === 0}
       <div class="empty">Open a folder to start</div>
+    {:else if filtered.length === 0}
+      <div class="empty">No match</div>
     {:else}
-      {#each state.projects as project (project.id)}
+      {#each filtered as project (project.id)}
         <div
           class="project-item"
-          class:active={state.activeProjectId === project.id}
+          class:active={app.activeProjectId === project.id}
           role="button"
           tabindex="0"
           onclick={() => onSelect(project.id)}
@@ -72,9 +104,17 @@
         >
           <div class="row">
             <span class="name">{project.name}</span>
+            <button
+              type="button"
+              class="pin-btn"
+              class:on={project.pinned}
+              title={project.pinned ? 'Unpin' : 'Pin'}
+              aria-label={project.pinned ? 'Unpin project' : 'Pin project'}
+              onclick={(e) => onPin(e, project.id)}
+            >★</button>
             <div
               class="dot-gold"
-              class:dim={state.activeProjectId !== project.id}
+              class:dim={app.activeProjectId !== project.id}
               title="project"
             ></div>
           </div>

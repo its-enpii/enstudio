@@ -1,18 +1,146 @@
-import { chatCompletions, type ChatMessage, type ToolCall } from './provider/openai.js'
+import { providerChat } from './provider/chat.js'
+import { type ChatContentPart, type ChatMessage, type ToolCall } from './provider/openai.js'
+import { checkpointSnapshot, newCheckpointId } from './checkpoint.js'
 import type { ProviderConfig } from './config.js'
-import type { SessionMeta } from './types.js'
-import { TOOL_DEFS, WRITE_TOOL_NAMES } from './tools/defs.js'
-import { previewWriteTool, runTool } from './tools/run.js'
+import type { RunTask, SessionMeta } from './types.js'
+import { discoverProjectContext, ensureEnpiiDir, projectContextPrompt } from './context.js'
+import { DEFAULT_DENY_GLOBS } from './tools/run.js'
+import { createRunState, finishRunState, normalizeGoal, updateRunState } from './run-state.js'
+import { GIT_MUTATING_TOOL_NAMES, isMutatingTool, MCP_MUTATING_TOOL_NAMES, SHELL_TOOL_NAMES, TOOL_DEFS, WRITE_TOOL_NAMES } from './tools/defs.js'
+import { previewWriteTool, runTool, type ToolResult } from './tools/run.js'
+import {
+  discoverVerificationCommands,
+  goalPrompt,
+  verifyGoal,
+  type ChangeEvidence,
+  type CheckEvidence,
+} from './verifier.js'
+
+export interface PendingApproval {
+  requestId: string
+  /** Tool name for session grants (allow-for-session). */
+  name?: string
+  resolve: (decision: 'allow' | 'deny') => void
+}
 
 export interface SessionRuntime {
   meta: SessionMeta
   messages: ChatMessage[]
   abort?: AbortController
-  /** Pending write approval waiter (session.approve resolves). */
-  pendingApproval?: {
-    requestId: string
-    resolve: (decision: 'allow' | 'deny') => void
+  /** Pending approval waiters keyed by requestId (session.approve resolves). */
+  pendingApprovals?: Map<string, PendingApproval>
+  /**
+   * Session-scoped auto-allow for mutation kinds after "Allow for session".
+   * Cleared on stopTurn; not persisted.
+   */
+  sessionGrants?: Set<'write' | 'shell' | 'git' | 'mcp'>
+  /** Last pre-compact transcript for one-shot undo (memory only). */
+  preCompactMessages?: ChatMessage[]
+}
+
+function messageText(message: ChatMessage): string {
+  if (typeof message.content === 'string') return message.content
+  if (Array.isArray(message.content)) return message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n')
+  return ''
+}
+
+export function compactionTranscript(messages: ChatMessage[], maxChars = 140_000): string {
+  const transcript = messages.map((message) => {
+    const text = messageText(message)
+    const calls = message.tool_calls?.map((call) => `${call.function.name} ${call.function.arguments}`).join('\n') ?? ''
+    return `[${message.role}]\n${[text, calls].filter(Boolean).join('\n')}`
+  }).join('\n\n')
+  return transcript.length > maxChars ? `${transcript.slice(-maxChars)}\n[older context truncated before compaction]` : transcript
+}
+
+/** Keep recent turns raw; only older middle is summarized. */
+export const COMPACT_KEEP_RECENT = 8
+
+/** Split transcript for smart compact: middle → summary, tail kept verbatim. */
+export function splitForCompaction(
+  messages: ChatMessage[],
+  keepRecent = COMPACT_KEEP_RECENT,
+): { toSummarize: ChatMessage[]; keep: ChatMessage[] } {
+  if (messages.length <= keepRecent) return { toSummarize: [], keep: messages.map((m) => structuredClone(m)) }
+  const cut = messages.length - keepRecent
+  return {
+    toSummarize: messages.slice(0, cut).map((m) => structuredClone(m)),
+    keep: messages.slice(cut).map((m) => structuredClone(m)),
   }
+}
+
+export async function compactRuntime(opts: {
+  runtime: SessionRuntime
+  config: ProviderConfig
+}): Promise<{ summary: string; originalMessageCount: number; canUndo: boolean }> {
+  const originalMessageCount = opts.runtime.messages.length
+  if (!originalMessageCount) throw new Error('Session belum memiliki context untuk di-compact')
+  const snapshot = opts.runtime.messages.map((m) => structuredClone(m))
+  const { toSummarize, keep } = splitForCompaction(opts.runtime.messages)
+  // Short sessions: still produce a summary of everything but re-attach nothing extra.
+  const body = toSummarize.length ? toSummarize : opts.runtime.messages
+  const transcript = compactionTranscript(body)
+  const result = await providerChat({
+    dialect: opts.config.dialect,
+    baseUrl: opts.config.baseUrl,
+    apiKey: opts.config.apiKey,
+    model: opts.config.model,
+    stream: false,
+    signal: opts.runtime.abort?.signal,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Create a durable working summary for a coding-agent session. Preserve the goal, decisions, constraints, files and paths, current changes, errors, commands, approvals, open questions, and unfinished work. Prefer concrete paths and commands over prose. Be concise but complete. Do not invent facts. Recent messages will be kept raw after this summary — focus on older context.',
+      },
+      { role: 'user', content: transcript },
+    ],
+  })
+  const summary = result.content.trim()
+  if (!summary) throw new Error('Provider mengembalikan summary kosong')
+  opts.runtime.preCompactMessages = snapshot
+  opts.runtime.messages = [
+    { role: 'system', content: `Working summary after compaction:\n${summary}` },
+    // Keep recent raw turns so the model does not lose the last exchange.
+    ...(toSummarize.length ? keep : []),
+  ]
+  return { summary, originalMessageCount, canUndo: true }
+}
+
+/** Restore messages saved by the last compactRuntime call. */
+export function undoCompactRuntime(runtime: SessionRuntime): {
+  ok: true
+  messageCount: number
+} {
+  const prev = runtime.preCompactMessages
+  if (!prev?.length) throw new Error('Tidak ada snapshot compact untuk di-undo')
+  runtime.messages = prev.map((m) => structuredClone(m))
+  runtime.preCompactMessages = undefined
+  return { ok: true, messageCount: runtime.messages.length }
+}
+
+const AUTO_COMPACT_MSG_THRESHOLD = 36
+const AUTO_COMPACT_CHAR_THRESHOLD = 120_000
+
+function estimateMessageChars(messages: ChatMessage[]): number {
+  let n = 0
+  for (const m of messages) {
+    n += messageText(m).length
+    if (m.tool_calls) n += m.tool_calls.reduce((a, c) => a + (c.function.arguments?.length ?? 0) + 40, 0)
+  }
+  return n
+}
+
+/** True when session context is large enough to warrant auto-compact. */
+export function shouldAutoCompact(
+  messages: ChatMessage[],
+  usage?: Usage,
+  maxTokens?: number,
+): boolean {
+  if (messages.length >= AUTO_COMPACT_MSG_THRESHOLD) return true
+  if (estimateMessageChars(messages) >= AUTO_COMPACT_CHAR_THRESHOLD) return true
+  if (usage?.total_tokens && maxTokens && usage.total_tokens >= maxTokens * 0.7) return true
+  return false
 }
 
 export type LoopEmit = (event: {
@@ -21,17 +149,26 @@ export type LoopEmit = (event: {
   [key: string]: unknown
 }) => void
 
-const MAX_ROUNDS = 8
 const APPROVAL_TIMEOUT_MS = 5 * 60_000
 
 const SYSTEM = `You are enpii, a local coding agent inside enpiistudio.
 Workspace root is the user's open project. Be concise and practical.
 Tools:
-- Read: list_dir, read_file, glob, grep
+- Planning: plan_tasks (publish 2-12 concrete steps before changes)
+- Read: list_dir, read_file, glob, grep, search_codebase (ranked filename+content discovery)
 - Write: write_file (create/overwrite), edit_file (unique substring replace)
-Write tools may require user approval (ask mode). Prefer edit_file for small changes.
-Use relative paths. Inspect with read tools before writing.
+- Memory: memory_write / memory_delete (durable notes), memory_search (ranked search)
+- Git read: git_status, git_diff, git_history, git_branches, git_stashes, git_remotes, git_conflicts
+- Git write: git_stage, git_unstage, git_commit, git_branch, git_stash, git_fetch, git_pull, git_push, git_resolve_conflict (may need approval)
+- Shell: run_shell (non-interactive command in workspace; may need approval)
+For "where is X?" in large repos, prefer search_codebase before many greps.
+Write and shell tools may require user approval. Prefer edit_file for small changes.
+Sensitive paths (.env, keys, credentials) are denied. Use relative paths. Inspect before writing.
 If a tool fails, explain and try another approach.`
+
+export function isCasualPrompt(text: string): boolean {
+  return /^(?:halo|hai|hi|hello|hey|tes|test|ping)(?:\s+(?:enpii|bro|gan|kak))?[!.?\s]*$/i.test(text.trim())
+}
 
 type Usage = {
   prompt_tokens?: number
@@ -53,7 +190,7 @@ function shortArgs(args: string): string {
     const o = JSON.parse(args) as Record<string, unknown>
     return Object.entries(o)
       .map(([k, v]) => {
-        if (k === 'content' || k === 'old_string' || k === 'new_string') {
+        if (k === 'content' || k === 'expected_content' || k === 'old_string' || k === 'new_string') {
           const s = String(v)
           return `${k}=${s.slice(0, 40)}${s.length > 40 ? '…' : ''}`
         }
@@ -66,12 +203,47 @@ function shortArgs(args: string): string {
   }
 }
 
-function needsApproval(mode: SessionMeta['permissionMode'], name: string): boolean {
-  if (!WRITE_TOOL_NAMES.has(name)) return false
-  if (mode === 'read_only') return true // will deny later
+function plannedTasks(args: string): RunTask[] | null {
+  try {
+    const parsed = JSON.parse(args) as { tasks?: { title?: unknown; detail?: unknown }[] }
+    if (!Array.isArray(parsed.tasks)) return null
+    const tasks = parsed.tasks.map((task, index) => ({
+      id: `task-${index + 1}`,
+      title: typeof task.title === 'string' ? task.title.trim().slice(0, 160) : '',
+      detail: typeof task.detail === 'string' ? task.detail.trim().slice(0, 300) : undefined,
+      status: index === 0 ? 'running' as const : 'pending' as const,
+    })).filter((task) => task.title).slice(0, 12)
+    return tasks.length >= 2 ? tasks : null
+  } catch {
+    return null
+  }
+}
+
+function needsApproval(
+  mode: SessionMeta['permissionMode'],
+  name: string,
+  grants?: Set<'write' | 'shell' | 'git' | 'mcp'>,
+): boolean {
+  if (!isMutatingTool(name)) return false
+  if (mode === 'read_only') return true // blocked later
+  if (grants?.has(mutationKind(name))) return false
   if (mode === 'ask') return true
-  // autopilot_workspace + full: auto-allow workspace writes
+  // shell, Git, MCP stay gated under autopilot; full auto-allows them
+  if (
+    (SHELL_TOOL_NAMES.has(name) || GIT_MUTATING_TOOL_NAMES.has(name) || MCP_MUTATING_TOOL_NAMES.has(name)) &&
+    mode === 'autopilot_workspace'
+  ) {
+    return true
+  }
+  // autopilot_workspace: auto file writes; full: auto-all
   return false
+}
+
+function mutationKind(name: string): 'shell' | 'git' | 'write' | 'mcp' {
+  if (SHELL_TOOL_NAMES.has(name)) return 'shell'
+  if (GIT_MUTATING_TOOL_NAMES.has(name)) return 'git'
+  if (MCP_MUTATING_TOOL_NAMES.has(name)) return 'mcp'
+  return 'write'
 }
 
 export async function runPromptTurn(opts: {
@@ -80,126 +252,473 @@ export async function runPromptTurn(opts: {
   config: ProviderConfig
   emit: LoopEmit
   setStatus?: (status: SessionMeta['status']) => void
+  goal?: unknown
+  images?: { name: string; mime: string; dataUrl: string }[]
 }): Promise<{ content: string; usage?: Usage }> {
   const { runtime, text, config, emit, setStatus } = opts
   const sessionId = runtime.meta.id
   const root = runtime.meta.projectRoot
+  const goal = normalizeGoal(opts.goal, text)
+  try {
+    ensureEnpiiDir(root)
+  } catch {
+    /* read-only trees still run */
+  }
+  const loadMemory = runtime.meta.loadMemory !== false
+  const projectContext = discoverProjectContext(root, text, { loadMemory })
+  const contextPrompt = projectContextPrompt(projectContext, {
+    workspaceRoot: root,
+    permissionMode: runtime.meta.permissionMode,
+  })
+  let run = createRunState(sessionId, goal)
+  const checkpointId = newCheckpointId()
+  run = updateRunState(run, { status: 'running', lastEvent: 'run_started' })
+  const started = Date.now()
 
-  runtime.messages.push({ role: 'user', content: text })
+  // OpenAI image_url has no filename field — names go in text only.
+  const imageParts: ChatContentPart[] = (opts.images ?? []).map((image) => ({ type: 'image_url', image_url: { url: image.dataUrl, detail: 'auto' } }))
+  const imageNames = (opts.images ?? []).map((image) => image.name).filter(Boolean)
+  const textWithImages = imageNames.length
+    ? `${text}\n\nAttached images: ${imageNames.map((name) => `[${name}]`).join(' ')}`
+    : text
+  runtime.messages.push({ role: 'user', content: imageParts.length ? [{ type: 'text', text: textWithImages }, ...imageParts] : text })
   runtime.abort = new AbortController()
 
+  emit({ type: 'task_plan', sessionId, tasks: run.tasks })
+
+  if (isCasualPrompt(text)) {
+    const content = 'Hai. Ada yang bisa dibantu?'
+    emit({ type: 'status', sessionId, status: 'running', detail: 'casual reply' })
+    emit({ type: 'run_state', sessionId, run })
+    runtime.messages.push({ role: 'assistant', content })
+    emit({
+      type: 'assistant_message',
+      sessionId,
+      message: { role: 'assistant', content },
+    })
+    run = updateRunState(run, { tasks: run.tasks.map((task) => ({ ...task, status: 'completed' })) })
+    run = finishRunState(run, 'completed')
+    emit({ type: 'run_state', sessionId, run })
+    setStatus?.('idle')
+    emit({ type: 'status', sessionId, status: 'idle' })
+    return { content }
+  }
+
   emit({ type: 'status', sessionId, status: 'running', detail: `model ${config.model}` })
+  emit({ type: 'run_state', sessionId, run })
+  emit({
+    type: 'project_context',
+    sessionId,
+    fingerprint: projectContext.fingerprint,
+    hasAgentInstructions: Boolean(projectContext.projectInstructions),
+    hasMemory: Boolean(projectContext.memoryExcerpts),
+    skillCount: projectContext.skills.length,
+    loadedSkills: projectContext.loadedSkills.map((skill) => skill.name),
+  })
   setStatus?.('running')
 
   let usage: Usage | undefined
   let finalText = ''
+  let completed = false
+  let repairAttempts = 0
+  const changes: ChangeEvidence[] = []
+  const verificationCommands = discoverVerificationCommands(root, goal.verificationCommands)
+  const toolsEnabled = !isCasualPrompt(text)
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    if (runtime.abort.signal.aborted) throw new Error('stopped')
+  try {
+    for (let round = 0; round < goal.maxRounds!; round++) {
+      if (runtime.abort.signal.aborted) throw new Error('stopped')
+      if (Date.now() - started > goal.maxRuntimeMs!) throw new Error('run time budget exceeded')
+      if ((usage?.total_tokens ?? 0) >= goal.maxTokens!) throw new Error('token budget exceeded')
 
-    const apiMessages: ChatMessage[] = [
-      { role: 'system', content: SYSTEM },
-      ...runtime.messages,
-    ]
-
-    const result = await chatCompletions({
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      model: config.model || runtime.meta.model,
-      messages: apiMessages,
-      tools: TOOL_DEFS,
-      stream: true,
-      signal: runtime.abort.signal,
-      onDelta: (delta) => {
-        emit({ type: 'text_delta', sessionId, text: delta })
-      },
-    })
-
-    usage = addUsage(usage, result.usage)
-    const toolCalls = result.tool_calls?.filter((t) => t.function?.name) ?? []
-
-    if (toolCalls.length > 0) {
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: result.content || null,
-        tool_calls: toolCalls,
+      // Auto-compact once per turn when context balloons (keeps recent goal via summary).
+      if (round > 0 && shouldAutoCompact(runtime.messages, usage, goal.maxTokens)) {
+        try {
+          emit({ type: 'status', sessionId, status: 'running', detail: 'auto-compact' })
+          const compacted = await compactRuntime({ runtime, config })
+          emit({
+            type: 'session_compacted',
+            sessionId,
+            originalMessageCount: compacted.originalMessageCount,
+            auto: true,
+            canUndo: true,
+            summary: compacted.summary.slice(0, 500),
+          })
+          run = updateRunState(run, { lastEvent: 'auto_compact' })
+        } catch (err) {
+          // Compact failure is non-fatal — continue with full context.
+          emit({
+            type: 'status',
+            sessionId,
+            status: 'running',
+            detail: `auto-compact skipped: ${err instanceof Error ? err.message : String(err)}`.slice(0, 160),
+          })
+        }
       }
-      runtime.messages.push(assistantMsg)
 
-      if (result.content) {
-        emit({
-          type: 'assistant_message',
+      run = updateRunState(run, { round: round + 1, usage, lastEvent: `model_round_${round + 1}` })
+      emit({ type: 'run_state', sessionId, run })
+
+      const apiMessages: ChatMessage[] = [
+        { role: 'system', content: `${SYSTEM}\n\n${contextPrompt}\n\n${goalPrompt(goal)}` },
+        ...runtime.messages,
+      ]
+
+      const result = await providerChat({
+        dialect: config.dialect ?? runtime.meta.dialect,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        model: config.model || runtime.meta.model,
+        messages: apiMessages,
+        tools: toolsEnabled ? TOOL_DEFS : undefined,
+        stream: true,
+        signal: runtime.abort.signal,
+        onRetry: (retry) => {
+          emit({ type: 'provider_retry', sessionId, ...retry })
+        },
+        onCircuit: (circuit) => {
+          emit({ type: 'provider_circuit', sessionId, ...circuit })
+        },
+        onDelta: (delta) => {
+          emit({ type: 'text_delta', sessionId, text: delta })
+        },
+      })
+
+      usage = addUsage(usage, result.usage)
+      const toolCalls = result.tool_calls?.filter((t) => t.function?.name) ?? []
+
+      if (toolCalls.length > 0) {
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content: result.content || null,
+          tool_calls: toolCalls,
+        }
+        runtime.messages.push(assistantMsg)
+
+        if (result.content) {
+          emit({
+            type: 'assistant_message',
+            sessionId,
+            message: { role: 'assistant', content: result.content },
+            partial: true,
+          })
+        }
+
+        // tool cards first so UI can attach approval cards to running tools
+        for (const tc of toolCalls) {
+          const name = tc.function.name
+          const args = tc.function.arguments || '{}'
+          emit({
+            type: 'tool_start',
+            sessionId,
+            toolCallId: tc.id,
+            name,
+            args: shortArgs(args),
+            summary: isMutatingTool(name)
+              ? previewWriteTool(root, name, args).summary
+              : shortArgs(args),
+          })
+        }
+
+        const roundApprovals = await collectRoundApprovals({
+          root,
           sessionId,
-          message: { role: 'assistant', content: result.content },
-          partial: true,
+          toolCalls,
+          runtime,
+          emit,
+          setStatus,
+          onApproval: (status) => {
+            run = updateRunState(run, { status, lastEvent: status })
+            emit({ type: 'run_state', sessionId, run })
+          },
         })
+
+        for (const tc of toolCalls) {
+          const outcome = await execOneTool({
+            root,
+            sessionId,
+            tc,
+            runtime,
+            emit,
+            setStatus,
+            onApproval: (status) => {
+              run = updateRunState(run, { status, lastEvent: status })
+            },
+            preDecision: roundApprovals.get(tc.id),
+            skipToolStart: true,
+            checkpointId,
+            checkpointPrompt: text,
+            denyGlobs: config.denyGlobs,
+          })
+          if (outcome.change) changes.push(outcome.change)
+          const modelPlan = tc.function.name === 'plan_tasks' ? plannedTasks(tc.function.arguments || '{}') : null
+          run = updateRunState(run, modelPlan
+            ? { tasks: modelPlan, lastEvent: 'model_plan_published' }
+            : {
+                tasks: run.tasks.map((task) => task.id === 'plan'
+                  ? { ...task, status: 'completed' }
+                  : task.id === 'inspect'
+                    ? { ...task, status: 'completed' }
+                    : task.id === 'change'
+                      ? { ...task, status: 'running' }
+                      : task),
+              })
+          if (modelPlan) emit({ type: 'task_plan', sessionId, tasks: modelPlan })
+          emit({ type: 'run_state', sessionId, run })
+          run = updateRunState(run, {
+            toolCount: run.toolCount + 1,
+            lastEvent: `tool_${tc.function.name}_completed`,
+          })
+        }
+        continue
       }
 
-      for (const tc of toolCalls) {
-        await execOneTool({ root, sessionId, tc, runtime, emit, setStatus })
+      const candidate = result.content || ''
+      const shouldVerify = Boolean(goal.acceptanceCriteria?.length || changes.length)
+      if (shouldVerify) {
+        run = updateRunState(run, {
+          status: 'verifying',
+          usage,
+          lastEvent: 'verification_started',
+          tasks: run.tasks.map((task) => task.id === 'change'
+            ? { ...task, status: 'completed' }
+            : task.id === 'verify' ? { ...task, status: 'running' } : task),
+        })
+        emit({ type: 'run_state', sessionId, run })
+        emit({ type: 'verification_start', sessionId, changes: changes.map((change) => change.path) })
+        const checks: CheckEvidence[] = []
+        for (const [index, command] of verificationCommands.entries()) {
+          const outcome = await execOneTool({
+            root,
+            sessionId,
+            tc: {
+              id: `verify_${run.runId}_${repairAttempts}_${index}`,
+              type: 'function',
+              function: { name: 'run_shell', arguments: JSON.stringify({ command }) },
+            },
+            runtime,
+            emit,
+            setStatus,
+            onApproval: (status) => {
+              run = updateRunState(run, { status, lastEvent: status })
+            },
+            checkpointId,
+            denyGlobs: config.denyGlobs,
+          })
+          run = updateRunState(run, {
+            status: 'verifying',
+            toolCount: run.toolCount + 1,
+            lastEvent: `verification_check_${index + 1}`,
+          })
+          const check = {
+            command,
+            ok: outcome.result.ok,
+            output: outcome.result.content.slice(0, 4_000),
+          }
+          checks.push(check)
+          emit({ type: 'verification_check', sessionId, ...check })
+          if (outcome.result.content.startsWith('user denied shell')) {
+            throw new Error('verification check not approved')
+          }
+        }
+
+        const failedChecks = checks.filter((check) => !check.ok)
+        const verdict = failedChecks.length
+          ? {
+              passed: false,
+              summary: `${failedChecks.length} project check(s) failed`,
+              failures: failedChecks.map((check) => `${check.command}: ${check.output.slice(0, 300)}`),
+              usage: undefined,
+            }
+          : await verifyGoal({
+              goal,
+              finalText: candidate,
+              changes,
+              checks,
+              config,
+              signal: runtime.abort.signal,
+              onRetry: (retry) => emit({ type: 'provider_retry', sessionId, ...retry }),
+              onCircuit: (circuit) => emit({ type: 'provider_circuit', sessionId, ...circuit }),
+            })
+        usage = addUsage(usage, verdict.usage)
+        emit({ type: 'verification_result', sessionId, ...verdict })
+        if ((usage?.total_tokens ?? 0) >= goal.maxTokens!) throw new Error('token budget exceeded')
+        if (!verdict.passed) {
+          if (repairAttempts >= goal.maxRepairAttempts!) {
+            throw new Error(`verification failed: ${verdict.summary}`)
+          }
+          repairAttempts++
+          run = updateRunState(run, {
+            status: 'repairing',
+            repairAttempts,
+            usage,
+            lastEvent: `repair_${repairAttempts}`,
+          })
+          emit({ type: 'run_state', sessionId, run })
+          runtime.messages.push({
+            role: 'system',
+            content: `Independent verifier rejected the previous candidate. Repair the work before answering again.\nSummary: ${verdict.summary}\nFailures:\n${verdict.failures.map((failure) => `- ${failure}`).join('\n') || '- Re-check the goal and evidence.'}`,
+          })
+          emit({ type: 'status', sessionId, status: 'running', detail: `repair ${repairAttempts}` })
+          continue
+        }
       }
-      continue
+
+      finalText = candidate
+      completed = true
+      run = updateRunState(run, {
+        tasks: run.tasks.map((task) => ({ ...task, status: 'completed' })),
+      })
+      runtime.messages.push({ role: 'assistant', content: finalText })
+      emit({
+        type: 'assistant_message',
+        sessionId,
+        message: { role: 'assistant', content: finalText },
+        usage,
+      })
+      break
     }
 
-    finalText = result.content || ''
-    runtime.messages.push({ role: 'assistant', content: finalText })
-    emit({
-      type: 'assistant_message',
-      sessionId,
-      message: { role: 'assistant', content: finalText },
-      usage,
-    })
-    break
-  }
+    if (!completed) throw new Error(`max rounds exceeded (${goal.maxRounds})`)
 
-  if (!finalText && !usage) {
-    finalText = '(stopped after max tool rounds)'
-    emit({
-      type: 'assistant_message',
-      sessionId,
-      message: { role: 'assistant', content: finalText },
-    })
+    if (usage) {
+      run = updateRunState(run, { usage, lastEvent: 'model_completed' })
+      emit({ type: 'usage', sessionId, usage })
+    }
+    run = finishRunState(run, 'completed')
+    emit({ type: 'run_state', sessionId, run })
+    setStatus?.('idle')
+    emit({ type: 'status', sessionId, status: 'idle' })
+    return { content: finalText, usage }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    run = updateRunState(run, { tasks: run.tasks.map((task) => task.status === 'running' ? { ...task, status: 'failed' } : task) })
+    run = finishRunState(run, runtime.abort?.signal.aborted ? 'cancelled' : 'failed', message)
+    emit({ type: 'run_state', sessionId, run })
+    throw error
   }
+}
 
-  if (usage) emit({ type: 'usage', sessionId, usage })
-  setStatus?.('idle')
-  emit({ type: 'status', sessionId, status: 'idle' })
-  return { content: finalText, usage }
+export async function runDirectEdit(opts: {
+  runtime: SessionRuntime
+  path: string
+  expectedContent: string
+  content: string
+  emit: LoopEmit
+  setStatus?: (status: SessionMeta['status']) => void
+}): Promise<ToolResult> {
+  const { runtime, emit, setStatus } = opts
+  runtime.abort = new AbortController()
+  setStatus?.('running')
+  emit({ type: 'status', sessionId: runtime.meta.id, status: 'running', detail: `edit ${opts.path}` })
+  try {
+    const result = await runTool(
+      runtime.meta.projectRoot,
+      'replace_file',
+      JSON.stringify({
+        path: opts.path,
+        expected_content: opts.expectedContent,
+        content: opts.content,
+      }),
+      { denyGlobs: DEFAULT_DENY_GLOBS },
+    )
+    if (!result.ok) throw new Error(result.content)
+    return result
+  } finally {
+    setStatus?.('idle')
+    emit({ type: 'status', sessionId: runtime.meta.id, status: 'idle' })
+  }
+}
+
+function approvalMap(runtime: SessionRuntime): Map<string, PendingApproval> {
+  if (!runtime.pendingApprovals) runtime.pendingApprovals = new Map()
+  return runtime.pendingApprovals
 }
 
 async function waitApproval(
   runtime: SessionRuntime,
   requestId: string,
+  toolName?: string,
 ): Promise<'allow' | 'deny'> {
   return new Promise((resolve) => {
+    const pending = approvalMap(runtime)
     const timer = setTimeout(() => {
-      if (runtime.pendingApproval?.requestId === requestId) {
-        runtime.pendingApproval = undefined
+      if (pending.get(requestId)?.resolve === settled) {
+        pending.delete(requestId)
         resolve('deny')
       }
     }, APPROVAL_TIMEOUT_MS)
 
-    runtime.pendingApproval = {
-      requestId,
-      resolve: (decision) => {
-        clearTimeout(timer)
-        runtime.pendingApproval = undefined
-        resolve(decision)
-      },
+    const settled = (decision: 'allow' | 'deny') => {
+      clearTimeout(timer)
+      // map entry may already be gone if resolveApproval deleted it
+      pending.delete(requestId)
+      resolve(decision)
     }
+
+    pending.set(requestId, { requestId, name: toolName, resolve: settled })
 
     runtime.abort?.signal.addEventListener(
       'abort',
       () => {
+        if (!pending.has(requestId)) return
         clearTimeout(timer)
-        if (runtime.pendingApproval?.requestId === requestId) {
-          runtime.pendingApproval = undefined
-          resolve('deny')
-        }
+        pending.delete(requestId)
+        resolve('deny')
       },
       { once: true },
     )
   })
+}
+
+/** Emit + wait approvals for every mutating tool in this round (parallel wait). */
+async function collectRoundApprovals(opts: {
+  root: string
+  sessionId: string
+  toolCalls: ToolCall[]
+  runtime: SessionRuntime
+  emit: LoopEmit
+  setStatus?: (status: SessionMeta['status']) => void
+  onApproval?: (status: 'running' | 'awaiting_approval') => void
+}): Promise<Map<string, 'allow' | 'deny'>> {
+  const { root, sessionId, toolCalls, runtime, emit, setStatus, onApproval } = opts
+  const mode = runtime.meta.permissionMode
+  const needing = toolCalls.filter((tc) => needsApproval(mode, tc.function.name, runtime.sessionGrants))
+  const decisions = new Map<string, 'allow' | 'deny'>()
+  if (!needing.length) return decisions
+
+  setStatus?.('awaiting_approval')
+  onApproval?.('awaiting_approval')
+  emit({
+    type: 'status',
+    sessionId,
+    status: 'awaiting_approval',
+    detail: needing.length === 1
+      ? previewWriteTool(root, needing[0].function.name, needing[0].function.arguments || '{}').summary
+      : `${needing.length} actions need approval`,
+  })
+
+  await Promise.all(needing.map(async (tc) => {
+    const name = tc.function.name
+    const args = tc.function.arguments || '{}'
+    const prev = previewWriteTool(root, name, args)
+    emit({
+      type: 'approval_request',
+      sessionId,
+      requestId: tc.id,
+      toolCallId: tc.id,
+      name,
+      args: shortArgs(args),
+      summary: prev.summary,
+      preview: prev.preview,
+    })
+    decisions.set(tc.id, await waitApproval(runtime, tc.id, name))
+  }))
+
+  setStatus?.('running')
+  onApproval?.('running')
+  emit({ type: 'status', sessionId, status: 'running' })
+  return decisions
 }
 
 async function execOneTool(opts: {
@@ -209,29 +728,57 @@ async function execOneTool(opts: {
   runtime: SessionRuntime
   emit: LoopEmit
   setStatus?: (status: SessionMeta['status']) => void
-}): Promise<void> {
-  const { root, sessionId, tc, runtime, emit, setStatus } = opts
+  onApproval?: (status: 'running' | 'awaiting_approval') => void
+  /** Decision already collected for this tool (round queue). */
+  preDecision?: 'allow' | 'deny'
+  skipApproval?: boolean
+  skipToolStart?: boolean
+  checkpointId: string
+  checkpointPrompt?: string
+  captureCheckpoint?: boolean
+  denyGlobs?: string[]
+}): Promise<{ change?: ChangeEvidence; result: ToolResult }> {
+  const {
+    root,
+    sessionId,
+    tc,
+    runtime,
+    emit,
+    setStatus,
+    onApproval,
+    preDecision,
+    skipApproval = false,
+    skipToolStart = false,
+    checkpointId,
+    checkpointPrompt,
+    captureCheckpoint = true,
+    denyGlobs = [],
+  } = opts
   const name = tc.function.name
   const args = tc.function.arguments || '{}'
   const mode = runtime.meta.permissionMode
+  const mutationPreview = WRITE_TOOL_NAMES.has(name)
+    ? previewWriteTool(root, name, args)
+    : undefined
 
-  const startSummary =
-    WRITE_TOOL_NAMES.has(name)
-      ? previewWriteTool(root, name, args).summary
-      : shortArgs(args)
+  const startSummary = isMutatingTool(name)
+    ? previewWriteTool(root, name, args).summary
+    : shortArgs(args)
 
-  emit({
-    type: 'tool_start',
-    sessionId,
-    toolCallId: tc.id,
-    name,
-    args: shortArgs(args),
-    summary: startSummary,
-  })
+  if (!skipToolStart) {
+    emit({
+      type: 'tool_start',
+      sessionId,
+      toolCallId: tc.id,
+      name,
+      args: shortArgs(args),
+      summary: startSummary,
+    })
+  }
 
-  // read_only blocks writes
-  if (WRITE_TOOL_NAMES.has(name) && mode === 'read_only') {
-    const msg = `write blocked: permissionMode=read_only`
+  // read_only blocks mutations
+  if (isMutatingTool(name) && mode === 'read_only') {
+    const msg = `${mutationKind(name)} blocked: permissionMode=read_only`
     emit({
       type: 'tool_result',
       sessionId,
@@ -247,13 +794,34 @@ async function execOneTool(opts: {
       name,
       content: msg,
     })
-    return
+    return { result: { ok: false, summary: msg, content: msg } }
   }
 
-  if (needsApproval(mode, name)) {
+  if (preDecision === 'deny') {
+    const msg = `user denied ${mutationKind(name)}`
+    emit({
+      type: 'tool_result',
+      sessionId,
+      toolCallId: tc.id,
+      name,
+      ok: false,
+      summary: msg,
+      preview: msg,
+    })
+    runtime.messages.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      name,
+      content: msg,
+    })
+    return { result: { ok: false, summary: msg, content: msg } }
+  }
+
+  if (!skipApproval && preDecision !== 'allow' && needsApproval(mode, name, runtime.sessionGrants)) {
     const requestId = tc.id
     const prev = previewWriteTool(root, name, args)
     setStatus?.('awaiting_approval')
+    onApproval?.('awaiting_approval')
     emit({
       type: 'approval_request',
       sessionId,
@@ -271,12 +839,13 @@ async function execOneTool(opts: {
       detail: prev.summary,
     })
 
-    const decision = await waitApproval(runtime, requestId)
+    const decision = await waitApproval(runtime, requestId, name)
     setStatus?.('running')
+    onApproval?.('running')
     emit({ type: 'status', sessionId, status: 'running' })
 
     if (decision !== 'allow') {
-      const msg = 'user denied write'
+      const msg = `user denied ${mutationKind(name)}`
       emit({
         type: 'tool_result',
         sessionId,
@@ -292,31 +861,57 @@ async function execOneTool(opts: {
         name,
         content: msg,
       })
-      return
+      return { result: { ok: false, summary: msg, content: msg } }
     }
   }
 
-  const result = await runTool(root, name, args)
+  if (
+    captureCheckpoint &&
+    WRITE_TOOL_NAMES.has(name) &&
+    name !== 'memory_write' &&
+    name !== 'memory_delete'
+  ) {
+    const pathValue = toolPath(args)
+    const checkpoint = checkpointSnapshot(root, checkpointId, pathValue, checkpointPrompt)
+    emit({ type: 'checkpoint', sessionId, checkpointId, path: pathValue, prompt: checkpoint.prompt, files: checkpoint.files })
+  }
+
+  const result = await runTool(root, name, args, {
+    denyGlobs: [...DEFAULT_DENY_GLOBS, ...denyGlobs],
+  })
 
   emit({
     type: 'tool_result',
     sessionId,
     toolCallId: tc.id,
     name,
+    path: toolPath(args),
     ok: result.ok,
     summary: result.summary,
     preview: result.content.slice(0, 500),
   })
 
-  if (result.ok && WRITE_TOOL_NAMES.has(name)) {
+  if (result.ok && WRITE_TOOL_NAMES.has(name) && name !== 'memory_write' && name !== 'memory_delete') {
+    const change = {
+      path: toolPath(args),
+      diff: mutationPreview?.preview ?? '',
+    }
     emit({
       type: 'diff',
       sessionId,
       toolCallId: tc.id,
       name,
+      path: change.path,
       summary: result.summary,
-      preview: previewWriteTool(root, name, args).preview,
+      preview: change.diff,
     })
+    runtime.messages.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      name,
+      content: result.content.slice(0, 80_000),
+    })
+    return { change, result }
   }
 
   runtime.messages.push({
@@ -325,25 +920,59 @@ async function execOneTool(opts: {
     name,
     content: result.content.slice(0, 80_000),
   })
+  return { result }
+}
+
+function toolPath(argsJson: string): string {
+  try {
+    const args = JSON.parse(argsJson) as Record<string, unknown>
+    return typeof args.path === 'string' && args.path.trim() ? args.path.trim() : '(unknown)'
+  } catch {
+    return '(unknown)'
+  }
 }
 
 export function resolveApproval(
   runtime: SessionRuntime,
   requestId: string,
   decision: 'allow' | 'deny',
+  scope: 'once' | 'session' = 'once',
 ): boolean {
-  if (!runtime.pendingApproval || runtime.pendingApproval.requestId !== requestId) {
-    return false
+  const pending = runtime.pendingApprovals?.get(requestId)
+  if (!pending) return false
+  if (decision === 'allow' && scope === 'session' && pending.name && isMutatingTool(pending.name)) {
+    if (!runtime.sessionGrants) runtime.sessionGrants = new Set()
+    runtime.sessionGrants.add(mutationKind(pending.name))
   }
-  runtime.pendingApproval.resolve(decision)
+  // delete before resolve so re-entrant callers see a clean map
+  runtime.pendingApprovals?.delete(requestId)
+  pending.resolve(decision)
   return true
 }
 
-export function stopTurn(runtime: SessionRuntime): void {
-  if (runtime.pendingApproval) {
-    runtime.pendingApproval.resolve('deny')
-    runtime.pendingApproval = undefined
+/** Resolve every pending approval with the same decision (batch allow/deny). */
+export function resolveAllApprovals(
+  runtime: SessionRuntime,
+  decision: 'allow' | 'deny',
+  scope: 'once' | 'session' = 'once',
+): number {
+  const pending = runtime.pendingApprovals
+  if (!pending?.size) return 0
+  const items = [...pending.values()]
+  if (decision === 'allow' && scope === 'session') {
+    if (!runtime.sessionGrants) runtime.sessionGrants = new Set()
+    for (const item of items) {
+      if (item.name && isMutatingTool(item.name)) runtime.sessionGrants.add(mutationKind(item.name))
+    }
   }
+  pending.clear()
+  for (const item of items) item.resolve(decision)
+  return items.length
+}
+
+export function stopTurn(runtime: SessionRuntime): void {
+  resolveAllApprovals(runtime, 'deny')
+  runtime.sessionGrants?.clear()
   runtime.abort?.abort()
   runtime.abort = undefined
 }

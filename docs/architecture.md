@@ -349,20 +349,32 @@ Out of scope v0: multi-user isolation, remote sandbox VM, SOC2.
 
 | Need | Approach |
 |---|---|
-| Agent loop / tools / perms | Own `agent-core`; **borrow patterns** from OpenHarness (not full product personality) |
-| Multi-agent swarm | Defer; **borrow ideas** from ClawTeam later |
-| Desktop workspace | Own |
-| Third-party CLIs | Optional adapter later — not foundation |
+| Agent loop / tools / perms | Own `agent-core` (TS); **borrow patterns** from `reference/OpenHarness` (not Python port, not OH personality) |
+| Multi-agent isolation | Own worktree sessions; **borrow** spawn/board ideas from `reference/ClawTeam` |
+| Loop ops (schedule, gates, state spine) | **borrow** primitives from `reference/loop-engineering` when unattended loops matter |
+| Desktop workspace | Own (Electron + Svelte) — not in those references |
+| Third-party CLIs | Optional Terminal host adapters — not foundation |
+
+Pinned trees live under repo `reference/` (git checkouts). They are **read-only design input**, not runtime dependencies.
+
+### v1 absorb order (detail: `docs/progress.md`)
+
+```
+web_fetch/search → task_* → agent/send_message(+worktree)
+  → plan/ask → parallel read tools → MCP resources
+    → cron/schedule → ClawTeam mailbox/templates
+```
 
 ---
 
 ## 16. Evolution path
 
 ```
-v0  enpii single-agent + multi-pane workspace (this doc)
-v1  richer terminal blocks, diff UX, memory quality
-v2  worktree multi-agent orchestration
-v3  remote SSH / tunnel / share (CLIMonkey parity extras)
+v0  enpii single-agent + multi-pane workspace + git/term   ✅
+    (+ early: worktree board, MCP, SSH, browser, packaging)
+v1  reference-parity agent surface (web, tasks, sub-agent, plan/ask)
+v2  loop ops (cron/durable schedule, richer swarm mailbox)
+v3  polish: signed ship, search index, browser profiles, OAuth MCP as needed
 ```
 
 Each version must keep **Agent Contract** backward-compatible or versioned.
@@ -373,5 +385,7 @@ Each version must keep **Agent Contract** backward-compatible or versioned.
 
 - [Design](./design.md) — UX and interaction design
 - [PRD](./prd.md) — product requirements
+- [Progress](./progress.md) — shipped vs next (includes `reference/` coverage table)
 - [Rules](./rules.md) — engineering & agent policy rules
 - [Schema](./schema.md) — contracts, configs, events
+- `reference/OpenHarness|ClawTeam|loop-engineering` — pinned pattern sources (not runtime)

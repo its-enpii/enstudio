@@ -4,6 +4,15 @@ import electron from 'vite-plugin-electron/simple'
 import path from 'node:path'
 
 export default defineConfig({
+  optimizeDeps: {
+    force: true,
+    include: [
+      '@codemirror/commands',
+      '@codemirror/search',
+      '@codemirror/state',
+      '@codemirror/view',
+    ],
+  },
   plugins: [
     svelte(),
     electron({
@@ -13,7 +22,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['electron'],
+              external: ['electron', 'node-pty'],
             },
           },
         },
