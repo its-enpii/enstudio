@@ -78,6 +78,9 @@
   const wtSessions = $derived(
     app.sessionList.filter((s) => Boolean(s.worktreeBranch || s.baseProjectRoot)),
   )
+  const mainSessions = $derived(
+    app.sessionList.filter((s) => !s.worktreeBranch && !s.baseProjectRoot),
+  )
   /** Git checkouts with no matching agent session — only these need a separate row. */
   const orphanWorktrees = $derived.by(() => {
     const roots = new Set(
@@ -471,23 +474,105 @@
       </button>
       <button
         type="button"
+        class="wt-mini"
+        disabled={!app.session || isWorktreeSession}
+        title="Export transcript as Markdown"
+        onclick={() => void onExportTranscript()}
+      >Export</button>
+    </div>
+    {#if mainSessions.length === 0 && !app.session}
+      <div class="insp-meta">No session yet</div>
+    {:else if mainSessions.length === 0 && isWorktreeSession}
+      <div class="insp-meta muted">Main chats live here. Active chat is a worktree — see Worktrees below.</div>
+    {:else}
+      <div class="session-switcher">
+        <div class="session-history-label">
+          <span>{mainSessions.length} chat{mainSessions.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="session-history">
+          {#each mainSessions as s (s.id)}
+            {#if renamingId === s.id}
+              <div class="session-history-item session-rename-row" class:active={app.session?.id === s.id}>
+                <input
+                  class="session-rename-input"
+                  bind:value={renameDraft}
+                  disabled={renameBusy}
+                  aria-label="Session title"
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void commitRename()
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      cancelRename()
+                    }
+                  }}
+                />
+                <button type="button" class="wt-mini" disabled={renameBusy} onclick={() => void commitRename()}>Save</button>
+                <button type="button" class="wt-mini" disabled={renameBusy} onclick={cancelRename}>×</button>
+              </div>
+            {:else}
+              <div
+                class="session-history-item"
+                class:active={app.session?.id === s.id}
+                class:running={app.isSessionBusy(s.id) || s.status === 'running' || s.status === 'awaiting_approval'}
+                role="button"
+                tabindex="0"
+                onclick={() => void openSession(s.id)}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    void openSession(s.id)
+                  }
+                }}
+              >
+                <span class="session-history-copy">
+                  <span class="session-history-name">{s.title}</span>
+                  <span class="session-history-meta">{s.messageCount ?? 0} msg · {formatBytes(s.sizeBytes ?? 0)}</span>
+                </span>
+                <span class="session-history-status">
+                  {#if app.isSessionBusy(s.id) && s.id !== app.session?.id}running
+                  {:else}{s.status}{/if}
+                </span>
+                <button
+                  type="button"
+                  class="wt-mini session-rename-btn"
+                  title="Rename session"
+                  aria-label="Rename session"
+                  onclick={(e) => startRename(s, e)}
+                >✎</button>
+              </div>
+            {/if}
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </section>
+
+  <section class="insp-section insp-section-worktree">
+    <h3 class="insp-label">Worktrees</h3>
+    <p class="worktree-list-hint muted">Sandbox checkout + chat. Apply → main; Discard → delete both.</p>
+    <div class="session-actions">
+      <button
+        type="button"
         class="session-new session-worktree"
         disabled={!app.activeProject || wtBusy}
-        title="Create git worktree + jailed agent session"
+        title="Create sandbox worktree + chat"
         onclick={() => void startWorktreeSession()}
       >
-        Worktree
+        New
       </button>
       <button
         type="button"
         class="session-new session-worktree"
         disabled={!app.activeProject || wtBusy}
-        title="Spawn 2 isolated worktree agent sessions"
+        title="Spawn 2 parallel sandbox agents"
         onclick={() => void startWorktreeAgents(2)}
       >
         ×2
       </button>
     </div>
+
     {#if isWorktreeSession}
       <div class="worktree-banner">
         <div class="worktree-banner-row">
@@ -497,7 +582,6 @@
             <button type="button" class="wt-close" disabled={wtBusy || app.busy} title="Discard this worktree (tree + chat)" aria-label="Discard worktree" onclick={requestDiscardWorktree}>×</button>
           </div>
         </div>
-        <div class="worktree-meta muted">One unit: git checkout + this chat. Apply merges to main; Discard deletes both.</div>
         {#if wtError}
           <div class="worktree-error">{wtError}</div>
         {:else if wtPreview}
@@ -567,34 +651,30 @@
         </div>
       </div>
     {/if}
-    {#if app.sessionList.length === 0 && !app.session}
-      <div class="insp-meta">No session yet</div>
-    {:else}
+
+    {#if wtSessions.length === 0 && orphanWorktrees.length === 0}
+      <div class="insp-meta muted">No sandboxes. New = one agent lab; ×2 = two in parallel.</div>
+    {:else if wtSessions.length > 0}
       <div class="session-switcher">
         <div class="session-history-label">
-          <span>
-            {app.sessionList.length} session{app.sessionList.length === 1 ? '' : 's'}
-            {#if wtSessions.length}
-              · {wtBusyCount}/{wtSessions.length} wt busy
-            {/if}
-          </span>
+          <span>{wtBusyCount}/{wtSessions.length} busy</span>
           <button
             type="button"
             class="wt-mini"
-            disabled={!app.session}
-            title="Export transcript as Markdown"
+            disabled={!isWorktreeSession}
+            title="Export active worktree transcript"
             onclick={() => void onExportTranscript()}
           >Export</button>
         </div>
         <div class="session-history">
-          {#each app.sessionList as s (s.id)}
+          {#each wtSessions as s (s.id)}
             {#if renamingId === s.id}
               <div class="session-history-item session-rename-row" class:active={app.session?.id === s.id}>
                 <input
                   class="session-rename-input"
                   bind:value={renameDraft}
                   disabled={renameBusy}
-                  aria-label="Session title"
+                  aria-label="Worktree title"
                   onkeydown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
@@ -624,10 +704,7 @@
                 }}
               >
                 <span class="session-history-copy">
-                  <span class="session-history-name">
-                    {#if s.worktreeBranch || s.baseProjectRoot}<span class="wt-tag">wt</span>{/if}
-                    {s.worktreeBranch ?? s.title}
-                  </span>
+                  <span class="session-history-name">{s.worktreeBranch ?? s.title}</span>
                   <span class="session-history-meta">{s.messageCount ?? 0} msg · {formatBytes(s.sizeBytes ?? 0)}</span>
                 </span>
                 <span class="session-history-status">
@@ -637,92 +714,91 @@
                 <button
                   type="button"
                   class="wt-mini session-rename-btn"
-                  title="Rename session"
-                  aria-label="Rename session"
+                  title="Rename"
+                  aria-label="Rename worktree session"
                   onclick={(e) => startRename(s, e)}
                 >✎</button>
               </div>
             {/if}
           {/each}
         </div>
-        {#if wtSessions.length > 0}
-          <div class="agent-fanout">
-            <input
-              class="agent-fanout-input"
-              type="text"
-              placeholder="Fan-out to all worktree sessions…"
-              bind:value={fanoutText}
-              disabled={fanoutBusy}
-              onkeydown={(e) => {
-                if (e.key === 'Enter') void onFanout()
-              }}
-            />
-            <button
-              type="button"
-              class="wt-mini"
-              disabled={fanoutBusy || !fanoutText.trim()}
-              onclick={() => void onFanout()}
-            >Send all</button>
-            <button
-              type="button"
-              class="wt-mini"
-              disabled={fanoutBusy}
-              title="Merge clean worktree agents into main (sequential)"
-              onclick={requestApplyAllAgents}
-            >Apply all</button>
-          </div>
-          {#if applyAllReport}
-            <div class="apply-all-report" class:bad={!applyAllReport.ok}>
-              <div class="worktree-list-label muted">
-                Apply all · {applyAllReport.applied} merged
-                <button type="button" class="wt-mini" onclick={() => (applyAllReport = null)}>×</button>
-              </div>
-              {#each applyAllReport.lines as line, i (`${line.label}-${i}`)}
-                <div class="apply-all-line {line.kind}">
-                  <code>{line.label}</code>
-                  <span>{line.detail}</span>
-                </div>
-              {/each}
-              {#if applyAllReport.conflictPaths.length}
-                <div class="worktree-error">
-                  Conflicts{applyAllReport.conflictBranch ? ` (${applyAllReport.conflictBranch})` : ''}: resolve in main, then commit.
-                </div>
-                <ul class="worktree-commits conflict-paths">
-                  {#each applyAllReport.conflictPaths as p (p)}
-                    <li>
-                      <button
-                        type="button"
-                        class="conflict-path-btn"
-                        title="Open in Code"
-                        onclick={() => app.openCodeFile(p)}
-                      ><code>{p}</code></button>
-                    </li>
-                  {/each}
-                </ul>
-                <div class="agent-fanout">
-                  <button type="button" class="wt-mini" onclick={() => app.setMode('git')}>Open Git</button>
-                  <button
-                    type="button"
-                    class="wt-mini"
-                    onclick={() => {
-                      const first = applyAllReport?.conflictPaths[0]
-                      if (first) app.openCodeFile(first)
-                    }}
-                  >Open first</button>
-                </div>
-              {/if}
+        <div class="agent-fanout">
+          <input
+            class="agent-fanout-input"
+            type="text"
+            placeholder="Fan-out to all worktrees…"
+            bind:value={fanoutText}
+            disabled={fanoutBusy}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') void onFanout()
+            }}
+          />
+          <button
+            type="button"
+            class="wt-mini"
+            disabled={fanoutBusy || !fanoutText.trim()}
+            onclick={() => void onFanout()}
+          >Send all</button>
+          <button
+            type="button"
+            class="wt-mini"
+            disabled={fanoutBusy}
+            title="Merge clean worktrees into main (sequential)"
+            onclick={requestApplyAllAgents}
+          >Apply all</button>
+        </div>
+        {#if applyAllReport}
+          <div class="apply-all-report" class:bad={!applyAllReport.ok}>
+            <div class="worktree-list-label muted">
+              Apply all · {applyAllReport.applied} merged
+              <button type="button" class="wt-mini" onclick={() => (applyAllReport = null)}>×</button>
             </div>
-          {/if}
+            {#each applyAllReport.lines as line, i (`${line.label}-${i}`)}
+              <div class="apply-all-line {line.kind}">
+                <code>{line.label}</code>
+                <span>{line.detail}</span>
+              </div>
+            {/each}
+            {#if applyAllReport.conflictPaths.length}
+              <div class="worktree-error">
+                Conflicts{applyAllReport.conflictBranch ? ` (${applyAllReport.conflictBranch})` : ''}: resolve in main, then commit.
+              </div>
+              <ul class="worktree-commits conflict-paths">
+                {#each applyAllReport.conflictPaths as p (p)}
+                  <li>
+                    <button
+                      type="button"
+                      class="conflict-path-btn"
+                      title="Open in Code"
+                      onclick={() => app.openCodeFile(p)}
+                    ><code>{p}</code></button>
+                  </li>
+                {/each}
+              </ul>
+              <div class="agent-fanout">
+                <button type="button" class="wt-mini" onclick={() => app.setMode('git')}>Open Git</button>
+                <button
+                  type="button"
+                  class="wt-mini"
+                  onclick={() => {
+                    const first = applyAllReport?.conflictPaths[0]
+                    if (first) app.openCodeFile(first)
+                  }}
+                >Open first</button>
+              </div>
+            {/if}
+          </div>
         {/if}
       </div>
     {/if}
+
     {#if orphanWorktrees.length > 0}
       <details class="worktree-list worktree-list-compact" open>
         <summary class="worktree-list-label muted">
           Orphan checkouts · {orphanWorktrees.length}
         </summary>
         <p class="worktree-list-hint muted">
-          Checkout without chat (rare). Open = attach chat; × = delete tree only.
+          Checkout without chat. Open = attach; × = delete tree.
         </p>
         {#each orphanWorktrees as wt (wt.path)}
           <div class="worktree-list-item" title={wt.path}>
@@ -745,11 +821,6 @@
         {/each}
       </details>
     {/if}
-  </section>
-
-  <section class="insp-section insp-section-logs">
-    <h3 class="insp-label">Logs</h3>
-    <div class="log-box">{app.logs.slice(-12).join('\n') || '—'}</div>
   </section>
 </aside>
 

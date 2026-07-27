@@ -1184,6 +1184,10 @@ textarea {
   padding-bottom: 0;
 }
 
+.insp-section-worktree {
+  border-top: 1px solid var(--border-subtle);
+}
+
 .insp-section-session {
   gap: 10px;
 }
