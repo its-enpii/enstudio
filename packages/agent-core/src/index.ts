@@ -37,6 +37,7 @@ export { createRunState, finishRunState, normalizeGoal, saveRunState, updateRunS
 export { discoverVerificationCommands, goalPrompt, parseVerifierResponse, verifyGoal } from './verifier.js'
 export { runTool } from './tools/run.js'
 export { TOOL_DEFS } from './tools/defs.js'
+export { webFetch, webSearch, ensurePublicHttpUrl, validateHttpUrl } from './web.js'
 export {
   ensureMcpConfigScaffold,
   loadMcpConfig,

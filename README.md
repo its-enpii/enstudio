@@ -122,7 +122,7 @@ Run focused checks before broad checks.
 - [x] MCP client (stdio + HTTP) · SSH tunnels + interactive PTY · vendor CLI host
 - [x] TOML config · deny globs · memory toggle · layout per project · auto `.enpii/`
 - [x] Packaging scaffold (`electron-builder` + multi-target dist + signing env hooks)
-- [ ] v1 agent: `web_fetch` / `web_search` (OpenHarness patterns)
+- [x] v1 agent: `web_fetch` / `web_search` (OpenHarness patterns, SSRF guard)
 - [ ] v1 agent: in-loop `task_*` + `agent` / worktree sub-agent
 - [ ] v1 agent: plan/ask, parallel tools, cron (later)
 - [ ] Signed installers when certs available (codesign / notarize / Authenticode)

@@ -162,7 +162,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 | Goal + verifier + repair + checkpoints | strong (LE maker/checker lite) |
 | Worktree multi-agent board / apply | partial (ClawTeam isolation; no mailbox) |
 | MCP stdio + HTTP tools/call | partial (no resources / OAuth) |
-| Web search / fetch | **missing** |
+| Web search / fetch | **shipped** (`web_fetch` / `web_search`, SSRF guard) |
 | In-loop `agent` + `task_*` + `send_message` | **missing** (UI fan-out only) |
 | Formal plan mode + ask-user | **thin** (`plan_tasks` + composer Plan = read-only) |
 | Parallel tool execution | **missing** (sequential) |
@@ -175,7 +175,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 
 Ordered by impact for chat-default users; implement one phase at a time:
 
-1. **P0 Web** — `web_fetch` + `web_search` (OH `web_fetch_tool` / `web_search_tool` patterns; SSRF guards; optional proxy env). Prefer native tools over “use MCP or curl”.
+1. **P0 Web** — ✅ `web_fetch` + `web_search` (SSRF guards; `ENPII_WEB_SEARCH_URL` / `ENPII_WEB_PROXY`).
 2. **P1 Task board** — durable `task_create|get|list|update|stop` (replace thin-only reliance on `plan_tasks` for multi-step work).
 3. **P1 Sub-agent** — in-loop `agent` / `send_message` spawning jailed worktree sessions (reuse existing worktree RPC; OH `agent_tool` + ClawTeam spawn ideas).
 4. **P2 Plan + ask** — `enter_plan_mode` / `exit_plan_mode` (block writes) + `ask_user` mid-run (structured questions → UI).

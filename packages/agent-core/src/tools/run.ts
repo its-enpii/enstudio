@@ -34,6 +34,7 @@ import {
 } from '../git.js'
 import { memoryDelete, memorySearch, memoryWrite } from '../context.js'
 import { mcpCallTool, mcpListTools } from '../mcp.js'
+import { webFetch, webSearch } from '../web.js'
 
 const DEFAULT_READ = 120_000
 const DEFAULT_GLOB = 200
@@ -225,6 +226,20 @@ export async function runTool(
           homeDir,
         })
         return result.ok ? ok(result.summary, result.content) : fail(result.summary)
+      }
+      case 'web_fetch': {
+        const r = await webFetch({
+          url: String(args.url ?? ''),
+          maxChars: typeof args.maxChars === 'number' ? args.maxChars : undefined,
+        })
+        return r.ok ? ok(r.summary, r.content) : fail(r.content)
+      }
+      case 'web_search': {
+        const r = await webSearch({
+          query: String(args.query ?? ''),
+          maxResults: typeof args.maxResults === 'number' ? args.maxResults : undefined,
+        })
+        return r.ok ? ok(r.summary, r.content) : fail(r.content)
       }
       case 'mcp_list_tools': {
         const server = typeof args.server === 'string' && args.server.trim() ? args.server.trim() : undefined
