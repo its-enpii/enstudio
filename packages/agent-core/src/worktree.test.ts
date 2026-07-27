@@ -141,9 +141,9 @@ test('worktree session stores under base project hash and lists with main', () =
     assert.equal(meta.baseProjectRoot && path.resolve(meta.baseProjectRoot), path.resolve(base))
     assert.equal(meta.worktreeBranch, 'enpii/try')
 
+    // Empty worktree sessions stay listed so Linked worktrees can re-open them.
     const listed = store.list(base)
-    // empty transcript filtered out of list UI
-    assert.equal(listed.some((s) => s.id === meta.id), false)
+    assert.equal(listed.some((s) => s.id === meta.id), true)
 
     store.setMessages(meta.id, [{ role: 'user', content: 'hi' }])
     const again = store.list(base)
@@ -154,5 +154,30 @@ test('worktree session stores under base project hash and lists with main', () =
   } finally {
     fs.rmSync(base, { recursive: true, force: true })
     fs.rmSync(wt, { recursive: true, force: true })
+  }
+})
+
+test('discard is idempotent when git worktree already gone', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'enpii-wt-orphan-'))
+  try {
+    git(root, 'init')
+    git(root, 'config', 'user.name', 'enpii test')
+    git(root, 'config', 'user.email', 'test@enpii.local')
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a\n', 'utf8')
+    git(root, 'add', 'a.txt')
+    git(root, 'commit', '-m', 'initial')
+
+    const created = gitWorktreeAdd(root, { name: 'orphan-me' })
+    const branch = created.branch
+    gitWorktreeRemove(root, created.path, true)
+    assert.equal(gitWorktreeList(root).some((w) => path.resolve(w.path) === path.resolve(created.path)), false)
+
+    const d = gitWorktreeDiscard(root, created.path, { branchHint: branch })
+    assert.equal(d.alreadyGone, true)
+    // second discard still ok
+    const d2 = gitWorktreeDiscard(root, created.path, { branchHint: branch })
+    assert.equal(d2.alreadyGone, true)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
   }
 })

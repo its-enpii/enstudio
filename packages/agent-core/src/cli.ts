@@ -708,7 +708,29 @@ async function main(): Promise<void> {
     }
     if (!p.projectRoot) throw new Error('projectRoot is required')
     if (!p.path) throw new Error('path is required')
-    return gitWorktreeRemove(p.projectRoot, p.path, Boolean(p.force))
+    const base = path.resolve(p.projectRoot)
+    const target = path.resolve(p.path)
+    let list
+    try {
+      list = gitWorktreeRemove(base, target, Boolean(p.force))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!/worktree not found/i.test(msg)) throw err
+      try {
+        // prune stale registrations; path already gone
+        list = gitWorktreeList(base)
+      } catch {
+        list = []
+      }
+    }
+    // Chat sessions are separate from git worktrees — archive orphans on path remove.
+    for (const meta of sessions.list(base)) {
+      if (!meta.baseProjectRoot) continue
+      if (path.resolve(meta.projectRoot) === target) {
+        sessions.setStatus(meta.id, 'archived')
+      }
+    }
+    return list
   })
 
   rpc.on('git.worktree_preview', (_method, params) => {
@@ -1042,8 +1064,10 @@ async function main(): Promise<void> {
       stopTurn(getRuntime(p.sessionId)!)
       sessions.setStatus(p.sessionId, 'idle')
     }
+    // Always archive session even if git tree already gone (orphan after path ×).
     const result = gitWorktreeDiscard(meta.baseProjectRoot, meta.projectRoot, {
       deleteBranch: p.deleteBranch,
+      branchHint: meta.worktreeBranch,
     })
     sessions.setStatus(p.sessionId, 'archived')
     return { ...result, sessionId: p.sessionId }

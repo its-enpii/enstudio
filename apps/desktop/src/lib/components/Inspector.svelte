@@ -172,7 +172,10 @@
       .catch((err) => {
         if (!cancelled) {
           wtPreview = null
-          wtError = err instanceof Error ? err.message : String(err)
+          const raw = err instanceof Error ? err.message : String(err)
+          wtError = /worktree not found/i.test(raw)
+            ? 'Git worktree already removed (orphan session). Discard archives this chat.'
+            : raw
         }
       })
     return () => {

@@ -1225,11 +1225,14 @@ export async function discardWorktreeSession(opts: { confirmed?: boolean } = {})
     }
     const result = (await window.enpiistudio.enpii.request('session.worktree_discard', {
       sessionId: session.id,
-    })) as { deletedBranch?: string }
-    state.pushLog(
-      `[worktree] discarded${result.deletedBranch ? ` · deleted ${result.deletedBranch}` : ''}`,
-    )
-    state.notify('info', 'Worktree discarded', result.deletedBranch ?? 'Removed isolated tree')
+    })) as { deletedBranch?: string; alreadyGone?: boolean }
+    const note = result.alreadyGone
+      ? 'Orphan chat archived (tree was already gone)'
+      : result.deletedBranch
+        ? `Removed · deleted ${result.deletedBranch}`
+        : 'Removed isolated tree'
+    state.pushLog(`[worktree] discarded${result.alreadyGone ? ' · orphan' : ''}${result.deletedBranch ? ` · ${result.deletedBranch}` : ''}`)
+    state.notify('info', 'Worktree discarded', note)
     await newSession()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

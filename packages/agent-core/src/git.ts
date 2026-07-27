@@ -623,7 +623,11 @@ function resolveLinkedWorktree(root: string, worktreePath: string): { primary: s
   const primary = mainWorktreeRoot(root)
   const target = path.resolve(worktreePath)
   const entry = parseWorktreeList(primary).find((wt) => path.resolve(wt.path) === target)
-  if (!entry) throw new Error('worktree not found')
+  if (!entry) {
+    throw new Error(
+      `worktree not found: ${target} — git tree already removed; Discard archives the orphan session`,
+    )
+  }
   if (entry.main) throw new Error('main worktree has nothing to apply back')
   return { primary, entry }
 }
@@ -740,13 +744,46 @@ export function gitWorktreeApply(
   return { merged: ref, status: gitStatus(primary), removed, worktrees, keptBranch }
 }
 
-/** Force-remove worktree; optionally delete enpii/* branch. */
+/** Force-remove worktree; optionally delete enpii/* branch. Idempotent if tree already gone. */
 export function gitWorktreeDiscard(
   root: string,
   worktreePath: string,
-  opts: { deleteBranch?: boolean } = {},
-): { worktrees: GitWorktree[]; deletedBranch?: string } {
-  const { primary, entry } = resolveLinkedWorktree(root, worktreePath)
+  opts: { deleteBranch?: boolean; branchHint?: string } = {},
+): { worktrees: GitWorktree[]; deletedBranch?: string; alreadyGone?: boolean } {
+  const primary = mainWorktreeRoot(root)
+  const target = path.resolve(worktreePath)
+  const listed = parseWorktreeList(primary)
+  const entry = listed.find((wt) => path.resolve(wt.path) === target)
+
+  if (!entry) {
+    try {
+      runGit(primary, ['worktree', 'prune'])
+    } catch {
+      /* */
+    }
+    let deletedBranch: string | undefined
+    const hint = (opts.branchHint ?? '').replace(/^refs\/heads\//, '')
+    if (opts.deleteBranch !== false && hint.startsWith('enpii/')) {
+      try {
+        runGit(primary, ['branch', '-D', hint])
+        deletedBranch = hint
+      } catch {
+        /* */
+      }
+    }
+    // Drop leftover dir under managed home if present.
+    try {
+      const home = path.resolve(worktreeHome(primary))
+      if (target.startsWith(home + path.sep) && fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true })
+      }
+    } catch {
+      /* */
+    }
+    return { worktrees: parseWorktreeList(primary), deletedBranch, alreadyGone: true }
+  }
+  if (entry.main) throw new Error('cannot discard main worktree')
+
   const worktrees = gitWorktreeRemove(primary, entry.path, true)
   let deletedBranch: string | undefined
   if (opts.deleteBranch !== false && entry.branch?.startsWith('enpii/')) {
