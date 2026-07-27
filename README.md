@@ -119,7 +119,7 @@ Run focused checks before broad checks.
 - [x] Session persist / SQLite index / resume
 - [x] Settings · shell · terminal (PTY) · git · code · browser
 - [x] Worktree multi-agent (spawn / board / fan-out / apply-all)
-- [x] MCP client (stdio + HTTP) · SSH tunnels + interactive PTY · vendor CLI host
+- [x] MCP client (stdio + HTTP) tools/resources/prompts · SSH tunnels + interactive PTY · vendor CLI host
 - [x] TOML config · deny globs · memory toggle · layout per project · auto `.enpii/`
 - [x] Packaging scaffold (`electron-builder` + multi-target dist + signing env hooks)
 - [x] v1 agent: `web_fetch` / `web_search` (OpenHarness patterns, SSRF guard)

@@ -33,7 +33,14 @@ import {
   gitUnstageAll,
 } from '../git.js'
 import { memoryDelete, memorySearch, memoryWrite } from '../context.js'
-import { mcpCallTool, mcpListTools } from '../mcp.js'
+import {
+  mcpCallTool,
+  mcpGetPrompt,
+  mcpListPrompts,
+  mcpListResources,
+  mcpListTools,
+  mcpReadResource,
+} from '../mcp.js'
 import { webFetch, webSearch } from '../web.js'
 import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from '../tasks.js'
 
@@ -311,6 +318,70 @@ export async function runTool(
         try {
           const content = await mcpCallTool(root, server, tool, toolArgs)
           return ok(`mcp ${server}/${tool}`, content.slice(0, 100_000))
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
+      }
+      case 'mcp_list_resources': {
+        const server = typeof args.server === 'string' && args.server.trim() ? args.server.trim() : undefined
+        const resources = await mcpListResources(root, server)
+        return ok(
+          `mcp resources (${resources.length}${server ? ` @ ${server}` : ''})`,
+          JSON.stringify(
+            resources.map((r) => ({
+              server: r.server,
+              uri: r.uri,
+              name: r.name,
+              description: r.description,
+              mimeType: r.mimeType,
+            })),
+            null,
+            2,
+          ),
+        )
+      }
+      case 'mcp_read_resource': {
+        const server = String(args.server ?? '').trim()
+        const uri = String(args.uri ?? '').trim()
+        if (!server || !uri) return fail('mcp_read_resource requires server and uri')
+        try {
+          const content = await mcpReadResource(root, server, uri)
+          return ok(`mcp resource ${server}`, content.slice(0, 100_000))
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
+      }
+      case 'mcp_list_prompts': {
+        const server = typeof args.server === 'string' && args.server.trim() ? args.server.trim() : undefined
+        const prompts = await mcpListPrompts(root, server)
+        return ok(
+          `mcp prompts (${prompts.length}${server ? ` @ ${server}` : ''})`,
+          JSON.stringify(
+            prompts.map((p) => ({
+              server: p.server,
+              name: p.name,
+              description: p.description,
+              arguments: p.arguments,
+            })),
+            null,
+            2,
+          ),
+        )
+      }
+      case 'mcp_get_prompt': {
+        const server = String(args.server ?? '').trim()
+        const name = String(args.name ?? '').trim()
+        if (!server || !name) return fail('mcp_get_prompt requires server and name')
+        const promptArgs: Record<string, string> = {}
+        if (args.arguments && typeof args.arguments === 'object' && !Array.isArray(args.arguments)) {
+          for (const [k, v] of Object.entries(args.arguments as Record<string, unknown>)) {
+            if (v == null) continue
+            promptArgs[k] = String(v)
+          }
+        }
+        try {
+          const content = await mcpGetPrompt(root, server, name, promptArgs)
+          return ok(`mcp prompt ${server}/${name}`, content.slice(0, 100_000))
         } catch (err) {
           return fail(err instanceof Error ? err.message : String(err))
         }

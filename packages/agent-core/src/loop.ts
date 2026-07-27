@@ -176,7 +176,7 @@ Tools:
 - Git read: git_status, git_diff, git_history, git_branches, git_stashes, git_remotes, git_conflicts
 - Git write: git_stage, git_unstage, git_commit, git_branch, git_stash, git_fetch, git_pull, git_push, git_resolve_conflict (may need approval)
 - Shell: run_shell (non-interactive command in workspace; may need approval)
-- MCP: mcp_list_tools / mcp_call_tool (configured servers; call may need approval)
+- MCP: mcp_list_tools / mcp_call_tool; resources mcp_list_resources / mcp_read_resource; prompts mcp_list_prompts / mcp_get_prompt (call may need approval)
 For "where is X?" in large repos, prefer search_codebase before many greps.
 For docs/APIs/news outside the repo, use web_search then web_fetch — not shell curl.
 Write and shell tools may require user approval. Prefer edit_file for small changes.

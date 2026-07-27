@@ -17,7 +17,11 @@ import {
   isHttpMcpConfig,
   mcpHttpCallTool,
   mcpHttpDisconnectAll,
+  mcpHttpGetPrompt,
+  mcpHttpListPrompts,
+  mcpHttpListResources,
   mcpHttpListTools,
+  mcpHttpReadResource,
   type McpHttpServerConfig,
 } from './mcp-http.js'
 
@@ -41,6 +45,21 @@ export interface McpTool {
   name: string
   description?: string
   inputSchema?: Record<string, unknown>
+  server: string
+}
+
+export interface McpResource {
+  uri: string
+  name?: string
+  description?: string
+  mimeType?: string
+  server: string
+}
+
+export interface McpPrompt {
+  name: string
+  description?: string
+  arguments?: { name: string; description?: string; required?: boolean }[]
   server: string
 }
 
@@ -244,6 +263,66 @@ class McpSession {
     return body
   }
 
+  async listResources(): Promise<McpResource[]> {
+    await this.ready
+    try {
+      const result = (await this.request('resources/list', {})) as {
+        resources?: { uri: string; name?: string; description?: string; mimeType?: string }[]
+      }
+      return (result.resources ?? []).map((r) => ({
+        uri: r.uri,
+        name: r.name,
+        description: r.description,
+        mimeType: r.mimeType,
+        server: this.name,
+      }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/method not found|unknown|-32601/i.test(msg)) return []
+      throw err
+    }
+  }
+
+  async readResource(uri: string): Promise<string> {
+    await this.ready
+    const result = (await this.request('resources/read', { uri })) as {
+      contents?: { uri?: string; mimeType?: string; text?: string; blob?: string }[]
+    }
+    return formatResourceContents(result.contents)
+  }
+
+  async listPrompts(): Promise<McpPrompt[]> {
+    await this.ready
+    try {
+      const result = (await this.request('prompts/list', {})) as {
+        prompts?: {
+          name: string
+          description?: string
+          arguments?: { name: string; description?: string; required?: boolean }[]
+        }[]
+      }
+      return (result.prompts ?? []).map((p) => ({
+        name: p.name,
+        description: p.description,
+        arguments: p.arguments,
+        server: this.name,
+      }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/method not found|unknown|-32601/i.test(msg)) return []
+      throw err
+    }
+  }
+
+  async getPrompt(name: string, args?: Record<string, string>): Promise<string> {
+    await this.ready
+    const result = await this.request('prompts/get', {
+      name,
+      ...(args && Object.keys(args).length ? { arguments: args } : {}),
+    })
+    return formatPromptResult(result)
+  }
+
   close(): void {
     this.closed = true
     try {
@@ -311,6 +390,115 @@ export async function mcpCallTool(
   if (!cfg) throw new Error(`unknown mcp server: ${server}`)
   if (isHttpMcpConfig(cfg)) return mcpHttpCallTool(server, cfg, tool, args)
   return getSession(server, cfg).callTool(tool, args)
+}
+
+export async function mcpListResources(projectRoot?: string, serverName?: string): Promise<McpResource[]> {
+  const cfgs = loadMcpConfig(projectRoot)
+  const names = serverName ? [serverName] : Object.keys(cfgs)
+  const out: McpResource[] = []
+  for (const name of names) {
+    const cfg = cfgs[name]
+    if (!cfg) continue
+    try {
+      if (isHttpMcpConfig(cfg)) out.push(...(await mcpHttpListResources(name, cfg)))
+      else out.push(...(await getSession(name, cfg).listResources()))
+    } catch (err) {
+      console.error(`[mcp] list resources failed for ${name}`, err)
+    }
+  }
+  return out
+}
+
+export async function mcpReadResource(
+  projectRoot: string | undefined,
+  server: string,
+  uri: string,
+): Promise<string> {
+  const cfgs = loadMcpConfig(projectRoot)
+  const cfg = cfgs[server]
+  if (!cfg) throw new Error(`unknown mcp server: ${server}`)
+  if (!uri.trim()) throw new Error('resource uri required')
+  if (isHttpMcpConfig(cfg)) return mcpHttpReadResource(server, cfg, uri.trim())
+  return getSession(server, cfg).readResource(uri.trim())
+}
+
+export async function mcpListPrompts(projectRoot?: string, serverName?: string): Promise<McpPrompt[]> {
+  const cfgs = loadMcpConfig(projectRoot)
+  const names = serverName ? [serverName] : Object.keys(cfgs)
+  const out: McpPrompt[] = []
+  for (const name of names) {
+    const cfg = cfgs[name]
+    if (!cfg) continue
+    try {
+      if (isHttpMcpConfig(cfg)) out.push(...(await mcpHttpListPrompts(name, cfg)))
+      else out.push(...(await getSession(name, cfg).listPrompts()))
+    } catch (err) {
+      console.error(`[mcp] list prompts failed for ${name}`, err)
+    }
+  }
+  return out
+}
+
+export async function mcpGetPrompt(
+  projectRoot: string | undefined,
+  server: string,
+  name: string,
+  args?: Record<string, string>,
+): Promise<string> {
+  const cfgs = loadMcpConfig(projectRoot)
+  const cfg = cfgs[server]
+  if (!cfg) throw new Error(`unknown mcp server: ${server}`)
+  if (!name.trim()) throw new Error('prompt name required')
+  if (isHttpMcpConfig(cfg)) return mcpHttpGetPrompt(server, cfg, name.trim(), args)
+  return getSession(server, cfg).getPrompt(name.trim(), args)
+}
+
+function formatResourceContents(
+  contents?: { uri?: string; mimeType?: string; text?: string; blob?: string }[],
+): string {
+  if (!contents?.length) return '(empty resource)'
+  const parts: string[] = []
+  for (const c of contents) {
+    const head = [c.uri, c.mimeType].filter(Boolean).join(' · ')
+    if (typeof c.text === 'string') {
+      parts.push(head ? `${head}\n${c.text}` : c.text)
+      continue
+    }
+    if (typeof c.blob === 'string') {
+      parts.push(`${head || 'blob'}\n[binary base64 ${c.blob.length} chars]`)
+      continue
+    }
+    parts.push(JSON.stringify(c))
+  }
+  return parts.join('\n\n').slice(0, 100_000)
+}
+
+function formatPromptResult(result: unknown): string {
+  const r = result as {
+    description?: string
+    messages?: { role?: string; content?: unknown }[]
+  } | null
+  if (!r || typeof r !== 'object') return JSON.stringify(result)
+  const lines: string[] = []
+  if (r.description) lines.push(r.description)
+  for (const m of r.messages ?? []) {
+    const role = m.role ?? 'message'
+    let body = ''
+    if (typeof m.content === 'string') body = m.content
+    else if (Array.isArray(m.content)) {
+      body = m.content
+        .map((part) => {
+          if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: string }).text ?? '')
+          return JSON.stringify(part)
+        })
+        .filter(Boolean)
+        .join('\n')
+    } else if (m.content && typeof m.content === 'object' && 'text' in (m.content as object)) {
+      body = String((m.content as { text?: string }).text ?? '')
+    } else body = JSON.stringify(m.content ?? '')
+    lines.push(`[${role}]\n${body}`)
+  }
+  return (lines.join('\n\n') || JSON.stringify(result)).slice(0, 100_000)
 }
 
 /** Ensure sample mcp.json exists under ENPII home (comments only). */

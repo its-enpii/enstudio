@@ -16,6 +16,21 @@ export type McpHttpTool = {
   server: string
 }
 
+export type McpHttpResource = {
+  uri: string
+  name?: string
+  description?: string
+  mimeType?: string
+  server: string
+}
+
+export type McpHttpPrompt = {
+  name: string
+  description?: string
+  arguments?: { name: string; description?: string; required?: boolean }[]
+  server: string
+}
+
 const PROTOCOL = '2024-11-05'
 const TIMEOUT_MS = 30_000
 
@@ -171,6 +186,66 @@ class HttpMcpSession {
     return toolText(result)
   }
 
+  async listResources(): Promise<McpHttpResource[]> {
+    await this.ready
+    try {
+      const result = (await this.request('resources/list', {})) as {
+        resources?: { uri: string; name?: string; description?: string; mimeType?: string }[]
+      }
+      return (result.resources ?? []).map((r) => ({
+        uri: r.uri,
+        name: r.name,
+        description: r.description,
+        mimeType: r.mimeType,
+        server: this.name,
+      }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/method not found|unknown|-32601/i.test(msg)) return []
+      throw err
+    }
+  }
+
+  async readResource(uri: string): Promise<string> {
+    await this.ready
+    const result = (await this.request('resources/read', { uri })) as {
+      contents?: { uri?: string; mimeType?: string; text?: string; blob?: string }[]
+    }
+    return formatHttpResourceContents(result.contents)
+  }
+
+  async listPrompts(): Promise<McpHttpPrompt[]> {
+    await this.ready
+    try {
+      const result = (await this.request('prompts/list', {})) as {
+        prompts?: {
+          name: string
+          description?: string
+          arguments?: { name: string; description?: string; required?: boolean }[]
+        }[]
+      }
+      return (result.prompts ?? []).map((p) => ({
+        name: p.name,
+        description: p.description,
+        arguments: p.arguments,
+        server: this.name,
+      }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/method not found|unknown|-32601/i.test(msg)) return []
+      throw err
+    }
+  }
+
+  async getPrompt(name: string, args?: Record<string, string>): Promise<string> {
+    await this.ready
+    const result = await this.request('prompts/get', {
+      name,
+      ...(args && Object.keys(args).length ? { arguments: args } : {}),
+    })
+    return formatHttpPromptResult(result)
+  }
+
   close(): void {
     this.closed = true
   }
@@ -207,5 +282,74 @@ export async function mcpHttpCallTool(
   args: Record<string, unknown>,
 ): Promise<string> {
   return getHttpSession(name, cfg).callTool(tool, args)
+}
+
+export async function mcpHttpListResources(name: string, cfg: McpHttpServerConfig): Promise<McpHttpResource[]> {
+  return getHttpSession(name, cfg).listResources()
+}
+
+export async function mcpHttpReadResource(name: string, cfg: McpHttpServerConfig, uri: string): Promise<string> {
+  return getHttpSession(name, cfg).readResource(uri)
+}
+
+export async function mcpHttpListPrompts(name: string, cfg: McpHttpServerConfig): Promise<McpHttpPrompt[]> {
+  return getHttpSession(name, cfg).listPrompts()
+}
+
+export async function mcpHttpGetPrompt(
+  name: string,
+  cfg: McpHttpServerConfig,
+  prompt: string,
+  args?: Record<string, string>,
+): Promise<string> {
+  return getHttpSession(name, cfg).getPrompt(prompt, args)
+}
+
+function formatHttpResourceContents(
+  contents?: { uri?: string; mimeType?: string; text?: string; blob?: string }[],
+): string {
+  if (!contents?.length) return '(empty resource)'
+  const parts: string[] = []
+  for (const c of contents) {
+    const head = [c.uri, c.mimeType].filter(Boolean).join(' · ')
+    if (typeof c.text === 'string') {
+      parts.push(head ? `${head}\n${c.text}` : c.text)
+      continue
+    }
+    if (typeof c.blob === 'string') {
+      parts.push(`${head || 'blob'}\n[binary base64 ${c.blob.length} chars]`)
+      continue
+    }
+    parts.push(JSON.stringify(c))
+  }
+  return parts.join('\n\n').slice(0, 100_000)
+}
+
+function formatHttpPromptResult(result: unknown): string {
+  const r = result as {
+    description?: string
+    messages?: { role?: string; content?: unknown }[]
+  } | null
+  if (!r || typeof r !== 'object') return JSON.stringify(result)
+  const lines: string[] = []
+  if (r.description) lines.push(r.description)
+  for (const m of r.messages ?? []) {
+    const role = m.role ?? 'message'
+    let body = ''
+    if (typeof m.content === 'string') body = m.content
+    else if (Array.isArray(m.content)) {
+      body = m.content
+        .map((part) => {
+          if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: string }).text ?? '')
+          return JSON.stringify(part)
+        })
+        .filter(Boolean)
+        .join('\n')
+    } else if (m.content && typeof m.content === 'object' && 'text' in (m.content as object)) {
+      body = String((m.content as { text?: string }).text ?? '')
+    } else body = JSON.stringify(m.content ?? '')
+    lines.push(`[${role}]\n${body}`)
+  }
+  return (lines.join('\n\n') || JSON.stringify(result)).slice(0, 100_000)
 }
 

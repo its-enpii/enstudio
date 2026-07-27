@@ -771,6 +771,79 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'mcp_list_resources',
+      description:
+        'List MCP resources (uri + name) from configured servers. Optional server filter. Empty if server has no resources capability.',
+      parameters: {
+        type: 'object',
+        properties: {
+          server: {
+            type: 'string',
+            description: 'Optional MCP server id; omit to list all',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'mcp_read_resource',
+      description: 'Read one MCP resource by server + uri (text or blob placeholder). Prefer after mcp_list_resources.',
+      parameters: {
+        type: 'object',
+        properties: {
+          server: { type: 'string', description: 'MCP server id' },
+          uri: { type: 'string', description: 'Resource URI from list' },
+        },
+        required: ['server', 'uri'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'mcp_list_prompts',
+      description:
+        'List MCP prompt templates from configured servers. Optional server filter. Empty if unsupported.',
+      parameters: {
+        type: 'object',
+        properties: {
+          server: {
+            type: 'string',
+            description: 'Optional MCP server id; omit to list all',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'mcp_get_prompt',
+      description: 'Fetch one MCP prompt template (messages) by server + name; optional string arguments map.',
+      parameters: {
+        type: 'object',
+        properties: {
+          server: { type: 'string', description: 'MCP server id' },
+          name: { type: 'string', description: 'Prompt name from list' },
+          arguments: {
+            type: 'object',
+            description: 'Optional string argument map for the prompt',
+            additionalProperties: { type: 'string' },
+          },
+        },
+        required: ['server', 'name'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 export const WRITE_TOOL_NAMES = new Set([
@@ -812,6 +885,10 @@ export const PARALLEL_SAFE_TOOL_NAMES = new Set([
   'web_fetch',
   'web_search',
   'mcp_list_tools',
+  'mcp_list_resources',
+  'mcp_read_resource',
+  'mcp_list_prompts',
+  'mcp_get_prompt',
   'task_get',
   'task_list',
   'plan_tasks',
@@ -867,3 +944,7 @@ export type ToolName =
   | 'web_search'
   | 'mcp_list_tools'
   | 'mcp_call_tool'
+  | 'mcp_list_resources'
+  | 'mcp_read_resource'
+  | 'mcp_list_prompts'
+  | 'mcp_get_prompt'

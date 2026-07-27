@@ -34,8 +34,12 @@ import {
   loadMcpConfig,
   mcpCallTool,
   mcpDisconnectAll,
+  mcpGetPrompt,
+  mcpListPrompts,
+  mcpListResources,
   mcpListServers,
   mcpListTools,
+  mcpReadResource,
 } from './mcp.js'
 import {
   ensureSshConfigScaffold,
@@ -263,6 +267,55 @@ async function main(): Promise<void> {
       p.server.trim(),
       p.tool.trim(),
       p.arguments && typeof p.arguments === 'object' ? p.arguments : {},
+    )
+    return { content }
+  })
+
+  rpc.on('mcp.list_resources', async (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; server?: string }
+    const root = p.projectRoot ? path.resolve(p.projectRoot) : undefined
+    const resources = await mcpListResources(root, p.server)
+    return { resources }
+  })
+
+  rpc.on('mcp.read_resource', async (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; server?: string; uri?: string }
+    if (!p.server?.trim() || !p.uri?.trim()) throw new Error('server and uri are required')
+    const content = await mcpReadResource(
+      p.projectRoot ? path.resolve(p.projectRoot) : undefined,
+      p.server.trim(),
+      p.uri.trim(),
+    )
+    return { content }
+  })
+
+  rpc.on('mcp.list_prompts', async (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; server?: string }
+    const root = p.projectRoot ? path.resolve(p.projectRoot) : undefined
+    const prompts = await mcpListPrompts(root, p.server)
+    return { prompts }
+  })
+
+  rpc.on('mcp.get_prompt', async (_method, params) => {
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      server?: string
+      name?: string
+      arguments?: Record<string, unknown>
+    }
+    if (!p.server?.trim() || !p.name?.trim()) throw new Error('server and name are required')
+    const args: Record<string, string> = {}
+    if (p.arguments && typeof p.arguments === 'object') {
+      for (const [k, v] of Object.entries(p.arguments)) {
+        if (v == null) continue
+        args[k] = String(v)
+      }
+    }
+    const content = await mcpGetPrompt(
+      p.projectRoot ? path.resolve(p.projectRoot) : undefined,
+      p.server.trim(),
+      p.name.trim(),
+      args,
     )
     return { content }
   })

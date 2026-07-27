@@ -9,12 +9,18 @@ import {
   loadMcpConfig,
   mcpCallTool,
   mcpDisconnectAll,
+  mcpGetPrompt,
+  mcpListPrompts,
+  mcpListResources,
   mcpListTools,
+  mcpReadResource,
 } from './mcp.js'
 
 /** Tiny MCP-ish stdio server for tests (Content-Length framing). */
 const FAKE_SERVER = `
 const tools = [{ name: 'echo', description: 'echo args', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } }];
+const resources = [{ uri: 'memo://note', name: 'note', description: 'test note', mimeType: 'text/plain' }];
+const prompts = [{ name: 'greet', description: 'say hi', arguments: [{ name: 'who', required: true }] }];
 let buf = Buffer.alloc(0);
 function send(obj) {
   const body = JSON.stringify(obj);
@@ -34,7 +40,7 @@ process.stdin.on('data', (chunk) => {
     buf = buf.subarray(i + 4 + len);
     let msg; try { msg = JSON.parse(body); } catch { continue; }
     if (msg.method === 'initialize') {
-      send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '0' } } });
+      send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'fake', version: '0' } } });
     } else if (msg.method === 'notifications/initialized') {
       // no-op
     } else if (msg.method === 'tools/list') {
@@ -42,6 +48,16 @@ process.stdin.on('data', (chunk) => {
     } else if (msg.method === 'tools/call') {
       const text = String((msg.params && msg.params.arguments && msg.params.arguments.text) || 'hi');
       send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'echo:' + text }] } });
+    } else if (msg.method === 'resources/list') {
+      send({ jsonrpc: '2.0', id: msg.id, result: { resources } });
+    } else if (msg.method === 'resources/read') {
+      const uri = String((msg.params && msg.params.uri) || '');
+      send({ jsonrpc: '2.0', id: msg.id, result: { contents: [{ uri, mimeType: 'text/plain', text: 'body:' + uri }] } });
+    } else if (msg.method === 'prompts/list') {
+      send({ jsonrpc: '2.0', id: msg.id, result: { prompts } });
+    } else if (msg.method === 'prompts/get') {
+      const who = String((msg.params && msg.params.arguments && msg.params.arguments.who) || 'world');
+      send({ jsonrpc: '2.0', id: msg.id, result: { description: 'greet', messages: [{ role: 'user', content: { type: 'text', text: 'hello ' + who } }] } });
     } else if (msg.id != null) {
       send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'unknown' } });
     }
@@ -116,6 +132,17 @@ describe('mcp', () => {
     assert.ok(tools.some((t) => t.server === 'fake' && t.name === 'echo'))
     const out = await mcpCallTool(undefined, 'fake', 'echo', { text: 'ping' })
     assert.match(out, /echo:ping/)
+  })
+
+  it('lists/reads resources and prompts on stdio server', async () => {
+    const resources = await mcpListResources()
+    assert.ok(resources.some((r) => r.server === 'fake' && r.uri === 'memo://note'))
+    const body = await mcpReadResource(undefined, 'fake', 'memo://note')
+    assert.match(body, /body:memo:\/\/note/)
+    const prompts = await mcpListPrompts()
+    assert.ok(prompts.some((p) => p.server === 'fake' && p.name === 'greet'))
+    const prompt = await mcpGetPrompt(undefined, 'fake', 'greet', { who: 'enpii' })
+    assert.match(prompt, /hello enpii/)
   })
 })
 

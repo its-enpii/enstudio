@@ -61,11 +61,15 @@ export {
   loadMcpConfig,
   mcpCallTool,
   mcpDisconnectAll,
+  mcpGetPrompt,
+  mcpListPrompts,
+  mcpListResources,
   mcpListServers,
   mcpListTools,
+  mcpReadResource,
   mcpTransportOf,
 } from './mcp.js'
-export type { McpServerEntry, McpStdioServerConfig } from './mcp.js'
+export type { McpPrompt, McpResource, McpServerEntry, McpStdioServerConfig } from './mcp.js'
 export {
   isHttpMcpConfig,
   mcpHttpCallTool,

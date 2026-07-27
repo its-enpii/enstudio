@@ -161,7 +161,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 | Jail + approval + deny globs + session grants | strong |
 | Goal + verifier + repair + checkpoints | strong (LE maker/checker lite) |
 | Worktree multi-agent board / apply | partial (ClawTeam isolation; no mailbox) |
-| MCP stdio + HTTP tools/call | partial (no resources / OAuth) |
+| MCP stdio + HTTP tools/call + resources/prompts | partial (no OAuth) |
 | Web search / fetch | **shipped** (`web_fetch` / `web_search`, SSRF guard) |
 | In-loop `task_*` durable board | **shipped** (project `tasks.json`; not OH background procs) |
 | In-loop `agent` + `send_message` | **shipped** (sync nested turn in worktree; depth 1; UI fan-out still available) |
@@ -181,7 +181,7 @@ Ordered by impact for chat-default users; implement one phase at a time:
 3. **P1 Sub-agent** — ✅ in-loop `agent` / `send_message` (worktree jail, nested `runPromptTurn`, max depth 1).
 4. **P2 Plan + ask** — ✅ `enter_plan_mode` / `exit_plan_mode` hard-block mutations + `ask_user` (options/free-text UI, `session.answer`).
 5. **P2 Parallel tools** — ✅ contiguous `isParallelSafeTool` batch via `Promise.all` (order preserved in transcript).
-6. **P2 MCP depth** — resources + prompts; OAuth when a real server requires it.
+6. **P2 MCP depth** — ✅ resources + prompts (`mcp_list/read_resource`, `mcp_list/get_prompt`); OAuth later when needed.
 7. **P3 Schedule** — `cron_*` or host scheduler firing prompts (LE automations primitive; durable across restart).
 8. **P3 Swarm depth** — mailbox / task deps / team templates (ClawTeam) only after P1 sub-agent is solid.
 
