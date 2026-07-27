@@ -128,5 +128,5 @@ Run focused checks before broad checks.
 - [x] v1 agent: plan mode + ask_user mid-run
 - [x] v1 agent: parallel read-only tools per round
 - [x] v1 agent: durable `cron_*` schedule (sidecar ticker)
-- [ ] v1 agent: swarm mailbox (later)
+- [x] v1 agent: swarm file mailbox + task blockedBy
 - [ ] Signed installers when certs available (codesign / notarize / Authenticode)

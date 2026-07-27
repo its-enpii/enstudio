@@ -160,7 +160,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 | AGENT.md, skills on-demand, memory, smart compact | strong |
 | Jail + approval + deny globs + session grants | strong |
 | Goal + verifier + repair + checkpoints | strong (LE maker/checker lite) |
-| Worktree multi-agent board / apply | partial (ClawTeam isolation; no mailbox) |
+| Worktree multi-agent board / apply | partial (ClawTeam isolation + file mailbox; no P2P/templates) |
 | MCP stdio + HTTP tools/call + resources/prompts | partial (no OAuth) |
 | Web search / fetch | **shipped** (`web_fetch` / `web_search`, SSRF guard) |
 | In-loop `task_*` durable board | **shipped** (project `tasks.json`; not OH background procs) |
@@ -183,7 +183,7 @@ Ordered by impact for chat-default users; implement one phase at a time:
 5. **P2 Parallel tools** — ✅ contiguous `isParallelSafeTool` batch via `Promise.all` (order preserved in transcript).
 6. **P2 MCP depth** — ✅ resources + prompts (`mcp_list/read_resource`, `mcp_list/get_prompt`); OAuth later when needed.
 7. **P3 Schedule** — ✅ `cron_create|list|delete|toggle` + 15s sidecar ticker (durable `cron.json`; fires new session while enpii runs).
-8. **P3 Swarm depth** — mailbox / task deps / team templates (ClawTeam) only after P1 sub-agent is solid.
+8. **P3 Swarm depth** — ✅ file `mailbox_*` + task `blockedBy`; team templates / P2P later.
 
 ### Shell / ship (parallel, lower agent IQ)
 

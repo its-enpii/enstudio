@@ -64,6 +64,13 @@ export {
 } from './cron.js'
 export type { CronJob, DueCronJob } from './cron.js'
 export {
+  mailboxBroadcast,
+  mailboxPeek,
+  mailboxReceive,
+  mailboxSend,
+} from './mailbox.js'
+export type { MailMessage } from './mailbox.js'
+export {
   spawnSubAgent,
   messageSubAgent,
   stopSubAgent,

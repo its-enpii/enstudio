@@ -44,6 +44,7 @@ import {
 import { webFetch, webSearch } from '../web.js'
 import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from '../tasks.js'
 import { cronCreate, cronDelete, cronList, cronToggle } from '../cron.js'
+import { mailboxBroadcast, mailboxPeek, mailboxReceive, mailboxSend } from '../mailbox.js'
 
 const DEFAULT_READ = 120_000
 const DEFAULT_GLOB = 200
@@ -305,6 +306,34 @@ export async function runTool(
           typeof args.enabled === 'boolean' ? args.enabled : undefined,
         )
         return r.ok ? ok(`cron ${r.job.id}`, r.content) : fail(r.content)
+      }
+      case 'mailbox_send': {
+        const r = mailboxSend(root, {
+          to: typeof args.to === 'string' ? args.to : undefined,
+          from: typeof args.from === 'string' ? args.from : undefined,
+          content: typeof args.content === 'string' ? args.content : undefined,
+          message: typeof args.message === 'string' ? args.message : undefined,
+          type: typeof args.type === 'string' ? args.type : undefined,
+        })
+        return r.ok ? ok(`mail ${r.message.id}`, r.content) : fail(r.content)
+      }
+      case 'mailbox_inbox': {
+        const agent = String(args.agent ?? args.agentId ?? 'main')
+        const limit = typeof args.limit === 'number' ? args.limit : 20
+        const r =
+          args.peek === true
+            ? mailboxPeek(root, agent, limit)
+            : mailboxReceive(root, agent, limit)
+        return r.ok ? ok(`inbox ${r.messages.length}`, r.content) : fail(r.content)
+      }
+      case 'mailbox_broadcast': {
+        const r = mailboxBroadcast(root, {
+          from: typeof args.from === 'string' ? args.from : undefined,
+          content: typeof args.content === 'string' ? args.content : undefined,
+          message: typeof args.message === 'string' ? args.message : undefined,
+          agents: Array.isArray(args.agents) ? args.agents.map(String) : undefined,
+        })
+        return r.ok ? ok(`broadcast ${r.sent}`, r.content) : fail(r.content)
       }
       case 'web_fetch': {
         const r = await webFetch({
