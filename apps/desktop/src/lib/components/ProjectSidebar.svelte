@@ -44,15 +44,29 @@
   }
 </script>
 
-<aside class="sidebar panel flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border-subtle bg-studio-panel p-4">
-  <div class="brand-row">
-    <div class="brand-mark">E</div>
-    <div class="brand-title">enpiistudio</div>
+<aside
+  class="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border-subtle bg-studio-panel p-4"
+>
+  <div class="mb-4 flex items-center gap-3">
+    <div
+      class="grid size-8 place-items-center rounded-lg bg-studio-purple text-xs font-bold text-white"
+    >
+      E
+    </div>
+    <div class="text-sm font-semibold tracking-tight text-studio-text">enpiistudio</div>
   </div>
 
-  <div class="search-row">
-    <div class="search-box">
-      <svg class="search-ico" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+  <div class="mb-3 flex items-center gap-2">
+    <div
+      class="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-border-subtle bg-studio-dark px-3 py-1.5"
+    >
+      <svg
+        class="size-3.5 shrink-0 text-studio-text-dim"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
         <path
           d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
           stroke-linecap="round"
@@ -61,6 +75,7 @@
         ></path>
       </svg>
       <input
+        class="min-w-0 flex-1 bg-transparent text-xs text-studio-text outline-none placeholder:text-studio-text-dim"
         type="text"
         placeholder="Search projects..."
         bind:value={filter}
@@ -69,7 +84,7 @@
     </div>
     <button
       type="button"
-      class="btn-icon-open"
+      class="grid size-8 shrink-0 place-items-center rounded-full border border-border-subtle text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
       title="Open folder"
       aria-label="Open folder"
       onclick={openProject}
@@ -85,40 +100,52 @@
       </svg>
     </button>
   </div>
-  {#if openError}<div class="sidebar-error">{openError}</div>{/if}
+  {#if openError}
+    <div class="mb-2 rounded-md border border-danger/30 bg-danger-bg/40 px-2 py-1.5 text-[11px] text-danger">
+      {openError}
+    </div>
+  {/if}
 
-  <nav class="sidebar-nav custom-scrollbar">
+  <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto">
     {#if app.projects.length === 0}
-      <div class="empty">Open a folder to start</div>
+      <div class="px-1 py-6 text-center text-xs text-studio-text-dim">Open a folder to start</div>
     {:else if filtered.length === 0}
-      <div class="empty">No match</div>
+      <div class="px-1 py-6 text-center text-xs text-studio-text-dim">No match</div>
     {:else}
       {#each filtered as project (project.id)}
         <div
-          class="project-item"
-          class:active={app.activeProjectId === project.id}
+          class="cursor-pointer rounded-lg border px-2.5 py-2 transition-colors {app.activeProjectId ===
+          project.id
+            ? 'border-studio-purple/40 bg-studio-purple/15'
+            : 'border-transparent hover:border-border-subtle hover:bg-white/[0.03]'}"
           role="button"
           tabindex="0"
           onclick={() => onSelect(project.id)}
           onkeydown={(e) => e.key === 'Enter' && onSelect(project.id)}
         >
-          <div class="row">
-            <span class="name">{project.name}</span>
+          <div class="flex items-center gap-2">
+            <span class="min-w-0 flex-1 truncate text-[13px] font-medium text-studio-text"
+              >{project.name}</span
+            >
             <button
               type="button"
-              class="pin-btn"
-              class:on={project.pinned}
+              class="text-xs {project.pinned
+                ? 'text-studio-gold'
+                : 'text-studio-text-dim/40 hover:text-studio-gold'}"
               title={project.pinned ? 'Unpin' : 'Pin'}
               aria-label={project.pinned ? 'Unpin project' : 'Pin project'}
               onclick={(e) => onPin(e, project.id)}
             >★</button>
             <div
-              class="dot-gold"
-              class:dim={app.activeProjectId !== project.id}
+              class="size-1.5 shrink-0 rounded-full bg-studio-gold {app.activeProjectId !== project.id
+                ? 'opacity-30'
+                : ''}"
               title="project"
             ></div>
           </div>
-          <div class="path" title={project.path}>{project.path}</div>
+          <div class="mt-0.5 truncate font-mono text-[10px] text-studio-text-dim" title={project.path}>
+            {project.path}
+          </div>
         </div>
       {/each}
     {/if}

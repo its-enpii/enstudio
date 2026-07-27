@@ -1270,20 +1270,35 @@
 </script>
 
 <div
-  class="agent-shell"
+  class="relative col-start-1 row-span-full grid h-full min-h-0 {agentPane !== 'enpii'
+    ? 'grid-rows-[auto_minmax(0,1fr)_0fr]'
+    : 'grid-rows-[auto_minmax(0,1fr)_auto]'}"
   class:is-dragging={draggingFiles}
-  class:vendor-active={agentPane !== 'enpii'}
+  role="region"
+  aria-label="Agent stage"
   ondragenter={onDragEnter}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={onDrop}
 >
-  {#if draggingFiles}<div class="composer-drop-overlay agent-drop-overlay">Drop files to attach</div>{/if}
-  <div class="agent-model-tabs" role="tablist" aria-label="Agent model">
+  {#if draggingFiles}
+    <div
+      class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[inherit] border border-dashed border-[#897fff]/80 bg-[rgba(17,14,35,0.92)] text-[11px] text-[#c9c4ff]"
+    >
+      Drop files to attach
+    </div>
+  {/if}
+  <div
+    class="relative z-30 flex min-h-[34px] shrink-0 items-stretch gap-0.5 overflow-visible border-b border-border-subtle bg-[rgba(16,16,17,0.6)] px-2.5 pt-1.5"
+    role="tablist"
+    aria-label="Agent model"
+  >
     <button
       type="button"
-      class="agent-model-tab"
-      class:active={agentPane === 'enpii'}
+      class="cursor-pointer whitespace-nowrap border-0 bg-transparent px-3 py-1.5 text-xs font-medium {agentPane ===
+      'enpii'
+        ? 'text-white'
+        : 'text-studio-text-dim hover:text-white'}"
       role="tab"
       aria-selected={agentPane === 'enpii'}
       onclick={() => void selectAgentPane('enpii')}
@@ -1359,25 +1374,30 @@
     <div class="agent-vendor-host terminal-host" bind:this={vendorHost}></div>
   </div>
 <div
-  class="stage stage-fill custom-scrollbar"
-  class:hidden-pane={agentPane !== 'enpii'}
+  class="row-start-2 flex min-h-0 flex-col gap-8 overflow-y-auto p-6 {agentPane !== 'enpii'
+    ? 'hidden'
+    : ''}"
   bind:this={stageEl}
   onscroll={onStageScroll}
 >
   {#if !app.activeProject}
-    <div class="agent-empty">
-      <div class="mark">e</div>
-      <div class="enpii">enpii</div>
-      <div class="hint">Open a project from the left to start.</div>
+    <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
+      <div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-full bg-studio-purple text-sm font-bold text-white">e</div>
+        <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
+        <div class="mx-auto max-w-md text-[13px] leading-relaxed">Open a project from the left to start.</div>
+      </div>
     </div>
   {:else if app.messages.length === 0}
-    <div class="agent-empty">
-      <div class="mark">e</div>
-      <div class="enpii">enpii</div>
-      <div class="hint">
-        Ask anything about <strong style="color:#fff">{app.activeProject.name}</strong>.
-        <br />
-        Tools: list_dir · read_file · glob · grep · write_file · edit_file
+    <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
+      <div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-full bg-studio-purple text-sm font-bold text-white">e</div>
+        <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
+        <div class="mx-auto max-w-md text-[13px] leading-relaxed">
+          Ask anything about <strong class="text-white">{app.activeProject.name}</strong>.
+          <br />
+          Tools: list_dir · read_file · glob · grep · write_file · edit_file
+        </div>
       </div>
     </div>
   {:else}
@@ -1686,9 +1706,14 @@
   {/if}
 </div>
 
-<footer class="composer" class:hidden-pane={agentPane !== 'enpii'}>
-  <div class="composer-inner" role="group" aria-label="Message composer">
+<footer class="row-start-3 shrink-0 px-6 pb-6 pt-2 {agentPane !== 'enpii' ? 'hidden' : ''}">
+  <div
+    class="composer-inner relative flex flex-col gap-4 rounded-3xl border border-border-subtle bg-studio-dark/50 p-4"
+    role="group"
+    aria-label="Message composer"
+  >
     <textarea
+      class="min-h-[60px] w-full resize-none bg-transparent text-sm text-studio-text outline-none placeholder:text-studio-text-dim disabled:opacity-45"
       rows="3"
       bind:this={composerEl}
       placeholder={app.activeProject
@@ -1704,18 +1729,24 @@
       onblur={onComposerBlur}
       disabled={!app.activeProject || app.busy}
     ></textarea>
-    <div class="composer-bar">
-      <div class="composer-tools">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3 text-studio-text-dim">
         <SmartSelect
           value={app.composerMode}
           options={[...COMPOSER_MODES]}
           ariaLabel="Composer mode"
           title="Shift+Tab: cycle composer mode"
-          class="composer-mode-picker"
+          class="w-[92px] min-w-0 [&_button]:min-h-7 [&_button]:rounded-full [&_button]:border-studio-purple/30 [&_button]:bg-studio-purple/15 [&_button]:px-2 [&_button]:py-1 [&_button]:text-[9px] [&_button]:text-[#bcb6ff]"
           disabled={app.busy}
           onChange={(value) => void changeComposerMode(value)}
         />
-        <button type="button" title="Attach files" aria-label="Attach files" onclick={() => void attachFiles()}>
+        <button
+          type="button"
+          class="text-studio-text-dim hover:text-white disabled:opacity-45"
+          title="Attach files"
+          aria-label="Attach files"
+          onclick={() => void attachFiles()}
+        >
           <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
@@ -1726,14 +1757,17 @@
           </svg>
         </button>
         {#if app.attachments.length}
-          <span class="attachment-budget" title={app.attachments.map((f) => f.name).join(', ')}>
+          <span
+            class="whitespace-nowrap text-[8px] text-white/30"
+            title={app.attachments.map((f) => f.name).join(', ')}
+          >
             {app.attachments.length} file{app.attachments.length === 1 ? '' : 's'} · ~{attachmentTokens().toLocaleString()} tok
           </span>
         {/if}
       </div>
       <button
         type="button"
-        class="btn-send"
+        class="flex items-center gap-2 rounded-full bg-studio-gold px-4 py-2 pl-5 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
         onclick={onSend}
         disabled={!app.activeProject || app.busy}
       >

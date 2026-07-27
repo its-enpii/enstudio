@@ -25,95 +25,36 @@
     children?: Snippet
     onclick?: HTMLButtonAttributes['onclick']
   } & Omit<HTMLButtonAttributes, 'type' | 'disabled' | 'onclick' | 'class'> = $props()
+
+  const base =
+    'inline-flex items-center justify-center gap-2 rounded-sm font-medium border border-transparent whitespace-nowrap transition-[filter,background,border-color,color] duration-100'
+  const sizes: Record<Size, string> = {
+    sm: 'text-[11px] px-2.5 py-1',
+    md: 'text-[13px] px-4 py-2',
+  }
+  const variants: Record<Variant, string> = {
+    primary: 'bg-studio-purple text-white hover:brightness-110 disabled:hover:brightness-100',
+    secondary:
+      'bg-transparent text-studio-text border-studio-purple/45 hover:border-studio-purple/80 hover:bg-studio-purple/12',
+    ghost: 'bg-transparent text-studio-text-dim hover:text-white hover:bg-white/5',
+    danger: 'bg-danger-bg text-danger border-danger/25 hover:brightness-110',
+  }
 </script>
 
 <button
-  class="ui-btn ui-btn-{variant} ui-btn-{size} {className}"
+  class="{base} {sizes[size]} {variants[variant]} {className}"
   {type}
   disabled={disabled || loading}
   {onclick}
   {...rest}
 >
   {#if loading}
-    <span class="ui-btn-spin" aria-hidden="true"></span>
+    <span
+      class="size-3 rounded-full border-2 border-current border-r-transparent animate-spin"
+      aria-hidden="true"
+    ></span>
   {/if}
   {#if children}
     {@render children()}
   {/if}
 </button>
-
-<style>
-  .ui-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border-radius: 8px;
-    font-weight: 500;
-    border: 1px solid transparent;
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      filter 0.12s,
-      background 0.12s,
-      border-color 0.12s,
-      color 0.12s;
-  }
-  .ui-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  .ui-btn-sm {
-    font-size: 11px;
-    padding: 4px 10px;
-  }
-  .ui-btn-md {
-    font-size: 13px;
-    padding: 8px 16px;
-  }
-  .ui-btn-primary {
-    background: var(--studio-purple);
-    color: #fff;
-  }
-  .ui-btn-primary:hover:not(:disabled) {
-    filter: brightness(1.1);
-  }
-  .ui-btn-secondary {
-    background: transparent;
-    color: var(--studio-text);
-    border-color: rgba(61, 52, 139, 0.45);
-  }
-  .ui-btn-secondary:hover:not(:disabled) {
-    border-color: rgba(61, 52, 139, 0.8);
-    background: rgba(61, 52, 139, 0.12);
-  }
-  .ui-btn-ghost {
-    background: transparent;
-    color: var(--studio-text-dim);
-  }
-  .ui-btn-ghost:hover:not(:disabled) {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .ui-btn-danger {
-    background: rgba(147, 0, 10, 0.35);
-    color: #ffb4ab;
-    border-color: rgba(255, 180, 171, 0.25);
-  }
-  .ui-btn-danger:hover:not(:disabled) {
-    filter: brightness(1.1);
-  }
-  .ui-btn-spin {
-    width: 12px;
-    height: 12px;
-    border: 2px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: ui-spin 0.7s linear infinite;
-  }
-  @keyframes ui-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-</style>

@@ -5,26 +5,43 @@
 </script>
 
 <header
-  class="topnav flex h-14 items-center justify-between rounded-2xl border border-border-subtle bg-studio-card/70 px-6 backdrop-blur-md"
+  class="flex h-14 shrink-0 items-center justify-between rounded-2xl border border-border-subtle bg-studio-card/70 px-6 backdrop-blur-md"
 >
-  <div class="topnav-left flex items-center gap-3 min-w-0">
-    <div class="mac-window-dots" aria-hidden="true">
-      <span class="mac-dot red"></span><span class="mac-dot yellow"></span><span class="mac-dot green"></span>
+  <div class="flex min-w-0 items-center gap-3">
+    <div class="flex items-center gap-1.5" aria-hidden="true">
+      <span class="size-2.5 rounded-full bg-[#ff5f57]"></span>
+      <span class="size-2.5 rounded-full bg-[#febc2e]"></span>
+      <span class="size-2.5 rounded-full bg-[#28c840]"></span>
     </div>
-    <button type="button" class="icon-ghost" title="Back" aria-label="Back">
+    <button
+      type="button"
+      class="grid place-items-center rounded-full p-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
+      title="Back"
+      aria-label="Back"
+    >
       <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path d="M10 19l-7-7m0 0l7-7m-7 7h18" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+        <path
+          d="M10 19l-7-7m0 0l7-7m-7 7h18"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+        ></path>
       </svg>
     </button>
-    <span class="topnav-project truncate text-sm text-studio-text-dim">{state.activeProject?.name ?? 'No project'}</span>
+    <span class="truncate text-sm text-studio-text-dim"
+      >{state.activeProject?.name ?? 'No project'}</span
+    >
   </div>
 
-  <div class="mode-group flex items-center gap-1 rounded-full border border-border-subtle bg-studio-dark/60 p-1">
+  <div
+    class="flex items-center gap-1 rounded-full border border-border-subtle bg-black/30 p-1 text-xs font-medium"
+  >
     {#each MODES as m}
       <button
         type="button"
-        class="mode rounded-full px-3 py-1.5 text-xs font-medium text-studio-text-dim transition-colors hover:text-studio-text"
-        class:active={state.mode === m.id}
+        class="rounded-full px-4 py-1 transition-colors {state.mode === m.id
+          ? 'bg-studio-purple text-white'
+          : 'text-studio-text-dim hover:text-white'}"
         onclick={() => state.setMode(m.id)}
       >
         {m.label}
@@ -32,23 +49,34 @@
     {/each}
   </div>
 
-  <div class="topnav-right flex items-center gap-2">
+  <div class="flex items-center gap-2">
     <button
       type="button"
-      class="icon-ghost notification-trigger relative"
-      class:active={state.notificationsOpen}
+      class="relative grid place-items-center rounded-full p-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text {state.notificationsOpen
+        ? 'text-studio-text'
+        : ''}"
       title="Notifications"
       aria-label="Notifications"
       onclick={() => state.toggleNotifications()}
     >
       <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .53-.21 1.04-.59 1.41L4 17h5m6 0a3 3 0 01-6 0h6z"></path>
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .53-.21 1.04-.59 1.41L4 17h5m6 0a3 3 0 01-6 0h6z"
+        ></path>
       </svg>
-      {#if unreadNotifications}<span class="notification-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span>{/if}
+      {#if unreadNotifications}
+        <span
+          class="absolute -right-0.5 -top-0.5 min-w-3.5 rounded-full bg-studio-gold px-1 text-center text-[9px] font-bold leading-[14px] text-black"
+          >{unreadNotifications > 9 ? '9+' : unreadNotifications}</span
+        >
+      {/if}
     </button>
     <button
       type="button"
-      class="icon-ghost"
+      class="grid place-items-center rounded-full p-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
       title="Settings"
       aria-label="Settings"
       onclick={() => (state.settingsOpen = true)}
@@ -68,8 +96,11 @@
         ></path>
       </svg>
     </button>
-    <div class="avatar" title={state.activeProject?.name ?? 'No project'}>
-      <div class="avatar-dot"></div>
+    <div
+      class="relative size-7 overflow-hidden rounded-full border border-border-subtle bg-studio-grey"
+      title={state.activeProject?.name ?? 'No project'}
+    >
+      <div class="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-studio-gold"></div>
     </div>
   </div>
 </header>

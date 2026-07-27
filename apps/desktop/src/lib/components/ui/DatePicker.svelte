@@ -87,14 +87,11 @@
     const gap = 6
     let top = r.bottom + gap
     let left = r.left
-    // flip up if not enough space below
     if (top + PANEL_H > vh - 8 && r.top - gap - PANEL_H > 8) {
       top = r.top - gap - PANEL_H
     }
-    // clamp horizontal
     if (left + PANEL_W > vw - 8) left = Math.max(8, vw - PANEL_W - 8)
     if (left < 8) left = 8
-    // final vertical clamp
     if (top + PANEL_H > vh - 8) top = Math.max(8, vh - PANEL_H - 8)
     if (top < 8) top = 8
     panelStyle = `top:${Math.round(top)}px;left:${Math.round(left)}px;width:${PANEL_W}px`
@@ -135,20 +132,20 @@
   const today = new Date()
 </script>
 
-<svelte:window
-  onclick={onDoc}
-  onscroll={onScrollOrResize}
-  onresize={onScrollOrResize}
-/>
+<svelte:window onclick={onDoc} onscroll={onScrollOrResize} onresize={onScrollOrResize} />
 
-<div class="ui-field {className}" class:has-error={Boolean(error)} class:is-open={open} bind:this={rootEl}>
+<div class="relative flex min-w-0 flex-col gap-1.5 {className}" bind:this={rootEl}>
   {#if label}
-    <span class="ui-label">{label}</span>
+    <span class="text-xs font-medium text-studio-text-dim">{label}</span>
   {/if}
 
   <button
     type="button"
-    class="ui-date-trigger"
+    class="flex min-h-[38px] w-full items-center justify-between gap-2 rounded-sm border bg-studio-dark px-3 py-2 text-[13px] text-studio-text hover:border-studio-purple/35 disabled:opacity-50 {error
+      ? 'border-danger/45'
+      : open
+        ? 'border-studio-purple/70'
+        : 'border-border-subtle'}"
     bind:this={triggerEl}
     {disabled}
     onclick={(e) => {
@@ -156,8 +153,8 @@
       openCal()
     }}
   >
-    <span class="val" class:placeholder={!display}>{display || 'Pick a date'}</span>
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <span class={display ? '' : 'text-studio-text-dim/55'}>{display || 'Pick a date'}</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="text-studio-text-dim">
       <path
         d="M8 7V3m8 4V3M3 11h18M5 5h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"
         stroke="currentColor"
@@ -171,7 +168,7 @@
   {#if open}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="ui-cal"
+      class="fixed z-[200] rounded-md border border-studio-purple/35 bg-studio-card p-3 shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
       role="dialog"
       aria-label="Calendar"
       tabindex="-1"
@@ -180,186 +177,64 @@
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
     >
-      <div class="ui-cal-head">
-        <button type="button" class="nav" onclick={() => shiftMonth(-1)} aria-label="Previous month"
-          >‹</button
+      <div class="mb-2.5 flex items-center justify-between">
+        <button
+          type="button"
+          class="grid size-7 place-items-center rounded-sm text-lg leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
+          onclick={() => shiftMonth(-1)}
+          aria-label="Previous month">‹</button
         >
-        <span class="month">{monthLabel}</span>
-        <button type="button" class="nav" onclick={() => shiftMonth(1)} aria-label="Next month"
-          >›</button
+        <span class="text-[13px] font-semibold text-studio-text">{monthLabel}</span>
+        <button
+          type="button"
+          class="grid size-7 place-items-center rounded-sm text-lg leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
+          onclick={() => shiftMonth(1)}
+          aria-label="Next month">›</button
         >
       </div>
-      <div class="ui-cal-week">
+      <div class="mb-1 grid grid-cols-7 gap-0.5 text-center text-[10px] font-medium text-studio-text-dim">
         {#each WEEK as w}
           <span>{w}</span>
         {/each}
       </div>
-      <div class="ui-cal-grid">
+      <div class="grid grid-cols-7 gap-0.5">
         {#each cells as c}
           <button
             type="button"
-            class="day"
-            class:out={!c.inMonth}
-            class:today={sameDay(c.date, today)}
-            class:sel={selected && sameDay(c.date, selected)}
+            class="aspect-square rounded-sm text-xs tabular-nums hover:bg-studio-purple/25 {!c.inMonth
+              ? 'text-studio-text-dim/40'
+              : 'text-studio-text'} {selected && sameDay(c.date, selected)
+              ? 'bg-studio-purple text-white hover:bg-studio-purple'
+              : ''} {sameDay(c.date, today) && !(selected && sameDay(c.date, selected))
+              ? 'shadow-[inset_0_0_0_1px_rgba(230,175,46,0.55)]'
+              : ''}"
             onclick={() => pick(c.date)}
           >
             {c.date.getDate()}
           </button>
         {/each}
       </div>
-      <div class="ui-cal-foot">
+      <div class="mt-2 flex justify-between border-t border-border-subtle pt-2">
         <button
           type="button"
-          class="link"
+          class="rounded px-1.5 py-1 text-[11px] text-studio-text-dim hover:bg-white/5 hover:text-white"
           onclick={() => {
             value = ''
             open = false
           }}>Clear</button
         >
-        <button type="button" class="link" onclick={() => pick(new Date())}>Today</button>
+        <button
+          type="button"
+          class="rounded px-1.5 py-1 text-[11px] text-studio-text-dim hover:bg-white/5 hover:text-white"
+          onclick={() => pick(new Date())}>Today</button
+        >
       </div>
     </div>
   {/if}
 
   {#if error}
-    <span class="ui-hint err">{error}</span>
+    <span class="text-[11px] text-danger">{error}</span>
   {:else if hint}
-    <span class="ui-hint">{hint}</span>
+    <span class="text-[11px] text-studio-text-dim">{hint}</span>
   {/if}
 </div>
-
-<style>
-  .ui-field {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-  .ui-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--studio-text-dim);
-  }
-  .ui-date-trigger {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    min-height: 38px;
-    background: var(--studio-dark);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 13px;
-    color: var(--studio-text);
-  }
-  .ui-date-trigger:hover:not(:disabled) {
-    border-color: rgba(61, 52, 139, 0.35);
-  }
-  .ui-date-trigger:disabled {
-    opacity: 0.5;
-  }
-  .is-open .ui-date-trigger {
-    border-color: rgba(61, 52, 139, 0.7);
-  }
-  .val.placeholder {
-    color: rgba(142, 142, 142, 0.55);
-  }
-  /* fixed — escapes overflow:auto ancestors */
-  .ui-cal {
-    position: fixed;
-    z-index: 200;
-    background: #141414;
-    border: 1px solid rgba(61, 52, 139, 0.35);
-    border-radius: 12px;
-    padding: 12px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  }
-  .ui-cal-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-  }
-  .month {
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .nav {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    color: var(--studio-text-dim);
-    font-size: 18px;
-    line-height: 1;
-  }
-  .nav:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: #fff;
-  }
-  .ui-cal-week {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
-    margin-bottom: 4px;
-    text-align: center;
-    font-size: 10px;
-    color: var(--studio-text-dim);
-    font-weight: 500;
-  }
-  .ui-cal-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
-  }
-  .day {
-    aspect-ratio: 1;
-    border-radius: 8px;
-    font-size: 12px;
-    color: var(--studio-text);
-    font-variant-numeric: tabular-nums;
-  }
-  .day:hover {
-    background: rgba(61, 52, 139, 0.25);
-  }
-  .day.out {
-    color: rgba(142, 142, 142, 0.4);
-  }
-  .day.today {
-    box-shadow: inset 0 0 0 1px rgba(230, 175, 46, 0.55);
-  }
-  .day.sel {
-    background: var(--studio-purple);
-    color: #fff;
-  }
-  .ui-cal-foot {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-subtle);
-  }
-  .link {
-    font-size: 11px;
-    color: var(--studio-text-dim);
-    padding: 4px 6px;
-    border-radius: 6px;
-  }
-  .link:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .ui-hint {
-    font-size: 11px;
-    color: var(--studio-text-dim);
-  }
-  .ui-hint.err {
-    color: #ffb4ab;
-  }
-  .has-error .ui-date-trigger {
-    border-color: rgba(255, 180, 171, 0.45);
-  }
-</style>

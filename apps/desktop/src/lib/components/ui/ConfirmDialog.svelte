@@ -51,25 +51,43 @@
 
 {#if open}
   <div
-    class="confirm-backdrop"
+    class="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4"
     role="presentation"
     onclick={(e) => {
       if (e.target === e.currentTarget) cancel()
     }}
   >
-    <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="ui-confirm-title">
-      <div class="confirm-icon">!</div>
-      <div class="confirm-copy">
-        <div id="ui-confirm-title" class="confirm-title">{title}</div>
+    <div
+      class="w-full max-w-sm rounded-xl border border-border-subtle bg-studio-card p-5 shadow-2xl"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ui-confirm-title"
+    >
+      <div class="mb-3 flex size-9 items-center justify-center rounded-full bg-studio-gold/15 text-sm font-bold text-studio-gold">
+        !
+      </div>
+      <div class="mb-4">
+        <div id="ui-confirm-title" class="text-sm font-semibold text-studio-text">{title}</div>
         {#if children}
-          <div class="confirm-message">{@render children()}</div>
+          <div class="mt-1.5 text-xs leading-relaxed text-studio-text-dim">{@render children()}</div>
         {:else if message}
-          <div class="confirm-message">{message}</div>
+          <div class="mt-1.5 text-xs leading-relaxed text-studio-text-dim">{message}</div>
         {/if}
       </div>
-      <div class="confirm-actions">
-        <button bind:this={cancelBtn} type="button" class="confirm-cancel" onclick={cancel}>{cancelLabel}</button>
-        <button type="button" class={danger ? 'confirm-danger' : ''} onclick={confirm}>{confirmLabel}</button>
+      <div class="flex justify-end gap-2">
+        <button
+          bind:this={cancelBtn}
+          type="button"
+          class="rounded-full border border-border-subtle px-3 py-1.5 text-xs text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
+          onclick={cancel}>{cancelLabel}</button
+        >
+        <button
+          type="button"
+          class="rounded-full px-3 py-1.5 text-xs font-medium {danger
+            ? 'bg-danger-bg text-danger border border-danger/25'
+            : 'bg-studio-purple text-white'}"
+          onclick={confirm}>{confirmLabel}</button
+        >
       </div>
     </div>
   </div>

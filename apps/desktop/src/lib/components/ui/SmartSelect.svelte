@@ -122,20 +122,20 @@
   }
 </script>
 
-<svelte:window
-  onclick={onDoc}
-  onscroll={onScrollOrResize}
-  onresize={onScrollOrResize}
-/>
+<svelte:window onclick={onDoc} onscroll={onScrollOrResize} onresize={onScrollOrResize} />
 
-<div class="ui-field {className}" class:has-error={Boolean(error)} class:is-open={open} bind:this={rootEl}>
+<div class="relative flex min-w-0 flex-col gap-1.5 {className}" bind:this={rootEl}>
   {#if label}
-    <span class="ui-label" id="{label}-lbl">{label}</span>
+    <span class="text-xs font-medium text-studio-text-dim" id="{label}-lbl">{label}</span>
   {/if}
 
   <button
     type="button"
-    class="ui-select-trigger"
+    class="flex min-h-[38px] w-full items-center justify-between gap-2 rounded-sm border bg-studio-dark px-3 py-2 text-left text-[13px] text-studio-text hover:border-studio-purple/35 focus-visible:border-studio-purple/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 {error
+      ? 'border-danger/45'
+      : open
+        ? 'border-studio-purple/70'
+        : 'border-border-subtle'}"
     bind:this={triggerEl}
     {disabled}
     aria-haspopup="listbox"
@@ -148,10 +148,19 @@
       toggle()
     }}
   >
-    <span class="ui-select-value" class:placeholder={!selected}>
+    <span class="truncate {selected ? '' : 'text-studio-text-dim/55'}">
       {selected?.label ?? placeholder}
     </span>
-    <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg
+      class="size-3.5 shrink-0 text-studio-text-dim transition-transform duration-150 {open
+        ? 'rotate-180'
+        : ''}"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
       <path
         d="M6 9l6 6 6-6"
         stroke="currentColor"
@@ -164,7 +173,7 @@
 
   {#if open}
     <div
-      class="ui-select-menu"
+      class="fixed z-[200] overflow-y-auto rounded-[10px] border border-studio-purple/35 bg-studio-card p-1 shadow-[0_16px_40px_rgba(0,0,0,0.55)] outline-none"
       role="listbox"
       tabindex="-1"
       bind:this={listEl}
@@ -174,18 +183,19 @@
       {#each options as opt, i (opt.value)}
         <button
           type="button"
-          class="ui-select-option"
-          class:active={i === activeIdx}
-          class:selected={opt.value === value}
+          class="flex w-full flex-col gap-0.5 rounded-sm px-2.5 py-2 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 {opt.value ===
+          value
+            ? 'text-white'
+            : 'text-studio-text'} {i === activeIdx ? 'bg-studio-purple/25' : 'hover:bg-studio-purple/25'}"
           role="option"
           aria-selected={opt.value === value}
           disabled={opt.disabled}
           onmouseenter={() => (activeIdx = i)}
           onclick={() => pick(opt)}
         >
-          <span class="opt-label">{opt.label}</span>
+          <span class="font-medium">{opt.label}</span>
           {#if opt.description}
-            <span class="opt-desc">{opt.description}</span>
+            <span class="text-[11px] text-studio-text-dim">{opt.description}</span>
           {/if}
         </button>
       {/each}
@@ -193,119 +203,8 @@
   {/if}
 
   {#if error}
-    <span class="ui-hint err">{error}</span>
+    <span class="text-[11px] text-danger">{error}</span>
   {:else if hint}
-    <span class="ui-hint">{hint}</span>
+    <span class="text-[11px] text-studio-text-dim">{hint}</span>
   {/if}
 </div>
-
-<style>
-  .ui-field {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-  .ui-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--studio-text-dim);
-  }
-  .ui-select-trigger {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    min-height: 38px;
-    text-align: left;
-    background: var(--studio-dark);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 13px;
-    color: var(--studio-text);
-  }
-  .ui-select-trigger:hover:not(:disabled) {
-    border-color: rgba(61, 52, 139, 0.35);
-  }
-  .ui-select-trigger:focus-visible {
-    outline: none;
-    border-color: rgba(61, 52, 139, 0.7);
-  }
-  .ui-select-trigger:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  .is-open .ui-select-trigger {
-    border-color: rgba(61, 52, 139, 0.7);
-  }
-  .ui-select-value {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ui-select-value.placeholder {
-    color: rgba(142, 142, 142, 0.55);
-  }
-  .chev {
-    flex-shrink: 0;
-    color: var(--studio-text-dim);
-    transition: transform 0.15s;
-  }
-  .is-open .chev {
-    transform: rotate(180deg);
-  }
-  .ui-select-menu {
-    position: fixed;
-    z-index: 200;
-    overflow-y: auto;
-    background: #141414;
-    border: 1px solid rgba(61, 52, 139, 0.35);
-    border-radius: 10px;
-    padding: 4px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-    outline: none;
-  }
-  .ui-select-option {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    width: 100%;
-    text-align: left;
-    padding: 8px 10px;
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--studio-text);
-    background: transparent;
-  }
-  .ui-select-option:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-  .ui-select-option.active,
-  .ui-select-option:hover:not(:disabled) {
-    background: rgba(61, 52, 139, 0.25);
-  }
-  .ui-select-option.selected {
-    color: #fff;
-  }
-  .opt-label {
-    font-weight: 500;
-  }
-  .opt-desc {
-    font-size: 11px;
-    color: var(--studio-text-dim);
-  }
-  .ui-hint {
-    font-size: 11px;
-    color: var(--studio-text-dim);
-  }
-  .ui-hint.err {
-    color: #ffb4ab;
-  }
-  .has-error .ui-select-trigger {
-    border-color: rgba(255, 180, 171, 0.45);
-  }
-</style>

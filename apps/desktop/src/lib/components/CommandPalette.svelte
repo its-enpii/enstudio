@@ -93,7 +93,6 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    // Palette always opens (even from inputs); other bindings skip typing targets.
     if (matchesKeybinding(event, app.keybindings.palette)) {
       event.preventDefault()
       open = true
@@ -108,7 +107,6 @@
         event.preventDefault()
         action.run()
       }
-      // Approval shortcuts when not typing
       if (app.pendingApprovals.length) {
         const key = event.key.toLowerCase()
         if (key === 'y' && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -149,32 +147,46 @@
 
 {#if open}
   <div
-    class="command-backdrop"
+    class="fixed inset-0 z-[250] flex items-start justify-center bg-black/55 pt-[15vh]"
     role="presentation"
     onclick={(event) => {
       if (event.target === event.currentTarget) close()
     }}
   >
-    <div class="command-palette" role="dialog" aria-modal="true" aria-label="Command Palette">
+    <div
+      class="w-full max-w-lg overflow-hidden rounded-xl border border-border-subtle bg-studio-card shadow-2xl"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command Palette"
+    >
       <input
+        class="w-full border-b border-border-subtle bg-transparent px-4 py-3 text-sm text-studio-text outline-none placeholder:text-studio-text-dim"
         bind:this={input}
         bind:value={query}
         placeholder="Search commands…"
         aria-label="Search commands"
       />
-      <div class="command-list">
-        {#if filtered.length === 0}<div class="command-empty">No matching command.</div>{/if}
+      <div class="max-h-72 overflow-y-auto p-1.5">
+        {#if filtered.length === 0}
+          <div class="px-3 py-6 text-center text-xs text-studio-text-dim">No matching command.</div>
+        {/if}
         {#each filtered as action, index (action.id)}
           <button
             type="button"
-            class:active={index === active}
+            class="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm {index === active
+              ? 'bg-studio-purple/30 text-white'
+              : 'text-studio-text hover:bg-white/5'}"
             onclick={() => execute(action)}
             onmouseenter={() => (active = index)}
-            ><span>{action.label}</span><small>{app.keybindings[action.id]}</small></button
           >
+            <span>{action.label}</span>
+            <small class="font-mono text-[10px] text-studio-text-dim">{app.keybindings[action.id]}</small>
+          </button>
         {/each}
       </div>
-      <footer>
+      <footer
+        class="flex gap-4 border-t border-border-subtle px-3 py-2 text-[10px] text-studio-text-dim"
+      >
         <span>↑↓ Navigate</span><span>Enter Run</span><span>Esc Close</span>
       </footer>
     </div>

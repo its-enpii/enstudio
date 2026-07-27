@@ -68,14 +68,11 @@
   })
 </script>
 
-<div
-  class="app-shell grid h-full w-full box-border gap-2 p-2 bg-studio-dark"
-  style={layoutStyle}
->
-  <div class="shell-col shell-col-side relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
+<div class="box-border grid h-full w-full gap-2 bg-studio-dark p-2" style={layoutStyle}>
+  <div class="relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
     <ProjectSidebar />
     <div
-      class="shell-resizer shell-resizer-side absolute top-0 bottom-0 right-[-4px] w-1.5 cursor-col-resize z-[5] touch-none hover:bg-studio-gold/25 active:bg-studio-gold/25"
+      class="absolute top-0 bottom-0 right-[-4px] z-[5] w-1.5 cursor-col-resize touch-none hover:bg-studio-gold/25 active:bg-studio-gold/25"
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize sidebar"
@@ -86,34 +83,34 @@
     ></div>
   </div>
 
-  <main class="center grid min-h-0 min-w-0 gap-2" style="grid-template-rows: auto minmax(0, 1fr)">
+  <main class="grid min-h-0 min-w-0 gap-2" style="grid-template-rows: auto minmax(0, 1fr)">
     <TopNav />
 
     <div
-      class="center-stage grid min-h-0 overflow-hidden rounded-3xl border border-border-subtle bg-studio-panel"
+      class="grid min-h-0 overflow-hidden rounded-3xl border border-border-subtle bg-studio-panel"
       style="grid-template-rows: minmax(0, 1fr) auto"
     >
       {#if state.mode === 'agent'}
         <AgentStage />
       {/if}
-      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'code'}>
+      <div class="h-full min-h-0 {state.mode !== 'code' ? 'hidden' : ''}">
         <CodeStage />
       </div>
-      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'terminal'}>
+      <div class="h-full min-h-0 {state.mode !== 'terminal' ? 'hidden' : ''}">
         <TerminalStage />
       </div>
-      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'git'}>
+      <div class="h-full min-h-0 {state.mode !== 'git' ? 'hidden' : ''}">
         <GitStage />
       </div>
-      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'browser'}>
+      <div class="h-full min-h-0 {state.mode !== 'browser' ? 'hidden' : ''}">
         <BrowserStage />
       </div>
     </div>
   </main>
 
-  <div class="shell-col shell-col-insp relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
+  <div class="relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
     <div
-      class="shell-resizer shell-resizer-insp absolute top-0 bottom-0 left-[-4px] w-1.5 cursor-col-resize z-[5] touch-none hover:bg-studio-gold/25 active:bg-studio-gold/25"
+      class="absolute top-0 bottom-0 left-[-4px] z-[5] w-1.5 cursor-col-resize touch-none hover:bg-studio-gold/25 active:bg-studio-gold/25"
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize inspector"

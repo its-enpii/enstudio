@@ -64,13 +64,15 @@
   }
 </script>
 
-<label class="ui-field {className}" class:has-error={Boolean(error)}>
+<label class="flex min-w-0 flex-col gap-1.5 {className}">
   {#if label}
-    <span class="ui-label">{label}</span>
+    <span class="text-xs font-medium text-studio-text-dim">{label}</span>
   {/if}
-  <div class="ui-number">
+  <div class="relative flex items-stretch">
     <input
-      class="ui-control"
+      class="w-full rounded-sm border bg-studio-dark py-2 pl-3 pr-9 text-[13px] text-studio-text tabular-nums outline-none hover:border-studio-purple/35 focus:border-studio-purple/70 disabled:opacity-50 {error
+        ? 'border-danger/45'
+        : 'border-border-subtle'}"
       type="text"
       inputmode="decimal"
       id={inputId}
@@ -91,91 +93,28 @@
       }}
       {...rest}
     />
-    <div class="ui-number-btns">
-      <button type="button" class="spin" tabindex="-1" {disabled} onclick={() => bump(1)} aria-label="Increment"
-        >▲</button
+    <div class="absolute right-1 top-1/2 flex -translate-y-1/2 flex-col gap-px">
+      <button
+        type="button"
+        class="grid h-3.5 w-[22px] place-items-center rounded p-0 text-[7px] leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
+        tabindex="-1"
+        {disabled}
+        onclick={() => bump(1)}
+        aria-label="Increment">▲</button
       >
-      <button type="button" class="spin" tabindex="-1" {disabled} onclick={() => bump(-1)} aria-label="Decrement"
-        >▼</button
+      <button
+        type="button"
+        class="grid h-3.5 w-[22px] place-items-center rounded p-0 text-[7px] leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
+        tabindex="-1"
+        {disabled}
+        onclick={() => bump(-1)}
+        aria-label="Decrement">▼</button
       >
     </div>
   </div>
   {#if error}
-    <span class="ui-hint err">{error}</span>
+    <span class="text-[11px] text-danger">{error}</span>
   {:else if hint}
-    <span class="ui-hint">{hint}</span>
+    <span class="text-[11px] text-studio-text-dim">{hint}</span>
   {/if}
 </label>
-
-<style>
-  .ui-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-  .ui-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--studio-text-dim);
-  }
-  .ui-number {
-    position: relative;
-    display: flex;
-    align-items: stretch;
-  }
-  .ui-control {
-    width: 100%;
-    background: var(--studio-dark);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 8px 36px 8px 12px;
-    font-size: 13px;
-    color: var(--studio-text);
-    outline: none;
-    font-variant-numeric: tabular-nums;
-  }
-  .ui-control:hover:not(:disabled) {
-    border-color: rgba(61, 52, 139, 0.35);
-  }
-  .ui-control:focus {
-    border-color: rgba(61, 52, 139, 0.7);
-  }
-  .ui-control:disabled {
-    opacity: 0.5;
-  }
-  .ui-number-btns {
-    position: absolute;
-    right: 4px;
-    top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-  .spin {
-    width: 22px;
-    height: 14px;
-    font-size: 7px;
-    line-height: 1;
-    color: var(--studio-text-dim);
-    border-radius: 4px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-  }
-  .spin:hover:not(:disabled) {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.06);
-  }
-  .ui-hint {
-    font-size: 11px;
-    color: var(--studio-text-dim);
-  }
-  .ui-hint.err {
-    color: #ffb4ab;
-  }
-  .has-error .ui-control {
-    border-color: rgba(255, 180, 171, 0.45);
-  }
-</style>
