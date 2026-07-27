@@ -436,11 +436,29 @@
   }
 
   function diffLineClass(line: string): string {
-    if (line.startsWith('+++') || line.startsWith('---')) return 'diff-meta'
-    if (line.startsWith('@@')) return 'diff-hunk'
-    if (line.startsWith('+')) return 'diff-add'
-    if (line.startsWith('-')) return 'diff-del'
-    return 'diff-ctx'
+    if (line.startsWith('+++') || line.startsWith('---')) return 'text-studio-text-dim'
+    if (line.startsWith('@@')) return 'bg-sky-500/12 text-sky-300'
+    if (line.startsWith('+')) return 'bg-emerald-500/20 text-emerald-400'
+    if (line.startsWith('-')) return 'bg-red-500/20 text-red-400'
+    return 'text-studio-text/75'
+  }
+
+  function toolBorder(status: string): string {
+    if (status === 'ok') return 'border-l-emerald-500'
+    if (status === 'error') return 'border-l-red-400'
+    return 'border-l-studio-gold'
+  }
+
+  function toolAccent(status: string): string {
+    if (status === 'ok') return 'text-emerald-400'
+    if (status === 'error') return 'text-red-400'
+    return 'text-studio-gold'
+  }
+
+  function toolDot(status: string): string {
+    if (status === 'ok') return 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
+    if (status === 'error') return 'bg-red-400'
+    return 'bg-studio-gold shadow-[0_0_8px_#e6af2e]'
   }
 
   function isUnifiedDiff(text: string): boolean {
@@ -1426,29 +1444,29 @@
       </div>
     {/if}
     {#if app.ask && !app.messages.some((m) => m.tool?.callId === app.ask?.toolCallId || m.tool?.callId === app.ask?.requestId)}
-      <div class="action-card ask-card sticky-ask">
-        <div class="action-head">
-          <div class="action-head-left">
+      <div class="mb-3 overflow-hidden rounded-2xl border border-[#aba3ff]/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+        <div class="flex items-center justify-between gap-3 border-b border-[#aba3ff]/20 bg-[#aba3ff]/10 px-4 py-2">
+          <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#aba3ff]">
             <span>Question</span>
             {#if app.pendingAsks.length > 1}
-              <span class="action-queue-count">{app.pendingAsks.length} pending</span>
+              <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
             {/if}
           </div>
-          <span class="action-badge">ask_user</span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-[#aba3ff]/60">ask_user</span>
         </div>
-        <div class="action-body">
-          <p class="action-copy">{app.ask.question}</p>
+        <div class="p-5">
+          <p class="mb-4 text-xs leading-relaxed text-studio-text">{app.ask.question}</p>
           {#if app.ask.options?.length}
-            <div class="ask-options">
+            <div class="mb-3 flex flex-wrap gap-2">
               {#each app.ask.options as opt (opt)}
-                <button type="button" class="btn-allow-full" onclick={() => submitAsk(app.ask!.requestId, opt)}>{opt}</button>
+                <button type="button" class="min-w-[120px] flex-1 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(app.ask!.requestId, opt)}>{opt}</button>
               {/each}
             </div>
           {/if}
-          <div class="ask-free">
+          <div class="grid grid-cols-[1fr_auto] gap-2">
             <input
               type="text"
-              class="ask-input"
+              class="min-h-[42px] w-full rounded-xl border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-[#aba3ff]/55"
               placeholder="Type an answer…"
               value={askDraft(app.ask.requestId)}
               oninput={(e) => setAskDraft(app.ask!.requestId, (e.currentTarget as HTMLInputElement).value)}
@@ -1461,7 +1479,7 @@
             />
             <button
               type="button"
-              class="btn-allow-full"
+              class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
               disabled={!askDraft(app.ask.requestId).trim()}
               onclick={() => submitAsk(app.ask!.requestId)}
             >Submit</button>
@@ -1662,27 +1680,22 @@
                       </div>
                     </div>
                   {:else if isTerminalTool(m.tool.name)}
-                    <details
-                      class="tool-card term-block"
-                      class:running={m.tool.status === 'running'}
-                      class:ok={m.tool.status === 'ok'}
-                      class:err={m.tool.status === 'error'}
-                    >
-                      <summary class="tool-row">
-                        <div class="tool-left">
-                          <span class="tool-dot"></span>
-                          <span class="tool-name">tool:{m.tool.name}</span>
-                          <span class="tool-path term-cmd">{shellCommand(m)}</span>
+                    <details class="rounded-r-lg border-l-2 bg-[#0b0f0c] font-mono text-xs {toolBorder(m.tool.status)}">
+                      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none [&::-webkit-details-marker]:hidden">
+                        <div class="flex min-w-0 items-center gap-3">
+                          <span class="size-2 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
+                          <span class="shrink-0 font-bold text-[#7dcea0]">tool:{m.tool.name}</span>
+                          <span class="truncate font-mono text-studio-text-dim">{shellCommand(m)}</span>
                         </div>
-                        <span class="tool-status">{statusLabel(m, false)}</span>
+                        <span class="shrink-0 text-[10px] uppercase tracking-widest text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
-                      <div class="term-chrome">
-                        <span class="term-prompt">$</span>
-                        <code class="term-cmd-line">{shellCommand(m)}</code>
+                      <div class="flex items-center gap-2 px-3 pb-2 font-mono text-[11px]">
+                        <span class="shrink-0 text-[#7dcea0]">$</span>
+                        <code class="min-w-0 flex-1 truncate text-studio-text/90">{shellCommand(m)}</code>
                         {#if m.tool.preview && m.tool.status !== 'running'}
                           <button
                             type="button"
-                            class="term-copy"
+                            class="shrink-0 rounded border border-white/12 bg-white/4 px-2 py-0.5 text-[10px] text-studio-text-dim hover:border-white/28 hover:text-white"
                             onclick={(e) => {
                               e.preventDefault()
                               void copyToolOutput(m.tool?.preview ?? '')
@@ -1693,34 +1706,29 @@
                         {/if}
                       </div>
                       {#if m.tool.preview && m.tool.status !== 'running'}
-                        <pre class="tool-preview term-out">{m.tool.preview}</pre>
+                        <pre class="mx-2 mb-2.5 max-h-70 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/6 bg-[#050705] p-3 font-mono text-[11px] text-[#c8e6c9]">{m.tool.preview}</pre>
                       {:else if m.tool.status === 'running'}
-                        <div class="tool-preview muted term-out">Running…</div>
+                        <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-[#050705] p-3 font-mono text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
-                        <div class="tool-preview muted term-out">No output</div>
+                        <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-[#050705] p-3 font-mono text-[11px] text-studio-text-dim">No output</div>
                       {/if}
                     </details>
                   {:else}
-                    <details
-                      class="tool-card"
-                      class:running={m.tool.status === 'running'}
-                      class:ok={m.tool.status === 'ok'}
-                      class:err={m.tool.status === 'error'}
-                    >
-                      <summary class="tool-row">
-                        <div class="tool-left">
-                          <span class="tool-dot"></span>
-                          <span class="tool-name">tool:{m.tool.name}</span>
-                          <span class="tool-path">{toolLabel(m)}</span>
+                    <details class="rounded-r-lg border-l-2 bg-studio-dark/40 font-mono text-xs {toolBorder(m.tool.status)}">
+                      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none [&::-webkit-details-marker]:hidden">
+                        <div class="flex min-w-0 items-center gap-3">
+                          <span class="size-2 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
+                          <span class="shrink-0 font-bold {toolAccent(m.tool.status)}">tool:{m.tool.name}</span>
+                          <span class="truncate text-studio-text-dim">{toolLabel(m)}</span>
                         </div>
-                        <span class="tool-status">{statusLabel(m, false)}</span>
+                        <span class="shrink-0 text-[10px] uppercase tracking-widest text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
                       {#if m.tool.preview && m.tool.status !== 'running'}
-                        <pre class="tool-preview">{m.tool.preview}</pre>
+                        <pre class="m-0 max-h-40 overflow-auto px-4 pb-4 text-[11px] whitespace-pre-wrap break-words text-studio-text/75">{m.tool.preview}</pre>
                       {:else if m.tool.status === 'running'}
-                        <div class="tool-preview muted">Running…</div>
+                        <div class="px-4 pb-4 text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
-                        <div class="tool-preview muted">No output</div>
+                        <div class="px-4 pb-4 text-[11px] text-studio-text-dim">No output</div>
                       {/if}
                     </details>
                   {/if}
