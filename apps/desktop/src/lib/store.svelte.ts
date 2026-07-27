@@ -96,20 +96,16 @@ export const LAYOUT_MAX = {
 export function clampProjectLayout(
   patch: Partial<ProjectLayout>,
   current?: ProjectLayout,
-  opts?: { gitMode?: boolean; viewportWidth?: number },
+  opts?: { viewportWidth?: number },
 ): ProjectLayout {
   let side = patch.sidebarWidth ?? current?.sidebarWidth ?? 256
   let insp = patch.inspectorWidth ?? current?.inspectorWidth ?? 288
   side = Math.min(LAYOUT_MAX.sidebar, Math.max(LAYOUT_MIN.sidebar, side))
   insp = Math.min(LAYOUT_MAX.inspector, Math.max(LAYOUT_MIN.inspector, insp))
   const avail = opts?.viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1400)
-  if (opts?.gitMode) {
-    side = Math.min(side, Math.max(LAYOUT_MIN.sidebar, avail - LAYOUT_MIN.center))
-  } else {
-    // Keep center floor: side + center + inspector ≤ viewport.
-    side = Math.min(side, Math.max(LAYOUT_MIN.sidebar, avail - LAYOUT_MIN.center - insp))
-    insp = Math.min(insp, Math.max(LAYOUT_MIN.inspector, avail - LAYOUT_MIN.center - side))
-  }
+  // Keep center floor: side + center + inspector ≤ viewport (all modes).
+  side = Math.min(side, Math.max(LAYOUT_MIN.sidebar, avail - LAYOUT_MIN.center - insp))
+  insp = Math.min(insp, Math.max(LAYOUT_MIN.inspector, avail - LAYOUT_MIN.center - side))
   return { sidebarWidth: Math.round(side), inspectorWidth: Math.round(insp) }
 }
 
@@ -640,7 +636,7 @@ class AppState {
     if (!id) return
     this.projects = this.projects.map((p) => {
       if (p.id !== id) return p
-      const layout = clampProjectLayout(patch, p.layout, { gitMode: this.mode === 'git' })
+      const layout = clampProjectLayout(patch, p.layout)
       return { ...p, layout }
     })
     saveProjects(this.projects)

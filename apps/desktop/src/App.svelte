@@ -19,9 +19,8 @@
     const side = layout?.sidebarWidth ?? 256
     const insp = layout?.inspectorWidth ?? 288
     const c = LAYOUT_MIN.center
-    return state.mode === 'git'
-      ? `grid-template-columns:minmax(${LAYOUT_MIN.sidebar}px, ${side}px) minmax(${c}px, 1fr)`
-      : `grid-template-columns:minmax(${LAYOUT_MIN.sidebar}px, ${side}px) minmax(${c}px, 1fr) minmax(${LAYOUT_MIN.inspector}px, ${insp}px)`
+    // Same 3-pane shell for every mode (incl. Git) — no special git layout.
+    return `grid-template-columns:minmax(${LAYOUT_MIN.sidebar}px, ${side}px) minmax(${c}px, 1fr) minmax(${LAYOUT_MIN.inspector}px, ${insp}px)`
   })
 
   let drag: null | { edge: 'sidebar' | 'inspector'; startX: number; startW: number } = null
@@ -67,7 +66,7 @@
   })
 </script>
 
-<div class="app-shell" class:git-mode={state.mode === 'git'} style={layoutStyle}>
+<div class="app-shell" style={layoutStyle}>
   <div class="shell-col shell-col-side">
     <ProjectSidebar />
     <div
@@ -104,21 +103,19 @@
     </div>
   </main>
 
-  {#if state.mode !== 'git'}
-    <div class="shell-col shell-col-insp">
-      <div
-        class="shell-resizer shell-resizer-insp"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize inspector"
-        onpointerdown={(e) => onResizeStart('inspector', e)}
-        onpointermove={onResizeMove}
-        onpointerup={onResizeEnd}
-        onpointercancel={onResizeEnd}
-      ></div>
-      <Inspector />
-    </div>
-  {/if}
+  <div class="shell-col shell-col-insp">
+    <div
+      class="shell-resizer shell-resizer-insp"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize inspector"
+      onpointerdown={(e) => onResizeStart('inspector', e)}
+      onpointermove={onResizeMove}
+      onpointerup={onResizeEnd}
+      onpointercancel={onResizeEnd}
+    ></div>
+    <Inspector />
+  </div>
 </div>
 
 <CommandPalette />

@@ -22,6 +22,7 @@
     type WorktreePreview,
   } from '../enpii'
   import { ConfirmDialog, Switch } from './ui'
+  import GitTools from './GitTools.svelte'
 
   let wtPreview = $state<WorktreePreview | null>(null)
   let wtBusy = $state(false)
@@ -359,6 +360,9 @@
 </script>
 
 <aside class="inspector panel">
+  {#if app.mode === 'git'}
+    <GitTools />
+  {:else}
   <section class="insp-section insp-section-status">
     <div class="insp-header">
       <h3 class="insp-label">Run Status</h3>
@@ -799,6 +803,7 @@
       </details>
     {/if}
   </section>
+  {/if}
 </aside>
 
 <ConfirmDialog
