@@ -1824,6 +1824,12 @@ textarea {
   letter-spacing: 0.04em;
 }
 
+.worktree-list-hint {
+  font-size: 10px;
+  line-height: 1.35;
+  margin: 0 6px 6px;
+}
+
 .worktree-list-item {
   display: flex;
   align-items: center;

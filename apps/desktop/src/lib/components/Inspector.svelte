@@ -78,6 +78,18 @@
   const wtSessions = $derived(
     app.sessionList.filter((s) => Boolean(s.worktreeBranch || s.baseProjectRoot)),
   )
+  /** Git checkouts with no matching agent session — only these need a separate row. */
+  const orphanWorktrees = $derived.by(() => {
+    const roots = new Set(
+      wtSessions
+        .map((s) => (s.projectRoot ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase())
+        .filter(Boolean),
+    )
+    return wtList.filter((wt) => {
+      const p = wt.path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+      return !roots.has(p)
+    })
+  })
   const wtBusyCount = $derived(
     wtSessions.filter((s) => app.isSessionBusy(s.id) || s.status === 'running' || s.status === 'awaiting_approval')
       .length,
@@ -703,17 +715,16 @@
         {/if}
       </div>
     {/if}
-    {#if wtList.length > 0}
-      <details class="worktree-list worktree-list-compact">
+    {#if orphanWorktrees.length > 0}
+      <details class="worktree-list worktree-list-compact" open>
         <summary class="worktree-list-label muted">
-          Git worktrees · {wtList.length}
+          Unattached trees · {orphanWorktrees.length}
         </summary>
-        {#each wtList as wt (wt.path)}
-          <div
-            class="worktree-list-item"
-            class:active={app.session?.projectRoot === wt.path}
-            title={wt.path}
-          >
+        <p class="worktree-list-hint muted">
+          Git checkout without a chat — Open attaches, × deletes tree.
+        </p>
+        {#each orphanWorktrees as wt (wt.path)}
+          <div class="worktree-list-item" title={wt.path}>
             <button
               type="button"
               class="worktree-list-open"
@@ -725,8 +736,8 @@
             <button
               type="button"
               class="wt-mini worktree-list-remove"
-              disabled={wtBusy || app.busy || app.session?.projectRoot === wt.path}
-              title="Remove worktree"
+              disabled={wtBusy || app.busy}
+              title="Remove unattached worktree"
               onclick={(e) => requestRemoveWorktreePath(wt.path, e)}
             >×</button>
           </div>
