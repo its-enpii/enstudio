@@ -27,6 +27,7 @@ export {
   compactionTranscript,
   resolveAllApprovals,
   resolveApproval,
+  resolveAnswer,
   runDirectEdit,
   runPromptTurn,
   shouldAutoCompact,

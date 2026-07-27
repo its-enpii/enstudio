@@ -74,6 +74,27 @@ export async function respondAllApprovals(
   }
 }
 
+export async function respondAsk(answer: string, requestId?: string): Promise<void> {
+  const a = requestId
+    ? state.pendingAsks.find((x) => x.requestId === requestId) ?? null
+    : state.ask
+  if (!a) return
+  try {
+    await window.enpiistudio.enpii.request('session.answer', {
+      sessionId: a.sessionId,
+      requestId: a.requestId,
+      answer,
+    })
+    state.pushLog(`[ask] answered: ${answer.slice(0, 80)}`)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    state.pushLog(`[ask] failed: ${message}`)
+    state.notify('error', 'Answer failed', message)
+  } finally {
+    state.clearAsk(a.requestId)
+  }
+}
+
 export type ProviderPublic = {
   baseUrl: string
   model: string
@@ -1652,6 +1673,47 @@ export function bindEnpiiEvents(): () => void {
         body: p.summary ?? p.name,
         urgency: 'critical',
       })
+      return
+    }
+
+    if (p.type === 'ask_user_request' && p.requestId && p.question) {
+      const ask = {
+        requestId: String(p.requestId),
+        sessionId: eventSessionId,
+        toolCallId: String(p.toolCallId ?? p.requestId),
+        question: String(p.question),
+        options: Array.isArray(p.options) ? p.options.map(String) : undefined,
+        summary: String(p.summary ?? p.question),
+      }
+      if (active) {
+        state.enqueueAsk(ask)
+        state.stashLiveSession(eventSessionId)
+      } else {
+        applyBackground((live) => {
+          live.pendingAsks = [ask, ...(live.pendingAsks ?? []).filter((a) => a.requestId !== ask.requestId)]
+          live.busy = true
+          live.status = 'awaiting_approval'
+        })
+      }
+      state.notify('warning', 'enpii asks', ask.summary)
+      void window.enpiistudio.app.showNotification?.({
+        title: 'enpii asks',
+        body: ask.summary,
+        urgency: 'critical',
+      })
+      return
+    }
+
+    if (p.type === 'plan_mode') {
+      const activePlan = p.active === true
+      if (active) {
+        state.planMode = activePlan
+        state.stashLiveSession(eventSessionId)
+      } else {
+        applyBackground((live) => {
+          live.planMode = activePlan
+        })
+      }
       return
     }
 

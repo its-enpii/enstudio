@@ -11,6 +11,7 @@ import {
 import {
   resolveAllApprovals,
   resolveApproval,
+  resolveAnswer,
   compactRuntime,
   runDirectEdit,
   runPromptTurn,
@@ -1357,6 +1358,21 @@ async function main(): Promise<void> {
     if (!runtime) throw new Error(`session not running: ${p.sessionId}`)
     const count = resolveAllApprovals(runtime, p.decision, scope)
     return { ok: true, decision: p.decision, scope, count }
+  })
+
+  rpc.on('session.answer', (_method, params) => {
+    const p = (params ?? {}) as {
+      sessionId?: string
+      requestId?: string
+      answer?: string
+    }
+    if (!p.sessionId) throw new Error('sessionId is required')
+    if (!p.requestId) throw new Error('requestId is required')
+    const runtime = runtimes.get(p.sessionId)
+    if (!runtime) throw new Error(`session not running: ${p.sessionId}`)
+    const ok = resolveAnswer(runtime, p.requestId, String(p.answer ?? ''))
+    if (!ok) throw new Error(`no pending question: ${p.requestId}`)
+    return { ok: true }
   })
 
   rpc.on('session.stop', (_method, params) => {

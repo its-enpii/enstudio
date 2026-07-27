@@ -4,7 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
   import { state as app, COMPOSER_MODES, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
-  import { acceptAgentCheckpoint, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshSessionList, respondAllApprovals, respondApproval, rollbackAgentCheckpoint, saveProviderConfig, searchProjectFiles, sendPrompt, stopAgentTurn, undoCompactSession } from '../enpii'
+  import { acceptAgentCheckpoint, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshSessionList, respondAllApprovals, respondApproval, respondAsk, rollbackAgentCheckpoint, saveProviderConfig, searchProjectFiles, sendPrompt, stopAgentTurn, undoCompactSession } from '../enpii'
   import { renderMarkdown } from '../markdown'
   import SmartSelect from './ui/SmartSelect.svelte'
   import ConfirmDialog from './ui/ConfirmDialog.svelte'
@@ -392,6 +392,31 @@
     return app.pendingApprovals.find(
       (a) => a.toolCallId === callId || a.requestId === callId,
     ) ?? null
+  }
+
+  function pendingAskForTool(callId: string) {
+    return app.pendingAsks.find(
+      (a) => a.toolCallId === callId || a.requestId === callId,
+    ) ?? null
+  }
+
+  let askDrafts = $state<Record<string, string>>({})
+
+  function askDraft(requestId: string): string {
+    return askDrafts[requestId] ?? ''
+  }
+
+  function setAskDraft(requestId: string, value: string): void {
+    askDrafts = { ...askDrafts, [requestId]: value }
+  }
+
+  function submitAsk(requestId: string, answer?: string): void {
+    const text = (answer ?? askDraft(requestId)).trim()
+    if (!text) return
+    const next = { ...askDrafts }
+    delete next[requestId]
+    askDrafts = next
+    void respondAsk(text, requestId)
   }
 
   function diffLineClass(line: string): string {
@@ -1080,6 +1105,7 @@
   $effect(() => {
     void app.messages.length
     void app.pendingApprovals.length
+    void app.pendingAsks.length
     void app.streamingId
     void app.messages[app.messages.length - 1]?.text
     void scrollToBottom()
@@ -1091,8 +1117,9 @@
     void app.session?.id
     void app.busy
     void app.pendingApprovals.length
+    void app.pendingAsks.length
     void agentPane
-    if (agentPane === 'enpii' && app.activeProject && !app.busy) {
+    if (agentPane === 'enpii' && app.activeProject && !app.busy && !app.pendingAsks.length) {
       void tick().then(focusComposer)
     }
   })
@@ -1332,6 +1359,56 @@
       </div>
     </div>
   {:else}
+    {#if app.planMode}
+      <div class="plan-mode-banner" role="status">
+        <strong>Plan mode</strong>
+        <span>Writes, shell, git, MCP, and sub-agents blocked until exit_plan_mode</span>
+      </div>
+    {/if}
+    {#if app.ask && !app.messages.some((m) => m.tool?.callId === app.ask?.toolCallId || m.tool?.callId === app.ask?.requestId)}
+      <div class="action-card ask-card sticky-ask">
+        <div class="action-head">
+          <div class="action-head-left">
+            <span>Question</span>
+            {#if app.pendingAsks.length > 1}
+              <span class="action-queue-count">{app.pendingAsks.length} pending</span>
+            {/if}
+          </div>
+          <span class="action-badge">ask_user</span>
+        </div>
+        <div class="action-body">
+          <p class="action-copy">{app.ask.question}</p>
+          {#if app.ask.options?.length}
+            <div class="ask-options">
+              {#each app.ask.options as opt (opt)}
+                <button type="button" class="btn-allow-full" onclick={() => submitAsk(app.ask!.requestId, opt)}>{opt}</button>
+              {/each}
+            </div>
+          {/if}
+          <div class="ask-free">
+            <input
+              type="text"
+              class="ask-input"
+              placeholder="Type an answer…"
+              value={askDraft(app.ask.requestId)}
+              oninput={(e) => setAskDraft(app.ask!.requestId, (e.currentTarget as HTMLInputElement).value)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  submitAsk(app.ask!.requestId)
+                }
+              }}
+            />
+            <button
+              type="button"
+              class="btn-allow-full"
+              disabled={!askDraft(app.ask.requestId).trim()}
+              onclick={() => submitAsk(app.ask!.requestId)}
+            >Submit</button>
+          </div>
+        </div>
+      </div>
+    {/if}
     {#if app.run}
       <section class="agent-task-panel">
         <div class="agent-task-head"><div><strong>Task</strong><span class="task-run-status {app.run.status}">{app.run.status}</span><span class="task-progress">{app.run.tasks.filter((task) => task.status === 'completed').length}/{app.run.tasks.length} steps · {app.run.toolCount ?? 0} tools</span></div><div class="agent-task-actions">{#if app.busy}<button type="button" class="danger" onclick={() => void stopAgentTurn()}>Stop</button>{:else}<button type="button" disabled={!lastUserPrompt()} onclick={() => void retryRun()}>Retry</button><button type="button" onclick={() => void continueRun()}>Continue</button>{/if}</div></div>
@@ -1383,7 +1460,51 @@
                   {/if}
                 {:else if m.role === 'tool' && m.tool}
                   {@const pending = pendingForTool(m.tool.callId)}
-                  {#if pending}
+                  {@const askPending = pendingAskForTool(m.tool.callId)}
+                  {#if askPending}
+                    <div class="action-card ask-card">
+                      <div class="action-head">
+                        <div class="action-head-left">
+                          <span>Question</span>
+                          {#if app.pendingAsks.length > 1}
+                            <span class="action-queue-count">{app.pendingAsks.length} pending</span>
+                          {/if}
+                        </div>
+                        <span class="action-badge">ask_user</span>
+                      </div>
+                      <div class="action-body">
+                        <p class="action-copy">{askPending.question}</p>
+                        {#if askPending.options?.length}
+                          <div class="ask-options">
+                            {#each askPending.options as opt (opt)}
+                              <button type="button" class="btn-allow-full" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
+                            {/each}
+                          </div>
+                        {/if}
+                        <div class="ask-free">
+                          <input
+                            type="text"
+                            class="ask-input"
+                            placeholder="Type an answer…"
+                            value={askDraft(askPending.requestId)}
+                            oninput={(e) => setAskDraft(askPending.requestId, (e.currentTarget as HTMLInputElement).value)}
+                            onkeydown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                submitAsk(askPending.requestId)
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            class="btn-allow-full"
+                            disabled={!askDraft(askPending.requestId).trim()}
+                            onclick={() => submitAsk(askPending.requestId)}
+                          >Submit</button>
+                        </div>
+                      </div>
+                    </div>
+                  {:else if pending}
                     <div class="action-card">
                       <div class="action-head">
                         <div class="action-head-left">

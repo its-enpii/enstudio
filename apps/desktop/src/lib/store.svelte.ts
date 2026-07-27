@@ -195,6 +195,16 @@ export interface ApprovalRequest {
   args?: string
 }
 
+/** Mid-run ask_user question from agent. */
+export interface AskUserRequest {
+  requestId: string
+  sessionId: string
+  toolCallId: string
+  question: string
+  options?: string[]
+  summary: string
+}
+
 export interface DiffItem {
   id: string
   name: string
@@ -334,6 +344,8 @@ export interface LiveSessionState {
   run: RunTelemetry | null
   streamingId: string | null
   pendingApprovals: ApprovalRequest[]
+  pendingAsks?: AskUserRequest[]
+  planMode?: boolean
   approvals: ApprovalRecord[]
   diffs: DiffItem[]
   checkpoints: AgentCheckpoint[]
@@ -360,6 +372,10 @@ class AppState {
   streamingId = $state<string | null>(null)
   /** Active approval queue (multi pending). `approval` = head for compat. */
   pendingApprovals = $state<ApprovalRequest[]>([])
+  /** Active ask_user queue. */
+  pendingAsks = $state<AskUserRequest[]>([])
+  /** Session-level plan mode flag (from enter_plan_mode events). */
+  planMode = $state(false)
   get approval(): ApprovalRequest | null {
     return this.pendingApprovals[0] ?? null
   }
@@ -370,6 +386,9 @@ class AppState {
     }
     const rest = this.pendingApprovals.filter((a) => a.requestId !== value.requestId)
     this.pendingApprovals = [value, ...rest]
+  }
+  get ask(): AskUserRequest | null {
+    return this.pendingAsks[0] ?? null
   }
   diffs = $state<DiffItem[]>([])
   checkpoints = $state<AgentCheckpoint[]>([])
@@ -422,6 +441,8 @@ class AppState {
       run: null,
       streamingId: null,
       pendingApprovals: [],
+      pendingAsks: [],
+      planMode: false,
       approvals: [],
       diffs: [],
       checkpoints: [],
@@ -441,6 +462,8 @@ class AppState {
       run: this.run,
       streamingId: this.streamingId,
       pendingApprovals: this.pendingApprovals,
+      pendingAsks: this.pendingAsks,
+      planMode: this.planMode,
       approvals: this.approvals,
       diffs: this.diffs,
       checkpoints: this.checkpoints,
@@ -461,6 +484,8 @@ class AppState {
     this.run = live.run
     this.streamingId = live.streamingId
     this.pendingApprovals = live.pendingApprovals
+    this.pendingAsks = live.pendingAsks ?? []
+    this.planMode = live.planMode ?? false
     this.approvals = live.approvals
     this.diffs = live.diffs
     this.checkpoints = live.checkpoints
@@ -836,6 +861,19 @@ class AppState {
   enqueueApproval(a: ApprovalRequest): void {
     if (this.pendingApprovals.some((x) => x.requestId === a.requestId)) return
     this.pendingApprovals = [...this.pendingApprovals, a]
+  }
+
+  clearAsk(requestId?: string): void {
+    if (!requestId) {
+      this.pendingAsks = []
+      return
+    }
+    this.pendingAsks = this.pendingAsks.filter((a) => a.requestId !== requestId)
+  }
+
+  enqueueAsk(a: AskUserRequest): void {
+    if (this.pendingAsks.some((x) => x.requestId === a.requestId)) return
+    this.pendingAsks = [...this.pendingAsks, a]
   }
 
   takeApproval(requestId: string): ApprovalRequest | null {

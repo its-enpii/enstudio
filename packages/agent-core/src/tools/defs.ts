@@ -608,6 +608,44 @@ export const TOOL_DEFS = [
   {
     type: 'function' as const,
     function: {
+      name: 'enter_plan_mode',
+      description:
+        'Enter plan mode: block all writes, shell, git, MCP calls, and sub-agents until exit_plan_mode. Use while researching and drafting a plan.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'exit_plan_mode',
+      description: 'Leave plan mode and restore normal mutation permissions.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'ask_user',
+      description:
+        'Ask the user a mid-run question and wait for their answer (optional multiple-choice options). Prefer for product decisions, not for tool output.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'Question to show the user' },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional short choices (max 6)',
+          },
+        },
+        required: ['question'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'agent',
       description:
         'Spawn an isolated sub-agent in a git worktree, run one prompt (max 4 rounds), return result + agentId. Use for parallel investigation or risky edits. Follow up with send_message. Nested agent auto-approves workspace writes (no nested UI approval).',
@@ -792,6 +830,9 @@ export type ToolName =
   | 'task_list'
   | 'task_update'
   | 'task_stop'
+  | 'enter_plan_mode'
+  | 'exit_plan_mode'
+  | 'ask_user'
   | 'agent'
   | 'send_message'
   | 'web_fetch'

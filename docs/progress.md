@@ -165,7 +165,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 | Web search / fetch | **shipped** (`web_fetch` / `web_search`, SSRF guard) |
 | In-loop `task_*` durable board | **shipped** (project `tasks.json`; not OH background procs) |
 | In-loop `agent` + `send_message` | **shipped** (sync nested turn in worktree; depth 1; UI fan-out still available) |
-| Formal plan mode + ask-user | **thin** (`plan_tasks` + composer Plan = read-only) |
+| Formal plan mode + ask-user | **shipped** (`enter_plan_mode`/`exit_plan_mode` hard-block + `ask_user` → UI) |
 | Parallel tool execution | **missing** (sequential) |
 | Schedule / cron / durable loop fire | **missing** |
 | Hooks, plugins, LSP, notebook, chat channels | out / YAGNI |
@@ -179,7 +179,7 @@ Ordered by impact for chat-default users; implement one phase at a time:
 1. **P0 Web** — ✅ `web_fetch` + `web_search` (SSRF guards; `ENPII_WEB_SEARCH_URL` / `ENPII_WEB_PROXY`).
 2. **P1 Task board** — ✅ durable `task_create|get|list|update|stop` under `~/.enpiistudio/projects/<hash>/tasks.json`.
 3. **P1 Sub-agent** — ✅ in-loop `agent` / `send_message` (worktree jail, nested `runPromptTurn`, max depth 1).
-4. **P2 Plan + ask** — `enter_plan_mode` / `exit_plan_mode` (block writes) + `ask_user` mid-run (structured questions → UI).
+4. **P2 Plan + ask** — ✅ `enter_plan_mode` / `exit_plan_mode` hard-block mutations + `ask_user` (options/free-text UI, `session.answer`).
 5. **P2 Parallel tools** — run read-only tool calls in one assistant round concurrently where safe.
 6. **P2 MCP depth** — resources + prompts; OAuth when a real server requires it.
 7. **P3 Schedule** — `cron_*` or host scheduler firing prompts (LE automations primitive; durable across restart).
