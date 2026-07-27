@@ -1417,8 +1417,11 @@
     </div>
   {:else}
     {#if app.planMode}
-      <div class="plan-mode-banner" role="status">
-        <strong>Plan mode</strong>
+      <div
+        class="mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-xl border border-[#aba3ff]/35 bg-[#aba3ff]/10 px-3.5 py-2.5 text-xs text-studio-text"
+        role="status"
+      >
+        <strong class="text-[10px] uppercase tracking-wide text-[#aba3ff]">Plan mode</strong>
         <span>Writes, shell, git, MCP, and sub-agents blocked until exit_plan_mode</span>
       </div>
     {/if}
@@ -1496,24 +1499,34 @@
         {/each}
       </section>
     {/if}
-    <div class="timeline">
+    <div class="mx-auto flex w-full max-w-3xl flex-col gap-8">
       {#each groups as g, gi (g.kind === 'turn' ? `t-${gi}-${g.items[0]?.id}` : g.m.id)}
         {#if g.kind === 'user'}
-          <div class="msg-user">
-            <div class="bubble">
-              {#if g.m.text}<div class="bubble-text">{g.m.text}</div>{/if}
+          <div class="flex justify-end">
+            <div
+              class="flex max-w-[70%] flex-col gap-2.5 break-words rounded-2xl rounded-tr-none border border-border-subtle bg-studio-card/80 p-4 text-sm leading-relaxed"
+            >
+              {#if g.m.text}<div class="whitespace-pre-wrap">{g.m.text}</div>{/if}
             </div>
           </div>
         {:else if g.kind === 'system'}
-          <div class="msg-system">{g.m.text}</div>
+          <div class="rounded-xl border border-dashed border-border-subtle p-3 text-center text-xs text-studio-text-dim">
+            {g.m.text}
+          </div>
         {:else}
-          <div class="msg-assistant">
-            <div class="avatar">e</div>
-            <div class="turn-body">
+          <div class="flex items-start justify-center gap-4">
+            <div
+              class="grid size-8 shrink-0 place-items-center rounded-full bg-studio-purple text-xs font-bold text-white"
+            >
+              e
+            </div>
+            <div class="flex min-w-0 max-w-[42rem] flex-1 flex-col gap-4">
               {#each g.items as m (m.id)}
                 {#if m.role === 'assistant'}
                   {#if m.text}
-                    <div class="body md">{@html renderMarkdown(m.text)}</div>
+                    <div class="break-words text-sm leading-relaxed text-studio-text-dim [&_strong]:font-semibold [&_strong]:text-white">
+                      {@html renderMarkdown(m.text)}
+                    </div>
                   {/if}
                 {:else if m.role === 'tool' && m.tool}
                   {@const pending = pendingForTool(m.tool.callId)}
