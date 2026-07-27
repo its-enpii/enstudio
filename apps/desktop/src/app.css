@@ -1490,6 +1490,7 @@ textarea {
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--studio-text-dim);
+  cursor: pointer;
   display: flex;
   font-size: 10px;
   gap: 7px;
@@ -1499,7 +1500,7 @@ textarea {
   text-align: left;
 }
 
-.session-history-item:hover:not(:disabled),
+.session-history-item:hover,
 .session-history-item.active {
   background: rgba(110, 101, 217, 0.14);
   border-color: rgba(110, 101, 217, 0.35);

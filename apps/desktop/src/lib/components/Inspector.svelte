@@ -594,7 +594,20 @@
                 <button type="button" class="wt-mini" disabled={renameBusy} onclick={cancelRename}>×</button>
               </div>
             {:else}
-              <button type="button" class="session-history-item" class:active={app.session?.id === s.id} class:running={app.isSessionBusy(s.id) || s.status === 'running' || s.status === 'awaiting_approval'} onclick={() => void openSession(s.id)}>
+              <div
+                class="session-history-item"
+                class:active={app.session?.id === s.id}
+                class:running={app.isSessionBusy(s.id) || s.status === 'running' || s.status === 'awaiting_approval'}
+                role="button"
+                tabindex="0"
+                onclick={() => void openSession(s.id)}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    void openSession(s.id)
+                  }
+                }}
+              >
                 <span class="session-history-copy">
                   <span class="session-history-name">
                     {#if s.worktreeBranch || s.baseProjectRoot}<span class="wt-tag">wt</span>{/if}
@@ -613,7 +626,7 @@
                   aria-label="Rename session"
                   onclick={(e) => startRename(s, e)}
                 >✎</button>
-              </button>
+              </div>
             {/if}
           {/each}
         </div>
