@@ -1,4 +1,26 @@
-/* Tokens from docs/design/code.html */
+@import 'tailwindcss';
+
+/* Tokens from docs/design/code.html — also exposed as Tailwind theme. */
+@theme {
+  --color-studio-dark: #040303;
+  --color-studio-card: #141414;
+  --color-studio-panel: #0c0c0c;
+  --color-studio-purple: #3d348b;
+  --color-studio-gold: #e6af2e;
+  --color-studio-grey: #1f1f1f;
+  --color-studio-text: #e2e2e2;
+  --color-studio-text-dim: #8e8e8e;
+  --color-border-subtle: rgba(255, 255, 255, 0.05);
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --radius-control: 999px;
+  --spacing-space: 8px;
+  --font-sans: Inter, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 :root {
   --studio-dark: #040303;
   --studio-card: #141414;
@@ -16,6 +38,7 @@
   --radius-sm: 8px;
   /* All interactive controls (buttons, mode chips, pills) share one shape. */
   --radius-control: 999px;
+  --studio-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color-scheme: dark;
   font-family: Inter, 'Segoe UI', system-ui, sans-serif;

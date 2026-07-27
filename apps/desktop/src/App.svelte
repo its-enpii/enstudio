@@ -46,12 +46,16 @@
   onMount(() => {
     const unbind = bindEnpiiEvents()
     void pingEnpii()
-    // Reclamp saved widths (git-mode used to inflate sidebar / crush inspector).
-    state.setProjectLayout({})
-    if (state.activeProjectId) void hydrateProjectSession()
-    else if (state.projects[0]) {
-      state.selectProject(state.projects[0].id)
+    // Reclamp rails after load (layoutVersion hard-reset may already have fired).
+    if (state.activeProjectId) {
+      state.setProjectLayout({})
       void hydrateProjectSession()
+    } else if (state.projects[0]) {
+      state.selectProject(state.projects[0].id)
+      state.setProjectLayout({})
+      void hydrateProjectSession()
+    } else {
+      state.setProjectLayout({})
     }
     const onWinResize = () => {
       state.setProjectLayout({})
@@ -64,11 +68,14 @@
   })
 </script>
 
-<div class="app-shell" style={layoutStyle}>
-  <div class="shell-col shell-col-side">
+<div
+  class="app-shell grid h-full w-full box-border gap-2 p-2 bg-studio-dark"
+  style={layoutStyle}
+>
+  <div class="shell-col shell-col-side relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
     <ProjectSidebar />
     <div
-      class="shell-resizer shell-resizer-side"
+      class="shell-resizer shell-resizer-side absolute top-0 bottom-0 right-[-4px] w-1.5 cursor-col-resize z-[5] touch-none hover:bg-studio-gold/25 active:bg-studio-gold/25"
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize sidebar"
@@ -79,31 +86,34 @@
     ></div>
   </div>
 
-  <main class="center">
+  <main class="center grid min-h-0 min-w-0 gap-2" style="grid-template-rows: auto minmax(0, 1fr)">
     <TopNav />
 
-    <div class="center-stage">
+    <div
+      class="center-stage grid min-h-0 overflow-hidden rounded-3xl border border-border-subtle bg-studio-panel"
+      style="grid-template-rows: minmax(0, 1fr) auto"
+    >
       {#if state.mode === 'agent'}
         <AgentStage />
       {/if}
-      <div class="mode-stage" class:hidden={state.mode !== 'code'}>
+      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'code'}>
         <CodeStage />
       </div>
-      <div class="mode-stage" class:hidden={state.mode !== 'terminal'}>
+      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'terminal'}>
         <TerminalStage />
       </div>
-      <div class="mode-stage" class:hidden={state.mode !== 'git'}>
+      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'git'}>
         <GitStage />
       </div>
-      <div class="mode-stage" class:hidden={state.mode !== 'browser'}>
+      <div class="mode-stage h-full min-h-0" class:hidden={state.mode !== 'browser'}>
         <BrowserStage />
       </div>
     </div>
   </main>
 
-  <div class="shell-col shell-col-insp">
+  <div class="shell-col shell-col-insp relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
     <div
-      class="shell-resizer shell-resizer-insp"
+      class="shell-resizer shell-resizer-insp absolute top-0 bottom-0 left-[-4px] w-1.5 cursor-col-resize z-[5] touch-none hover:bg-studio-gold/25 active:bg-studio-gold/25"
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize inspector"

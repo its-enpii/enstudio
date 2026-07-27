@@ -97,39 +97,22 @@ export const LAYOUT_DEFAULT = {
   inspector: 320,
 } as const
 
+/** Bump → wipe corrupted rail widths from localStorage once. */
+export const LAYOUT_VERSION = 2
+const LAYOUT_VERSION_KEY = 'enpiistudio.layoutVersion'
+
 /** Shell chrome: pad 8×2 + gap 8×2. */
 const LAYOUT_CHROME = 32
-
-/**
- * Heal widths left by old git 2-col / minmax collapse.
- * Anything below the healthy default for inspector was almost always corruption, not user choice.
- */
-function healRail(raw: number, fallback: number, min: number): number {
-  if (!Number.isFinite(raw)) return fallback
-  // Pre-fix floors were 180/220 — treat residual mins as broken.
-  if (raw < min) return fallback
-  if (raw < fallback * 0.85 && raw <= 260) return fallback
-  return raw
-}
 
 export function clampProjectLayout(
   patch: Partial<ProjectLayout>,
   current?: ProjectLayout,
   opts?: { viewportWidth?: number },
 ): ProjectLayout {
-  const patchSide = patch.sidebarWidth
-  const patchInsp = patch.inspectorWidth
-  let side = Number(
-    patchSide ?? healRail(Number(current?.sidebarWidth), LAYOUT_DEFAULT.sidebar, LAYOUT_MIN.sidebar),
-  )
-  let insp = Number(
-    patchInsp ?? healRail(Number(current?.inspectorWidth), LAYOUT_DEFAULT.inspector, LAYOUT_MIN.inspector),
-  )
+  let side = Number(patch.sidebarWidth ?? current?.sidebarWidth ?? LAYOUT_DEFAULT.sidebar)
+  let insp = Number(patch.inspectorWidth ?? current?.inspectorWidth ?? LAYOUT_DEFAULT.inspector)
   if (!Number.isFinite(side)) side = LAYOUT_DEFAULT.sidebar
   if (!Number.isFinite(insp)) insp = LAYOUT_DEFAULT.inspector
-  // Explicit drag/patch still heals absurd lows.
-  if (patchSide === undefined) side = healRail(side, LAYOUT_DEFAULT.sidebar, LAYOUT_MIN.sidebar)
-  if (patchInsp === undefined) insp = healRail(insp, LAYOUT_DEFAULT.inspector, LAYOUT_MIN.inspector)
   side = Math.min(LAYOUT_MAX.sidebar, Math.max(LAYOUT_MIN.sidebar, side))
   insp = Math.min(LAYOUT_MAX.inspector, Math.max(LAYOUT_MIN.inspector, insp))
   const avail =
@@ -145,6 +128,27 @@ export function clampProjectLayout(
     }
   }
   return { sidebarWidth: Math.round(side), inspectorWidth: Math.round(insp) }
+}
+
+/** Force defaults when schema bumps (corrupt rails from old git shell). */
+function defaultLayout(): ProjectLayout {
+  return { sidebarWidth: LAYOUT_DEFAULT.sidebar, inspectorWidth: LAYOUT_DEFAULT.inspector }
+}
+
+function layoutNeedsReset(): boolean {
+  try {
+    return Number(localStorage.getItem(LAYOUT_VERSION_KEY) ?? 0) < LAYOUT_VERSION
+  } catch {
+    return true
+  }
+}
+
+function markLayoutVersion(): void {
+  try {
+    localStorage.setItem(LAYOUT_VERSION_KEY, String(LAYOUT_VERSION))
+  } catch {
+    /* ignore */
+  }
 }
 
 export interface Project {
@@ -332,13 +336,17 @@ function sortProjects(list: Project[]): Project[] {
 function loadProjects(): Project[] {
   try {
     const raw = localStorage.getItem('enpiistudio.projects')
-    if (!raw) return []
+    if (!raw) {
+      markLayoutVersion()
+      return []
+    }
     const parsed = JSON.parse(raw) as Project[]
+    const reset = layoutNeedsReset()
     const migrated = sortProjects([...new Map(parsed
       .filter((project) => typeof project?.path === 'string' && project.path.trim())
       .map((project) => {
         const path = project.path
-        const layout = clampProjectLayout({}, project.layout)
+        const layout = reset ? defaultLayout() : clampProjectLayout({}, project.layout)
         return [projectPathKey(path), {
           ...project,
           id: projectId(path),
@@ -346,9 +354,10 @@ function loadProjects(): Project[] {
           layout,
         }]
       })).values()])
-    if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
+    if (reset || JSON.stringify(migrated) !== JSON.stringify(parsed)) {
       localStorage.setItem('enpiistudio.projects', JSON.stringify(migrated))
     }
+    markLayoutVersion()
     return migrated
   } catch {
     return []
@@ -676,13 +685,30 @@ class AppState {
 
   setProjectLayout(patch: Partial<ProjectLayout>): void {
     const id = this.activeProjectId
-    if (!id) return
+    // Empty patch without active project → reclamp/reset every project (mount heal).
+    if (!id) {
+      if (Object.keys(patch).length === 0) {
+        this.projects = this.projects.map((p) => ({
+          ...p,
+          layout: clampProjectLayout({}, p.layout),
+        }))
+        saveProjects(this.projects)
+      }
+      return
+    }
     this.projects = this.projects.map((p) => {
       if (p.id !== id) return p
       const layout = clampProjectLayout(patch, p.layout)
       return { ...p, layout }
     })
     saveProjects(this.projects)
+  }
+
+  /** Hard-reset all rails to defaults (layout schema migration / user fix). */
+  resetAllLayouts(): void {
+    this.projects = this.projects.map((p) => ({ ...p, layout: defaultLayout() }))
+    saveProjects(this.projects)
+    markLayoutVersion()
   }
 
   selectProject(id: string): void {

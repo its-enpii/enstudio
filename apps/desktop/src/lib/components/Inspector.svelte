@@ -359,7 +359,7 @@
   )
 </script>
 
-<aside class="inspector panel">
+<aside class="inspector panel flex h-full w-full min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto rounded-2xl border border-border-subtle bg-studio-panel p-4">
   {#if app.mode === 'git'}
     <GitTools />
   {:else}

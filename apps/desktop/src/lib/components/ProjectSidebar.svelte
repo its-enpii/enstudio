@@ -44,7 +44,7 @@
   }
 </script>
 
-<aside class="sidebar panel">
+<aside class="sidebar panel flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border-subtle bg-studio-panel p-4">
   <div class="brand-row">
     <div class="brand-mark">E</div>
     <div class="brand-title">enpiistudio</div>
