@@ -93,19 +93,34 @@ export const LAYOUT_MAX = {
   inspector: 480,
 } as const
 
+/** Shell chrome: pad 8×2 + gap 8×2. */
+const LAYOUT_CHROME = 32
+
 export function clampProjectLayout(
   patch: Partial<ProjectLayout>,
   current?: ProjectLayout,
   opts?: { viewportWidth?: number },
 ): ProjectLayout {
-  let side = patch.sidebarWidth ?? current?.sidebarWidth ?? 256
-  let insp = patch.inspectorWidth ?? current?.inspectorWidth ?? 288
+  let side = Number(patch.sidebarWidth ?? current?.sidebarWidth ?? 256)
+  let insp = Number(patch.inspectorWidth ?? current?.inspectorWidth ?? 288)
+  if (!Number.isFinite(side)) side = 256
+  if (!Number.isFinite(insp)) insp = 288
   side = Math.min(LAYOUT_MAX.sidebar, Math.max(LAYOUT_MIN.sidebar, side))
   insp = Math.min(LAYOUT_MAX.inspector, Math.max(LAYOUT_MIN.inspector, insp))
-  const avail = opts?.viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1400)
-  // Keep center floor: side + center + inspector ≤ viewport (all modes).
-  side = Math.min(side, Math.max(LAYOUT_MIN.sidebar, avail - LAYOUT_MIN.center - insp))
-  insp = Math.min(insp, Math.max(LAYOUT_MIN.inspector, avail - LAYOUT_MIN.center - side))
+  const avail =
+    (opts?.viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1400)) - LAYOUT_CHROME
+  // Keep center floor: side + center + inspector ≤ usable width (all modes).
+  const budget = Math.max(LAYOUT_MIN.sidebar + LAYOUT_MIN.center + LAYOUT_MIN.inspector, avail)
+  // Prefer trimming the wider rail first so center never collapses to a dead band.
+  if (side + insp > budget - LAYOUT_MIN.center) {
+    const railBudget = Math.max(LAYOUT_MIN.sidebar + LAYOUT_MIN.inspector, budget - LAYOUT_MIN.center)
+    const total = side + insp
+    side = Math.max(LAYOUT_MIN.sidebar, Math.round((side / total) * railBudget))
+    insp = Math.max(LAYOUT_MIN.inspector, railBudget - side)
+    if (side + insp > railBudget) {
+      insp = Math.max(LAYOUT_MIN.inspector, railBudget - side)
+    }
+  }
   return { sidebarWidth: Math.round(side), inspectorWidth: Math.round(insp) }
 }
 
@@ -298,11 +313,16 @@ function loadProjects(): Project[] {
     const parsed = JSON.parse(raw) as Project[]
     const migrated = sortProjects([...new Map(parsed
       .filter((project) => typeof project?.path === 'string' && project.path.trim())
-      .map((project) => [projectPathKey(project.path), {
-        ...project,
-        id: projectId(project.path),
-        pinned: Boolean(project.pinned),
-      }])).values()])
+      .map((project) => {
+        const path = project.path
+        const layout = clampProjectLayout({}, project.layout)
+        return [projectPathKey(path), {
+          ...project,
+          id: projectId(path),
+          pinned: Boolean(project.pinned),
+          layout,
+        }]
+      })).values()])
     if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
       localStorage.setItem('enpiistudio.projects', JSON.stringify(migrated))
     }

@@ -11,16 +11,17 @@
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import CommandPalette from './lib/components/CommandPalette.svelte'
   import NotificationCenter from './lib/components/NotificationCenter.svelte'
-  import { state, LAYOUT_MIN } from './lib/store.svelte'
+  import { state, clampProjectLayout, LAYOUT_MIN } from './lib/store.svelte'
   import { bindEnpiiEvents, pingEnpii, hydrateProjectSession } from './lib/enpii'
 
   const layoutStyle = $derived.by(() => {
-    const layout = state.activeProject?.layout
-    const side = layout?.sidebarWidth ?? 256
-    const insp = layout?.inspectorWidth ?? 288
-    const c = LAYOUT_MIN.center
-    // Same 3-pane shell for every mode (incl. Git) — no special git layout.
-    return `grid-template-columns:minmax(${LAYOUT_MIN.sidebar}px, ${side}px) minmax(${c}px, 1fr) minmax(${LAYOUT_MIN.inspector}px, ${insp}px)`
+    // Always clamp against live viewport — never trust raw localStorage widths.
+    const layout = clampProjectLayout({}, state.activeProject?.layout)
+    const side = layout.sidebarWidth
+    const insp = layout.inspectorWidth
+    // Fixed side rails + flexible center. Avoid minmax(min, pref) which left
+    // empty dead space / crushed rails after git-mode width corruption.
+    return `grid-template-columns:${side}px minmax(${LAYOUT_MIN.center}px, 1fr) ${insp}px`
   })
 
   let drag: null | { edge: 'sidebar' | 'inspector'; startX: number; startW: number } = null
@@ -49,13 +50,14 @@
   onMount(() => {
     const unbind = bindEnpiiEvents()
     void pingEnpii()
+    // Reclamp saved widths (git-mode used to inflate sidebar / crush inspector).
+    state.setProjectLayout({})
     if (state.activeProjectId) void hydrateProjectSession()
     else if (state.projects[0]) {
       state.selectProject(state.projects[0].id)
       void hydrateProjectSession()
     }
     const onWinResize = () => {
-      // Re-clamp so side/insp still leave center floor when window shrinks.
       state.setProjectLayout({})
     }
     window.addEventListener('resize', onWinResize)

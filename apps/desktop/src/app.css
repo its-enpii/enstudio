@@ -97,9 +97,10 @@ textarea {
   gap: var(--space);
   padding: var(--space);
   height: 100%;
+  width: 100%;
   background: var(--studio-dark);
+  box-sizing: border-box;
 }
-
 
 .shell-col {
   position: relative;
@@ -107,6 +108,12 @@ textarea {
   min-height: 0;
   display: flex;
   height: 100%;
+  width: 100%;
+}
+
+.shell-col-side,
+.shell-col-insp {
+  overflow: hidden;
 }
 
 .shell-col > :global(aside),
@@ -114,6 +121,7 @@ textarea {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  width: 100%;
 }
 
 .shell-resizer {
