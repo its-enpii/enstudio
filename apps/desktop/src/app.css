@@ -14,6 +14,8 @@
   --radius-xl: 24px; /* rounded-3xl */
   --radius-md: 12px;
   --radius-sm: 8px;
+  /* All interactive controls (buttons, mode chips, pills) share one shape. */
+  --radius-control: 999px;
 
   color-scheme: dark;
   font-family: Inter, 'Segoe UI', system-ui, sans-serif;
@@ -1230,8 +1232,8 @@ textarea {
 .status-pill {
   background: rgba(230, 175, 46, 0.1);
   border: 1px solid rgba(230, 175, 46, 0.2);
-  border-radius: 12px;
-  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1569,11 +1571,11 @@ textarea {
 .session-new {
   background: rgba(110, 101, 217, 0.2);
   border: 1px solid rgba(110, 101, 217, 0.38);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   color: #c9c5ff;
   font-size: 10px;
   font-weight: 600;
-  padding: 5px 8px;
+  padding: 5px 12px;
   white-space: nowrap;
 }
 
@@ -1590,6 +1592,17 @@ textarea {
 
 .session-worktree:hover:not(:disabled) {
   background: rgba(230, 175, 46, 0.2);
+  color: #fff;
+}
+
+.session-export {
+  background: transparent;
+  border-color: rgba(230, 175, 46, 0.4);
+  color: var(--studio-gold);
+}
+
+.session-export:hover:not(:disabled) {
+  background: rgba(230, 175, 46, 0.12);
   color: #fff;
 }
 
@@ -1970,8 +1983,8 @@ textarea {
 .wt-mini {
   font-size: 9px;
   font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 999px;
+  padding: 3px 10px;
+  border-radius: var(--radius-control);
   border: 1px solid rgba(230, 175, 46, 0.3);
   color: var(--studio-gold);
 }
@@ -2073,8 +2086,8 @@ textarea {
 .btn-ghost {
   font-size: 11px;
   color: var(--studio-text-dim);
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-control);
 }
 
 .btn-ghost:hover:not(:disabled) {
@@ -2098,7 +2111,7 @@ textarea {
   font-size: 13px;
   font-weight: 500;
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--studio-purple);
   color: #fff;
 }
@@ -3112,10 +3125,10 @@ textarea {
 .diff-open {
   background: transparent;
   border: 1px solid var(--border-subtle);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   color: var(--studio-text-dim);
   font-size: 10px;
-  padding: 2px 6px;
+  padding: 2px 8px;
 }
 
 .diff-open:hover {
@@ -5969,7 +5982,7 @@ textarea {
 .agent-model-add {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--studio-text-dim);
   cursor: pointer;
   font-size: 14px;

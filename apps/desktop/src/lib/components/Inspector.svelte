@@ -364,20 +364,12 @@
       <h3 class="insp-label">Run Status</h3>
       <button type="button" class="btn-ghost" onclick={() => pingEnpii()}>Ping</button>
     </div>
-    <div class="status-pill {statusClass}">
+    <div class="status-pill {statusClass}" title={app.enpiiInfo ?? undefined}>
       <div class="dot-gold"></div>
       <span>{statusLabel}</span>
     </div>
-    {#if app.enpiiInfo}
-      <div class="insp-meta">{app.enpiiInfo}</div>
-    {/if}
-    {#if app.provider}
-      <div class="insp-meta">
-        {app.provider.permissionMode} · {app.provider.dialect}
-        {#if !app.provider.hasKey}
-          · <span class="insp-warn">no key</span>
-        {/if}
-      </div>
+    {#if app.provider && !app.provider.hasKey}
+      <div class="insp-meta"><span class="insp-warn">API key missing</span> · {app.provider.dialect}</div>
     {/if}
   </section>
 
@@ -421,8 +413,6 @@
           </span>
         {/if}
       </div>
-    {:else}
-      <div class="insp-meta">per-session · when endpoint returns usage</div>
     {/if}
     {#if app.session}
       <div class="insp-switch">
@@ -431,11 +421,9 @@
     {/if}
   </section>
 
-  <section class="insp-section insp-section-diffs">
-    <h3 class="insp-label">Recent Diffs</h3>
-    {#if app.diffs.length === 0}
-      <div class="insp-meta">No pending diffs</div>
-    {:else}
+  {#if app.diffs.length > 0}
+    <section class="insp-section insp-section-diffs">
+      <h3 class="insp-label">Recent Diffs</h3>
       <div class="diff-item">
         {#each app.diffs as d (d.id)}
           <details class="diff-row">
@@ -463,8 +451,8 @@
           </details>
         {/each}
       </div>
-    {/if}
-  </section>
+    </section>
+  {/if}
 
   <section class="insp-section insp-section-session">
     <h3 class="insp-label">Agent Session</h3>
@@ -474,21 +462,14 @@
       </button>
       <button
         type="button"
-        class="wt-mini"
+        class="session-new session-export"
         disabled={!app.session || isWorktreeSession}
         title="Export transcript as Markdown"
         onclick={() => void onExportTranscript()}
       >Export</button>
     </div>
-    {#if mainSessions.length === 0 && !app.session}
-      <div class="insp-meta">No session yet</div>
-    {:else if mainSessions.length === 0 && isWorktreeSession}
-      <div class="insp-meta muted">Main chats live here. Active chat is a worktree — see Worktrees below.</div>
-    {:else}
+    {#if mainSessions.length > 0}
       <div class="session-switcher">
-        <div class="session-history-label">
-          <span>{mainSessions.length} chat{mainSessions.length === 1 ? '' : 's'}</span>
-        </div>
         <div class="session-history">
           {#each mainSessions as s (s.id)}
             {#if renamingId === s.id}
@@ -551,7 +532,6 @@
 
   <section class="insp-section insp-section-worktree">
     <h3 class="insp-label">Worktrees</h3>
-    <p class="worktree-list-hint muted">Sandbox checkout + chat. Apply → main; Discard → delete both.</p>
     <div class="session-actions">
       <button
         type="button"
@@ -652,12 +632,12 @@
       </div>
     {/if}
 
-    {#if wtSessions.length === 0 && orphanWorktrees.length === 0}
-      <div class="insp-meta muted">No sandboxes. New = one agent lab; ×2 = two in parallel.</div>
-    {:else if wtSessions.length > 0}
+    {#if wtSessions.length > 0}
       <div class="session-switcher">
         <div class="session-history-label">
-          <span>{wtBusyCount}/{wtSessions.length} busy</span>
+          {#if wtBusyCount > 0}
+            <span>{wtBusyCount}/{wtSessions.length} busy</span>
+          {/if}
           <button
             type="button"
             class="wt-mini"
@@ -795,11 +775,8 @@
     {#if orphanWorktrees.length > 0}
       <details class="worktree-list worktree-list-compact" open>
         <summary class="worktree-list-label muted">
-          Orphan checkouts · {orphanWorktrees.length}
+          Orphan · {orphanWorktrees.length}
         </summary>
-        <p class="worktree-list-hint muted">
-          Checkout without chat. Open = attach; × = delete tree.
-        </p>
         {#each orphanWorktrees as wt (wt.path)}
           <div class="worktree-list-item" title={wt.path}>
             <button
