@@ -43,6 +43,7 @@ import {
 } from '../mcp.js'
 import { webFetch, webSearch } from '../web.js'
 import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from '../tasks.js'
+import { cronCreate, cronDelete, cronList, cronToggle } from '../cron.js'
 
 const DEFAULT_READ = 120_000
 const DEFAULT_GLOB = 200
@@ -276,6 +277,34 @@ export async function runTool(
       case 'task_stop': {
         const r = taskStop(root, String(args.taskId ?? args.id ?? ''))
         return r.ok ? ok(`task ${r.task.id} stopped`, r.content) : fail(r.content)
+      }
+      case 'cron_create': {
+        const r = cronCreate(root, {
+          name: typeof args.name === 'string' ? args.name : undefined,
+          schedule: typeof args.schedule === 'string' ? args.schedule : undefined,
+          prompt: typeof args.prompt === 'string' ? args.prompt : undefined,
+          message: typeof args.message === 'string' ? args.message : undefined,
+          enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined,
+        })
+        return r.ok ? ok(`cron ${r.job.id}`, r.content) : fail(r.content)
+      }
+      case 'cron_list': {
+        const r = cronList(root, {
+          enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined,
+        })
+        return ok(`cron jobs ${r.jobs.length}`, r.content)
+      }
+      case 'cron_delete': {
+        const r = cronDelete(root, String(args.id ?? args.name ?? ''))
+        return r.ok ? ok('cron deleted', r.content) : fail(r.content)
+      }
+      case 'cron_toggle': {
+        const r = cronToggle(
+          root,
+          String(args.id ?? args.name ?? ''),
+          typeof args.enabled === 'boolean' ? args.enabled : undefined,
+        )
+        return r.ok ? ok(`cron ${r.job.id}`, r.content) : fail(r.content)
       }
       case 'web_fetch': {
         const r = await webFetch({

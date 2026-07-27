@@ -42,6 +42,16 @@ import {
   mcpReadResource,
 } from './mcp.js'
 import {
+  cronCreate,
+  cronDelete,
+  cronList,
+  cronMarkRan,
+  cronToggle,
+  startCronScheduler,
+  stopCronScheduler,
+  type DueCronJob,
+} from './cron.js'
+import {
   ensureSshConfigScaffold,
   listLiveTunnels,
   listSshHosts,
@@ -1446,16 +1456,133 @@ async function main(): Promise<void> {
     return { ok: true }
   })
 
+  async function fireCronJob(due: DueCronJob): Promise<void> {
+    const root = path.resolve(due.projectRoot)
+    const job = due.job
+    try {
+      provider = loadProviderConfig(root)
+      assertProviderReady(provider)
+      const meta = sessions.create({
+        projectRoot: root,
+        title: `cron:${job.name}`,
+        permissionMode: provider.permissionMode,
+        model: provider.model,
+        dialect: provider.dialect,
+      })
+      const runtime = getRuntime(meta.id)!
+      rpc.notify('event', {
+        type: 'cron_fire',
+        sessionId: meta.id,
+        projectRoot: root,
+        jobId: job.id,
+        name: job.name,
+        prompt: job.prompt.slice(0, 200),
+      })
+      sessions.setStatus(meta.id, 'running')
+      const result = await runPromptTurn({
+        runtime,
+        text: job.prompt,
+        config: provider,
+        goal: job.prompt,
+        emit: (event) => rpc.notify('event', event),
+        setStatus: (status) => sessions.setStatus(meta.id, status),
+      })
+      sessions.setMessages(meta.id, runtime.messages)
+      sessions.addUsage(meta.id, result.usage)
+      sessions.setStatus(meta.id, 'idle')
+      cronMarkRan(root, job.id, { ok: true, sessionId: meta.id })
+      rpc.notify('event', {
+        type: 'cron_done',
+        sessionId: meta.id,
+        projectRoot: root,
+        jobId: job.id,
+        name: job.name,
+        ok: true,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      cronMarkRan(root, job.id, { ok: false, error: message })
+      rpc.notify('event', {
+        type: 'cron_done',
+        projectRoot: root,
+        jobId: job.id,
+        name: job.name,
+        ok: false,
+        error: message.slice(0, 300),
+      })
+    }
+  }
+
+  rpc.on('cron.list', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; enabled?: boolean }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = cronList(path.resolve(p.projectRoot), {
+      enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
+    })
+    return { jobs: r.jobs }
+  })
+
+  rpc.on('cron.create', (_method, params) => {
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      name?: string
+      schedule?: string
+      prompt?: string
+      message?: string
+      enabled?: boolean
+    }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = cronCreate(path.resolve(p.projectRoot), {
+      name: p.name,
+      schedule: p.schedule,
+      prompt: p.prompt,
+      message: p.message,
+      enabled: p.enabled,
+    })
+    if (!r.ok) throw new Error(r.content)
+    return { job: r.job }
+  })
+
+  rpc.on('cron.delete', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; id?: string; name?: string }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = cronDelete(path.resolve(p.projectRoot), String(p.id ?? p.name ?? ''))
+    if (!r.ok) throw new Error(r.content)
+    return { ok: true }
+  })
+
+  rpc.on('cron.toggle', (_method, params) => {
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      id?: string
+      name?: string
+      enabled?: boolean
+    }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = cronToggle(
+      path.resolve(p.projectRoot),
+      String(p.id ?? p.name ?? ''),
+      typeof p.enabled === 'boolean' ? p.enabled : undefined,
+    )
+    if (!r.ok) throw new Error(r.content)
+    return { job: r.job }
+  })
+
+  startCronScheduler((due) => fireCronJob(due))
+
   process.on('exit', () => {
+    stopCronScheduler()
     mcpDisconnectAll()
     stopAllTunnels()
   })
   process.on('SIGINT', () => {
+    stopCronScheduler()
     mcpDisconnectAll()
     stopAllTunnels()
     process.exit(0)
   })
   process.on('SIGTERM', () => {
+    stopCronScheduler()
     mcpDisconnectAll()
     stopAllTunnels()
     process.exit(0)

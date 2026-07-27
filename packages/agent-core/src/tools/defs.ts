@@ -608,6 +608,74 @@ export const TOOL_DEFS = [
   {
     type: 'function' as const,
     function: {
+      name: 'cron_create',
+      description:
+        'Create or replace a durable project cron job (5-field schedule, local TZ). Fires prompt as a new agent session while the enpii sidecar is running. Same name replaces.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Unique job name in this project' },
+          schedule: {
+            type: 'string',
+            description: "Cron: 'm h dom mon dow' e.g. '*/30 * * * *' or '0 9 * * 1-5'",
+          },
+          prompt: { type: 'string', description: 'Agent prompt when the job fires' },
+          message: { type: 'string', description: 'Alias for prompt' },
+          enabled: { type: 'boolean', description: 'Default true' },
+        },
+        required: ['name', 'schedule'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'cron_list',
+      description: 'List durable project cron jobs (optional enabled filter).',
+      parameters: {
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean', description: 'If set, only enabled or disabled jobs' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'cron_delete',
+      description: 'Delete a durable project cron job by id or name.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'cron_toggle',
+      description: 'Enable/disable a cron job by id or name. Omit enabled to flip.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          enabled: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'enter_plan_mode',
       description:
         'Enter plan mode: block all writes, shell, git, MCP calls, and sub-agents until exit_plan_mode. Use while researching and drafting a plan.',
@@ -852,6 +920,9 @@ export const WRITE_TOOL_NAMES = new Set([
   'replace_file',
   'memory_write',
   'memory_delete',
+  'cron_create',
+  'cron_delete',
+  'cron_toggle',
 ])
 export const SHELL_TOOL_NAMES = new Set(['run_shell'])
 export const MCP_MUTATING_TOOL_NAMES = new Set(['mcp_call_tool'])
@@ -891,6 +962,7 @@ export const PARALLEL_SAFE_TOOL_NAMES = new Set([
   'mcp_get_prompt',
   'task_get',
   'task_list',
+  'cron_list',
   'plan_tasks',
 ])
 
@@ -935,6 +1007,10 @@ export type ToolName =
   | 'task_list'
   | 'task_update'
   | 'task_stop'
+  | 'cron_create'
+  | 'cron_list'
+  | 'cron_delete'
+  | 'cron_toggle'
   | 'enter_plan_mode'
   | 'exit_plan_mode'
   | 'ask_user'

@@ -167,7 +167,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 | In-loop `agent` + `send_message` | **shipped** (sync nested turn in worktree; depth 1; UI fan-out still available) |
 | Formal plan mode + ask-user | **shipped** (`enter_plan_mode`/`exit_plan_mode` hard-block + `ask_user` → UI) |
 | Parallel tool execution | **shipped** (contiguous read-only tools in one round) |
-| Schedule / cron / durable loop fire | **missing** |
+| Schedule / cron / durable loop fire | **shipped** (`cron_*` + sidecar ticker; agent_turn only while process live) |
 | Hooks, plugins, LSP, notebook, chat channels | out / YAGNI |
 
 ## Next targets
@@ -182,7 +182,7 @@ Ordered by impact for chat-default users; implement one phase at a time:
 4. **P2 Plan + ask** — ✅ `enter_plan_mode` / `exit_plan_mode` hard-block mutations + `ask_user` (options/free-text UI, `session.answer`).
 5. **P2 Parallel tools** — ✅ contiguous `isParallelSafeTool` batch via `Promise.all` (order preserved in transcript).
 6. **P2 MCP depth** — ✅ resources + prompts (`mcp_list/read_resource`, `mcp_list/get_prompt`); OAuth later when needed.
-7. **P3 Schedule** — `cron_*` or host scheduler firing prompts (LE automations primitive; durable across restart).
+7. **P3 Schedule** — ✅ `cron_create|list|delete|toggle` + 15s sidecar ticker (durable `cron.json`; fires new session while enpii runs).
 8. **P3 Swarm depth** — mailbox / task deps / team templates (ClawTeam) only after P1 sub-agent is solid.
 
 ### Shell / ship (parallel, lower agent IQ)

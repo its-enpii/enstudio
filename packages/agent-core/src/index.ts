@@ -49,6 +49,21 @@ export {
 } from './tasks.js'
 export type { BoardTask, TaskStatus } from './tasks.js'
 export {
+  collectDueCronJobs,
+  cronCreate,
+  cronDelete,
+  cronList,
+  cronMarkRan,
+  cronMatches,
+  cronToggle,
+  listAllCronProjectRoots,
+  nextCronFire,
+  startCronScheduler,
+  stopCronScheduler,
+  validateCronExpression,
+} from './cron.js'
+export type { CronJob, DueCronJob } from './cron.js'
+export {
   spawnSubAgent,
   messageSubAgent,
   stopSubAgent,
