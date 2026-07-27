@@ -1306,11 +1306,17 @@
     {#each vendorTabs as tabId (tabId)}
       {@const cli = VENDOR_CLIS.find((c) => c.id === tabId)}
       {#if cli}
-        <div class="agent-model-tab-shell" class:active={agentPane === cli.id}>
+        <div
+          class="flex items-stretch rounded-t-lg border border-b-0 {agentPane === cli.id
+            ? 'border-border-subtle bg-black/35'
+            : 'border-transparent'}"
+        >
           <button
             type="button"
-            class="agent-model-tab"
-            class:active={agentPane === cli.id}
+            class="cursor-pointer whitespace-nowrap border-0 bg-transparent px-3 py-1.5 text-xs font-medium {agentPane ===
+            cli.id
+              ? 'text-white'
+              : 'text-studio-text-dim hover:text-white'}"
             role="tab"
             aria-selected={agentPane === cli.id}
             title={`${cli.command} · model ${app.provider?.model ?? 'enpii settings'}`}
@@ -1318,7 +1324,7 @@
           >{cli.label}</button>
           <button
             type="button"
-            class="agent-model-tab-close"
+            class="cursor-pointer border-0 bg-transparent py-0 pr-2 text-sm leading-none text-studio-text-dim opacity-70 hover:text-[#ff8a9b] hover:opacity-100"
             aria-label={`Close ${cli.label}`}
             title={`Close ${cli.label}`}
             onclick={(e) => {
@@ -1329,10 +1335,10 @@
         </div>
       {/if}
     {/each}
-    <div class="agent-model-add-wrap" bind:this={vendorMenuEl}>
+    <div class="relative ml-auto flex-none self-center" bind:this={vendorMenuEl}>
       <button
         type="button"
-        class="agent-model-add"
+        class="h-[26px] cursor-pointer rounded-full border border-white/12 bg-white/5 px-2.5 text-sm font-semibold leading-none text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
         aria-label="Add vendor agent"
         aria-haspopup="menu"
         aria-expanded={vendorMenuOpen}
@@ -1341,37 +1347,46 @@
         onpointerdown={(e) => e.stopPropagation()}
       >+</button>
       {#if vendorMenuOpen}
-        <div class="agent-model-menu" role="menu" style={vendorMenuStyle}>
+        <div
+          class="fixed z-[200] grid min-w-[200px] gap-0.5 rounded-[10px] border border-white/12 bg-[#1a1a1c] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+          role="menu"
+          style={vendorMenuStyle}
+        >
           {#if !app.activeProject}
-            <p class="agent-model-menu-hint">Open a project first.</p>
+            <p class="mx-1.5 my-1 text-[10px] leading-snug text-studio-text-dim">Open a project first.</p>
           {:else if vendorAvailable.length === 0}
-            <p class="agent-model-menu-hint">All vendor agents already open.</p>
+            <p class="mx-1.5 my-1 text-[10px] leading-snug text-studio-text-dim">All vendor agents already open.</p>
           {:else}
             {#each vendorAvailable as cli (cli.id)}
               <button
                 type="button"
+                class="flex cursor-pointer justify-between gap-2 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-xs text-[#ddd] hover:bg-white/6 hover:text-white"
                 role="menuitem"
                 onclick={() => void addVendorTab(cli.id)}
               >
                 {cli.label}
-                <code>{cli.command}</code>
+                <code class="font-mono text-[10px] text-studio-text-dim">{cli.command}</code>
               </button>
             {/each}
           {/if}
-          <p class="agent-model-menu-hint">
+          <p class="mx-1.5 my-1 text-[10px] leading-snug text-studio-text-dim">
             Model/base URL dari Settings
             {#if app.provider}
-              · <code>{app.provider.model}</code>
+              · <code class="font-mono text-[10px]">{app.provider.model}</code>
             {/if}
           </p>
         </div>
       {/if}
     </div>
   </div>
-  <div class="agent-vendor-pane" class:visible={agentPane !== 'enpii'}>
-    {#if vendorError}<div class="agent-vendor-error">{vendorError}</div>{/if}
-    {#if vendorBusy && !vendorTerms.has(agentPane)}<div class="agent-vendor-loading">Starting…</div>{/if}
-    <div class="agent-vendor-host terminal-host" bind:this={vendorHost}></div>
+  <div
+    class="col-start-1 row-start-2 min-h-0 flex-col {agentPane !== 'enpii' ? 'flex' : 'hidden'}"
+  >
+    {#if vendorError}<div class="px-3 py-2 text-xs text-[#ff8a9b]">{vendorError}</div>{/if}
+    {#if vendorBusy && !vendorTerms.has(agentPane)}
+      <div class="px-3 py-2 text-xs text-studio-text-dim">Starting…</div>
+    {/if}
+    <div class="min-h-0 flex-1 p-2" bind:this={vendorHost}></div>
   </div>
 <div
   class="row-start-2 flex min-h-0 flex-col gap-8 overflow-y-auto p-6 {agentPane !== 'enpii'
