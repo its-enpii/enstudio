@@ -126,5 +126,6 @@ Run focused checks before broad checks.
 - [x] v1 agent: in-loop durable `task_*` board
 - [x] v1 agent: `agent` / worktree sub-agent + `send_message`
 - [x] v1 agent: plan mode + ask_user mid-run
-- [ ] v1 agent: parallel tools, cron (later)
+- [x] v1 agent: parallel read-only tools per round
+- [ ] v1 agent: cron (later)
 - [ ] Signed installers when certs available (codesign / notarize / Authenticode)

@@ -793,6 +793,34 @@ export function isMutatingTool(name: string): boolean {
   )
 }
 
+/** Safe to run concurrently in one assistant round (no shared mutable side effects). */
+export const PARALLEL_SAFE_TOOL_NAMES = new Set([
+  'list_dir',
+  'read_file',
+  'glob',
+  'grep',
+  'search_codebase',
+  'git_status',
+  'git_diff',
+  'git_history',
+  'git_branches',
+  'git_stashes',
+  'git_remotes',
+  'git_tags',
+  'git_conflicts',
+  'memory_search',
+  'web_fetch',
+  'web_search',
+  'mcp_list_tools',
+  'task_get',
+  'task_list',
+  'plan_tasks',
+])
+
+export function isParallelSafeTool(name: string): boolean {
+  return PARALLEL_SAFE_TOOL_NAMES.has(name) && !isMutatingTool(name)
+}
+
 export type ToolName =
   | 'plan_tasks'
   | 'list_dir'

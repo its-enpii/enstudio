@@ -6,7 +6,7 @@ import type { RunTask, SessionMeta } from './types.js'
 import { discoverProjectContext, ensureEnpiiDir, projectContextPrompt } from './context.js'
 import { DEFAULT_DENY_GLOBS } from './tools/run.js'
 import { createRunState, finishRunState, normalizeGoal, updateRunState } from './run-state.js'
-import { GIT_MUTATING_TOOL_NAMES, isMutatingTool, MCP_MUTATING_TOOL_NAMES, SHELL_TOOL_NAMES, TOOL_DEFS, WRITE_TOOL_NAMES } from './tools/defs.js'
+import { GIT_MUTATING_TOOL_NAMES, isMutatingTool, isParallelSafeTool, MCP_MUTATING_TOOL_NAMES, SHELL_TOOL_NAMES, TOOL_DEFS, WRITE_TOOL_NAMES } from './tools/defs.js'
 import { previewWriteTool, runTool, type ToolResult } from './tools/run.js'
 import { messageSubAgent, spawnSubAgent } from './subagent.js'
 import {
@@ -457,7 +457,79 @@ export async function runPromptTurn(opts: {
           },
         })
 
-        for (const tc of toolCalls) {
+        let ti = 0
+        while (ti < toolCalls.length) {
+          const head = toolCalls[ti]!
+          const canBatch =
+            isParallelSafeTool(head.function.name) &&
+            ti + 1 < toolCalls.length &&
+            isParallelSafeTool(toolCalls[ti + 1]!.function.name)
+          if (canBatch) {
+            const start = ti
+            while (ti < toolCalls.length && isParallelSafeTool(toolCalls[ti]!.function.name)) ti++
+            const batch = toolCalls.slice(start, ti)
+            const outcomes = await Promise.all(
+              batch.map((tc) =>
+                execOneTool({
+                  root,
+                  sessionId,
+                  tc,
+                  runtime,
+                  emit,
+                  setStatus,
+                  onApproval: (status) => {
+                    run = updateRunState(run, { status, lastEvent: status })
+                  },
+                  preDecision: roundApprovals.get(tc.id),
+                  skipToolStart: true,
+                  deferMessage: true,
+                  checkpointId,
+                  checkpointPrompt: text,
+                  denyGlobs: config.denyGlobs,
+                  config,
+                }),
+              ),
+            )
+            for (let j = 0; j < batch.length; j++) {
+              const tc = batch[j]!
+              const outcome = outcomes[j]!
+              runtime.messages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                name: tc.function.name,
+                content: outcome.result.content.slice(0, 80_000),
+              })
+              if (outcome.change) changes.push(outcome.change)
+              const modelPlan =
+                tc.function.name === 'plan_tasks' ? plannedTasks(tc.function.arguments || '{}') : null
+              run = updateRunState(
+                run,
+                modelPlan
+                  ? { tasks: modelPlan, lastEvent: 'model_plan_published' }
+                  : {
+                      tasks: run.tasks.map((task) =>
+                        task.id === 'plan'
+                          ? { ...task, status: 'completed' }
+                          : task.id === 'inspect'
+                            ? { ...task, status: 'completed' }
+                            : task.id === 'change'
+                              ? { ...task, status: 'running' }
+                              : task,
+                      ),
+                    },
+              )
+              if (modelPlan) emit({ type: 'task_plan', sessionId, tasks: modelPlan })
+              emit({ type: 'run_state', sessionId, run })
+              run = updateRunState(run, {
+                toolCount: run.toolCount + 1,
+                lastEvent: `tool_${tc.function.name}_completed`,
+              })
+            }
+            continue
+          }
+
+          const tc = head
+          ti++
           const outcome = await execOneTool({
             root,
             sessionId,
@@ -791,6 +863,8 @@ async function execOneTool(opts: {
   preDecision?: 'allow' | 'deny'
   skipApproval?: boolean
   skipToolStart?: boolean
+  /** When true, caller appends tool message (keeps parallel batch order). */
+  deferMessage?: boolean
   checkpointId: string
   checkpointPrompt?: string
   captureCheckpoint?: boolean
@@ -809,6 +883,7 @@ async function execOneTool(opts: {
     preDecision,
     skipApproval = false,
     skipToolStart = false,
+    deferMessage = false,
     checkpointId,
     checkpointPrompt,
     captureCheckpoint = true,
@@ -1108,21 +1183,25 @@ async function execOneTool(opts: {
       summary: result.summary,
       preview: change.diff,
     })
+    if (!deferMessage) {
+      runtime.messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        name,
+        content: result.content.slice(0, 80_000),
+      })
+    }
+    return { change, result }
+  }
+
+  if (!deferMessage) {
     runtime.messages.push({
       role: 'tool',
       tool_call_id: tc.id,
       name,
       content: result.content.slice(0, 80_000),
     })
-    return { change, result }
   }
-
-  runtime.messages.push({
-    role: 'tool',
-    tool_call_id: tc.id,
-    name,
-    content: result.content.slice(0, 80_000),
-  })
   return { result }
 }
 
