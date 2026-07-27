@@ -821,7 +821,7 @@ async function main(): Promise<void> {
       projectRoot: wt.path,
       baseProjectRoot: base,
       worktreeBranch: branch,
-      title: p.title ?? `Worktree · ${branch}`,
+      title: p.title ?? branch,
       permissionMode: p.permissionMode ?? provider.permissionMode,
       model: provider.model,
       dialect: provider.dialect,
@@ -877,7 +877,7 @@ async function main(): Promise<void> {
       projectRoot: wtPath,
       baseProjectRoot: base,
       worktreeBranch: branch,
-      title: `Worktree · ${branch}`,
+      title: branch,
       permissionMode: provider.permissionMode,
       model: provider.model,
       dialect: provider.dialect,
@@ -917,7 +917,7 @@ async function main(): Promise<void> {
           projectRoot: wt.path,
           baseProjectRoot: base,
           worktreeBranch: branch,
-          title: `Agent · ${branch}`,
+          title: branch,
           permissionMode: p.permissionMode ?? provider.permissionMode,
           model: provider.model,
           dialect: provider.dialect,
@@ -1091,6 +1091,23 @@ async function main(): Promise<void> {
 
   rpc.on('session.list', (_method, params) => {
     const p = (params ?? {}) as { projectRoot?: string }
+    const listed = sessions.list(p.projectRoot)
+    // Prune empty worktree chats whose git checkout is already gone (orphan clutter).
+    for (const meta of listed) {
+      if (!meta.baseProjectRoot) continue
+      const messages = sessions.getMessages(meta.id)
+      if (messages.length > 0) continue
+      const live = runtimes.get(meta.id)
+      if (live && (live.meta.status === 'running' || live.meta.status === 'awaiting_approval')) continue
+      try {
+        const trees = gitWorktreeList(meta.baseProjectRoot)
+        const target = path.resolve(meta.projectRoot)
+        const alive = trees.some((w) => path.resolve(w.path) === target)
+        if (!alive) sessions.setStatus(meta.id, 'archived')
+      } catch {
+        /* keep listed if git probe fails */
+      }
+    }
     return sessions.list(p.projectRoot).map((meta) => {
       const messages = sessions.getMessages(meta.id)
       const live = runtimes.get(meta.id)

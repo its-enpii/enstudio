@@ -491,12 +491,13 @@
     {#if isWorktreeSession}
       <div class="worktree-banner">
         <div class="worktree-banner-row">
-          <span class="worktree-banner-title">Isolated · <code>{app.session?.worktreeBranch ?? 'worktree'}</code></span>
+          <span class="worktree-banner-title"><code>{app.session?.worktreeBranch ?? app.session?.title ?? 'worktree'}</code></span>
           <div class="worktree-banner-actions">
             <button type="button" class="wt-mini" disabled={wtBusy || app.busy} onclick={() => void onRefreshWorktree()}>Refresh</button>
-            <button type="button" class="wt-close" disabled={wtBusy || app.busy} title="Close and discard worktree" aria-label="Close and discard worktree" onclick={requestDiscardWorktree}>×</button>
+            <button type="button" class="wt-close" disabled={wtBusy || app.busy} title="Discard this worktree (tree + chat)" aria-label="Discard worktree" onclick={requestDiscardWorktree}>×</button>
           </div>
         </div>
+        <div class="worktree-meta muted">One unit: git checkout + this chat. Apply merges to main; Discard deletes both.</div>
         {#if wtError}
           <div class="worktree-error">{wtError}</div>
         {:else if wtPreview}
@@ -625,9 +626,9 @@
                 <span class="session-history-copy">
                   <span class="session-history-name">
                     {#if s.worktreeBranch || s.baseProjectRoot}<span class="wt-tag">wt</span>{/if}
-                    {s.title}
+                    {s.worktreeBranch ?? s.title}
                   </span>
-                  <span class="session-history-meta">{s.messageCount ?? 0} msg · {formatBytes(s.sizeBytes ?? 0)}{#if s.worktreeBranch} · {s.worktreeBranch}{/if}</span>
+                  <span class="session-history-meta">{s.messageCount ?? 0} msg · {formatBytes(s.sizeBytes ?? 0)}</span>
                 </span>
                 <span class="session-history-status">
                   {#if app.isSessionBusy(s.id) && s.id !== app.session?.id}running
@@ -718,10 +719,10 @@
     {#if orphanWorktrees.length > 0}
       <details class="worktree-list worktree-list-compact" open>
         <summary class="worktree-list-label muted">
-          Unattached trees · {orphanWorktrees.length}
+          Orphan checkouts · {orphanWorktrees.length}
         </summary>
         <p class="worktree-list-hint muted">
-          Git checkout without a chat — Open attaches, × deletes tree.
+          Checkout without chat (rare). Open = attach chat; × = delete tree only.
         </p>
         {#each orphanWorktrees as wt (wt.path)}
           <div class="worktree-list-item" title={wt.path}>
