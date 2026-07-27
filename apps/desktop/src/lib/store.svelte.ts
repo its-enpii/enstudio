@@ -84,41 +84,64 @@ export interface ProjectLayout {
 
 /** Shell column floors / caps (px). */
 export const LAYOUT_MIN = {
-  sidebar: 180,
-  inspector: 220,
-  center: 420,
+  sidebar: 200,
+  inspector: 300,
+  center: 360,
 } as const
 export const LAYOUT_MAX = {
   sidebar: 420,
-  inspector: 480,
+  inspector: 520,
+} as const
+export const LAYOUT_DEFAULT = {
+  sidebar: 256,
+  inspector: 320,
 } as const
 
 /** Shell chrome: pad 8×2 + gap 8×2. */
 const LAYOUT_CHROME = 32
+
+/**
+ * Heal widths left by old git 2-col / minmax collapse.
+ * Anything below the healthy default for inspector was almost always corruption, not user choice.
+ */
+function healRail(raw: number, fallback: number, min: number): number {
+  if (!Number.isFinite(raw)) return fallback
+  // Pre-fix floors were 180/220 — treat residual mins as broken.
+  if (raw < min) return fallback
+  if (raw < fallback * 0.85 && raw <= 260) return fallback
+  return raw
+}
 
 export function clampProjectLayout(
   patch: Partial<ProjectLayout>,
   current?: ProjectLayout,
   opts?: { viewportWidth?: number },
 ): ProjectLayout {
-  let side = Number(patch.sidebarWidth ?? current?.sidebarWidth ?? 256)
-  let insp = Number(patch.inspectorWidth ?? current?.inspectorWidth ?? 288)
-  if (!Number.isFinite(side)) side = 256
-  if (!Number.isFinite(insp)) insp = 288
+  const patchSide = patch.sidebarWidth
+  const patchInsp = patch.inspectorWidth
+  let side = Number(
+    patchSide ?? healRail(Number(current?.sidebarWidth), LAYOUT_DEFAULT.sidebar, LAYOUT_MIN.sidebar),
+  )
+  let insp = Number(
+    patchInsp ?? healRail(Number(current?.inspectorWidth), LAYOUT_DEFAULT.inspector, LAYOUT_MIN.inspector),
+  )
+  if (!Number.isFinite(side)) side = LAYOUT_DEFAULT.sidebar
+  if (!Number.isFinite(insp)) insp = LAYOUT_DEFAULT.inspector
+  // Explicit drag/patch still heals absurd lows.
+  if (patchSide === undefined) side = healRail(side, LAYOUT_DEFAULT.sidebar, LAYOUT_MIN.sidebar)
+  if (patchInsp === undefined) insp = healRail(insp, LAYOUT_DEFAULT.inspector, LAYOUT_MIN.inspector)
   side = Math.min(LAYOUT_MAX.sidebar, Math.max(LAYOUT_MIN.sidebar, side))
   insp = Math.min(LAYOUT_MAX.inspector, Math.max(LAYOUT_MIN.inspector, insp))
   const avail =
     (opts?.viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1400)) - LAYOUT_CHROME
-  // Keep center floor: side + center + inspector ≤ usable width (all modes).
   const budget = Math.max(LAYOUT_MIN.sidebar + LAYOUT_MIN.center + LAYOUT_MIN.inspector, avail)
-  // Prefer trimming the wider rail first so center never collapses to a dead band.
   if (side + insp > budget - LAYOUT_MIN.center) {
     const railBudget = Math.max(LAYOUT_MIN.sidebar + LAYOUT_MIN.inspector, budget - LAYOUT_MIN.center)
-    const total = side + insp
-    side = Math.max(LAYOUT_MIN.sidebar, Math.round((side / total) * railBudget))
-    insp = Math.max(LAYOUT_MIN.inspector, railBudget - side)
+    // Prefer keeping inspector readable — trim sidebar first.
+    side = Math.min(side, Math.max(LAYOUT_MIN.sidebar, railBudget - LAYOUT_MIN.inspector))
+    insp = Math.min(insp, Math.max(LAYOUT_MIN.inspector, railBudget - side))
     if (side + insp > railBudget) {
-      insp = Math.max(LAYOUT_MIN.inspector, railBudget - side)
+      side = Math.max(LAYOUT_MIN.sidebar, railBudget - insp)
     }
   }
   return { sidebarWidth: Math.round(side), inspectorWidth: Math.round(insp) }
@@ -636,7 +659,7 @@ class AppState {
       id,
       name,
       path: folderPath,
-      layout: { sidebarWidth: 256, inspectorWidth: 288 },
+      layout: { sidebarWidth: LAYOUT_DEFAULT.sidebar, inspectorWidth: LAYOUT_DEFAULT.inspector },
     }
     this.projects = sortProjects([project, ...this.projects])
     saveProjects(this.projects)

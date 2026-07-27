@@ -93,7 +93,7 @@ textarea {
 /* ── shell: pad/gap 8px ── */
 .app-shell {
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr) 288px;
+  grid-template-columns: 256px minmax(0, 1fr) 320px;
   gap: var(--space);
   padding: var(--space);
   height: 100%;

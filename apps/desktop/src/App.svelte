@@ -11,27 +11,23 @@
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import CommandPalette from './lib/components/CommandPalette.svelte'
   import NotificationCenter from './lib/components/NotificationCenter.svelte'
-  import { state, clampProjectLayout, LAYOUT_MIN } from './lib/store.svelte'
+  import { state, clampProjectLayout } from './lib/store.svelte'
   import { bindEnpiiEvents, pingEnpii, hydrateProjectSession } from './lib/enpii'
 
   const layoutStyle = $derived.by(() => {
-    // Always clamp against live viewport — never trust raw localStorage widths.
     const layout = clampProjectLayout({}, state.activeProject?.layout)
-    const side = layout.sidebarWidth
-    const insp = layout.inspectorWidth
-    // Fixed side rails + flexible center. Avoid minmax(min, pref) which left
-    // empty dead space / crushed rails after git-mode width corruption.
-    return `grid-template-columns:${side}px minmax(${LAYOUT_MIN.center}px, 1fr) ${insp}px`
+    // Fixed rails + pure 1fr center (no minmax floor that invents empty band).
+    return `grid-template-columns:${layout.sidebarWidth}px minmax(0, 1fr) ${layout.inspectorWidth}px`
   })
 
   let drag: null | { edge: 'sidebar' | 'inspector'; startX: number; startW: number } = null
 
   function onResizeStart(edge: 'sidebar' | 'inspector', e: PointerEvent): void {
-    const layout = state.activeProject?.layout
+    const layout = clampProjectLayout({}, state.activeProject?.layout)
     drag = {
       edge,
       startX: e.clientX,
-      startW: edge === 'sidebar' ? (layout?.sidebarWidth ?? 256) : (layout?.inspectorWidth ?? 288),
+      startW: edge === 'sidebar' ? layout.sidebarWidth : layout.inspectorWidth,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
