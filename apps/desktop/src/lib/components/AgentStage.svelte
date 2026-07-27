@@ -1550,29 +1550,29 @@
                   {@const pending = pendingForTool(m.tool.callId)}
                   {@const askPending = pendingAskForTool(m.tool.callId)}
                   {#if askPending}
-                    <div class="action-card ask-card">
-                      <div class="action-head">
-                        <div class="action-head-left">
+                    <div class="overflow-hidden rounded-2xl border border-[#aba3ff]/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+                      <div class="flex items-center justify-between gap-3 border-b border-[#aba3ff]/20 bg-[#aba3ff]/10 px-4 py-2">
+                        <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#aba3ff]">
                           <span>Question</span>
                           {#if app.pendingAsks.length > 1}
-                            <span class="action-queue-count">{app.pendingAsks.length} pending</span>
+                            <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
                           {/if}
                         </div>
-                        <span class="action-badge">ask_user</span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-[#aba3ff]/60">ask_user</span>
                       </div>
-                      <div class="action-body">
-                        <p class="action-copy">{askPending.question}</p>
+                      <div class="p-5">
+                        <p class="mb-4 text-xs leading-relaxed text-studio-text">{askPending.question}</p>
                         {#if askPending.options?.length}
-                          <div class="ask-options">
+                          <div class="mb-3 flex flex-wrap gap-2">
                             {#each askPending.options as opt (opt)}
-                              <button type="button" class="btn-allow-full" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
+                              <button type="button" class="min-w-[120px] flex-1 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
                             {/each}
                           </div>
                         {/if}
-                        <div class="ask-free">
+                        <div class="grid grid-cols-[1fr_auto] gap-2">
                           <input
                             type="text"
-                            class="ask-input"
+                            class="min-h-[42px] w-full rounded-xl border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-[#aba3ff]/55"
                             placeholder="Type an answer…"
                             value={askDraft(askPending.requestId)}
                             oninput={(e) => setAskDraft(askPending.requestId, (e.currentTarget as HTMLInputElement).value)}
@@ -1585,7 +1585,7 @@
                           />
                           <button
                             type="button"
-                            class="btn-allow-full"
+                            class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
                             disabled={!askDraft(askPending.requestId).trim()}
                             onclick={() => submitAsk(askPending.requestId)}
                           >Submit</button>
@@ -1593,88 +1593,45 @@
                       </div>
                     </div>
                   {:else if pending}
-                    <div class="action-card">
-                      <div class="action-head">
-                        <div class="action-head-left">
-                          <svg
-                            class="action-ico"
-                            width="16"
-                            height="16"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                            aria-hidden="true"
-                          >
-                            <path
-                              fill-rule="evenodd"
-                              d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                              clip-rule="evenodd"
-                            ></path>
+                    <div class="overflow-hidden rounded-2xl border border-studio-gold/30 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+                      <div class="flex items-center justify-between gap-3 border-b border-studio-gold/20 bg-studio-gold/10 px-4 py-2">
+                        <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-gold">
+                          <svg class="size-4 shrink-0 text-studio-gold" width="16" height="16" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                           </svg>
                           <span>Action Required</span>
                           {#if app.pendingApprovals.length > 1}
-                            <span class="action-queue-count">{app.pendingApprovals.length} pending</span>
+                            <span class="text-[9px] text-studio-gold/75">{app.pendingApprovals.length} pending</span>
                           {/if}
                         </div>
-                        <span class="action-badge">
-                            {approvalKind(pending.name)}
-                          </span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-studio-gold/60">{approvalKind(pending.name)}</span>
                       </div>
-                      <div class="action-body">
-                        <p class="action-copy">
-                          <span class="enpii-name">enpii</span> wants to {approvalVerb(pending.name)}
-                          <code class="path-chip">{approvalPath(pending)}</code>
+                      <div class="p-5">
+                        <p class="mb-4 text-xs leading-relaxed text-studio-text">
+                          <span class="font-bold text-studio-purple">enpii</span> wants to {approvalVerb(pending.name)}
+                          <code class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[12px] text-[#c6c0ff]">{approvalPath(pending)}</code>
                         </p>
                         {#if pending.preview}
                           {#if isUnifiedDiff(pending.preview)}
-                            <div class="diff-view">
+                            <div class="mb-5 max-h-55 overflow-auto rounded-lg border border-white/6 bg-[#0d1117] py-1 font-mono text-[11px] leading-snug">
                               {#each pending.preview.split('\n') as line, li (`d-${li}`)}
-                                <div class="diff-line {diffLineClass(line)}">{line || ' '}</div>
+                                <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-3 {diffLineClass(line)}">{line || ' '}</div>
                               {/each}
                             </div>
                           {:else}
-                            <pre class="action-preview">{pending.preview}</pre>
+                            <pre class="mb-5 max-h-35 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/35 p-3 font-mono text-[11px] text-studio-text-dim">{pending.preview}</pre>
                           {/if}
                         {/if}
-                        <div class="action-actions">
-                          <button
-                            type="button"
-                            class="btn-deny-full"
-                            onclick={() => void respondApproval('deny', pending.requestId)}
-                          >
-                            Deny
-                          </button>
-                          <button
-                            type="button"
-                            class="btn-allow-full"
-                            onclick={() => void respondApproval('allow', pending.requestId)}
-                          >
-                            {approvalButton(pending.name)}
-                          </button>
-                          <button
-                            type="button"
-                            class="btn-allow-full"
-                            title="Auto-allow this action kind for the rest of the session"
-                            onclick={() => void respondApproval('allow', pending.requestId, 'session')}
-                          >
-                            Allow for session
-                          </button>
+                        <div class="grid grid-cols-2 gap-4">
+                          <button type="button" class="rounded-xl bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondApproval('deny', pending.requestId)}>Deny</button>
+                          <button type="button" class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondApproval('allow', pending.requestId)}>{approvalButton(pending.name)}</button>
+                          <button type="button" class="col-span-2 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Auto-allow this action kind for the rest of the session" onclick={() => void respondApproval('allow', pending.requestId, 'session')}>Allow for session</button>
                         </div>
                         {#if app.pendingApprovals.length > 1 && app.pendingApprovals[0]?.requestId === pending.requestId}
-                          <div class="action-batch">
-                            <button type="button" class="btn-deny-full" onclick={() => void respondAllApprovals('deny')}>
-                              Deny all ({app.pendingApprovals.length})
-                            </button>
-                            <button type="button" class="btn-allow-full" onclick={() => void respondAllApprovals('allow')}>
-                              Allow all ({app.pendingApprovals.length})
-                            </button>
-                            <button
-                              type="button"
-                              class="btn-allow-full"
-                              title="Allow these kinds for the rest of the session"
-                              onclick={() => void respondAllApprovals('allow', 'session')}
-                            >
-                              Allow all for session
-                            </button>
+                          <div class="mt-3 grid grid-cols-2 gap-2 border-t border-studio-gold/15 pt-3">
+                            <button type="button" class="rounded-xl bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondAllApprovals('deny')}>Deny all ({app.pendingApprovals.length})</button>
+                            <button type="button" class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondAllApprovals('allow')}>Allow all ({app.pendingApprovals.length})</button>
+                            <button type="button" class="col-span-2 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Allow these kinds for the rest of the session" onclick={() => void respondAllApprovals('allow', 'session')}>Allow all for session</button>
                           </div>
                         {/if}
                       </div>
