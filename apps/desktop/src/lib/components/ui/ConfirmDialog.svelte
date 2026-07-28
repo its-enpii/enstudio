@@ -58,12 +58,12 @@
     }}
   >
     <div
-      class="w-full max-w-sm rounded-xl border border-border-subtle bg-studio-card p-5 shadow-2xl"
+      class="w-full max-w-sm rounded-lg border border-border-subtle bg-studio-card p-5 shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ui-confirm-title"
     >
-      <div class="mb-3 flex size-9 items-center justify-center rounded-full bg-studio-gold/15 text-sm font-bold text-studio-gold">
+      <div class="mb-3 flex size-9 items-center justify-center rounded-lg bg-studio-gold/15 text-sm font-bold text-studio-gold">
         !
       </div>
       <div class="mb-4">
@@ -78,12 +78,12 @@
         <button
           bind:this={cancelBtn}
           type="button"
-          class="rounded-full border border-border-subtle px-3 py-1.5 text-xs text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
+          class="rounded-lg border border-border-subtle px-4 py-2 text-xs text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
           onclick={cancel}>{cancelLabel}</button
         >
         <button
           type="button"
-          class="rounded-full px-3 py-1.5 text-xs font-medium {danger
+          class="rounded-lg px-4 py-2 text-xs font-medium {danger
             ? 'bg-danger-bg text-danger border border-danger/25'
             : 'bg-studio-purple text-white'}"
           onclick={confirm}>{confirmLabel}</button

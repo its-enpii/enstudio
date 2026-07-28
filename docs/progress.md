@@ -8,9 +8,9 @@ Last updated: 2026-07-27 (v0 daily-driver closed; agent roadmap vs `reference/` 
 ### Shell & monorepo
 - Electron + Svelte 5 + Vite monorepo (`apps/desktop`, `packages/agent-core`)
 - UI chrome from `docs/design/code.html`: 3-pane shell, top mode nav, project sidebar, inspector
-- Spacing: **8px** shell pad/gap (product choice; mock used 16px in places)
+- Spacing: **16px** shell pad/gap (`p-4`/`gap-4`) matching `code.html` (source of truth)
 - Open folder as icon beside sidebar search
-- Plain CSS tokens (`--studio-*`) — **not** Tailwind (migrate deferred)
+- Tailwind v4 tokens via `app.css` `@theme` (`studio-*` palette from mock)
 
 ### Agent core (`@enpiistudio/agent-core`)
 - stdio JSON-RPC sidecar: `health`, `config.get`/`config.set`, `session.*`, `git.*`

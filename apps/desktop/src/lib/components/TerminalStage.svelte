@@ -5,6 +5,7 @@
   import '@xterm/xterm/css/xterm.css'
   import { listSsh, type SshHostInfo } from '../enpii'
   import { state as app } from '../store.svelte'
+  import { xtermTheme } from '../theme'
 
   type TerminalTab = { id: string; title: string; exited: boolean }
   type PaneIds = [string | null, string | null]
@@ -224,23 +225,7 @@
         scrollback: 5_000,
         // Disable bold → bright swap thrash some TUIs re-render on.
         drawBoldTextInBrightColors: false,
-        theme: {
-          background: '#090909',
-          foreground: '#d9d9dc',
-          cursor: '#e6af2e',
-          cursorAccent: '#090909',
-          selectionBackground: '#384f8f99',
-          black: '#171717',
-          red: '#ff6b81',
-          green: '#8bd49c',
-          yellow: '#e6af2e',
-          blue: '#82aaff',
-          magenta: '#c792ea',
-          cyan: '#67d4d0',
-          white: '#d9d9dc',
-          brightBlack: '#737884',
-          brightWhite: '#ffffff',
-        },
+        theme: { ...xtermTheme },
       })
       const fit = new FitAddon()
       terminal.loadAddon(fit)
@@ -423,13 +408,20 @@
   })
 </script>
 
-<div class="stage terminal-stage">
-  <div class="terminal-toolbar">
-    <button type="button" class="terminal-split terminal-split-global" aria-label="Split terminal" title="Split terminal" onclick={() => void splitTerminal()}>▥</button>
-    <div class="vendor-cli-wrap">
+
+<div class="relative flex h-full min-h-0 flex-col p-0">
+  <div class="absolute right-0 top-0 z-[6] flex items-center justify-end gap-2 px-2 pt-1.5">
+    <button
+      type="button"
+      class="rounded px-1.5 py-1 font-mono text-[13px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+      aria-label="Split terminal"
+      title="Split terminal"
+      onclick={() => void splitTerminal()}>▥</button
+    >
+    <div class="relative">
       <button
         type="button"
-        class="vendor-cli-btn"
+        class="cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 py-1 text-xs text-studio-text-dim hover:border-studio-gold/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
         aria-haspopup="menu"
         aria-expanded={sshMenuOpen}
         title="Open SSH host"
@@ -442,47 +434,200 @@
         SSH ▾
       </button>
       {#if sshMenuOpen}
-        <div class="vendor-cli-menu" role="menu">
+        <div
+          class="absolute right-0 top-full z-20 mt-1 grid min-w-[200px] gap-0.5 rounded-lg border border-white/12 bg-studio-elevated p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+          role="menu"
+        >
           {#if sshHosts.length === 0}
-            <p class="vendor-cli-hint">No hosts in ~/.enpiistudio/ssh.json</p>
+            <p class="mx-1 my-0.5 max-w-[200px] text-[10px] text-studio-text-dim">No hosts in ~/.enpiistudio/ssh.json</p>
           {:else}
             {#each sshHosts as h (h.name)}
-              <button type="button" role="menuitem" onclick={() => void launchSshHost(h)}>
+              <button
+                type="button"
+                class="flex cursor-pointer justify-between gap-2 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-xs text-studio-text hover:bg-white/6"
+                role="menuitem"
+                onclick={() => void launchSshHost(h)}
+              >
                 {h.name}
-                <code>{h.user ? `${h.user}@` : ''}{h.host}</code>
+                <code class="text-[10px] text-studio-text-dim">{h.user ? `${h.user}@` : ''}{h.host}</code>
               </button>
             {/each}
           {/if}
-          <p class="vendor-cli-hint">Interactive ssh via PTY. Keys/agent must work non-interactively or you type password in the tab.</p>
+          <p class="mx-1 my-0.5 max-w-[200px] text-[10px] text-studio-text-dim">
+            Interactive ssh via PTY. Keys/agent must work non-interactively or you type password in the tab.
+          </p>
         </div>
       {/if}
     </div>
   </div>
-  <section class="terminal-panel" class:split={Boolean(paneIds[1])}>
-    {#if error}<div class="terminal-error">{error}</div>{/if}
-    {#if tabs.length === 0 && !error}
-      <button type="button" class="terminal-empty-new" onclick={() => void addTerminal()}>New Terminal</button>
+  <section
+    class="relative min-h-0 flex-1 overflow-hidden {paneIds[1]
+      ? 'grid grid-cols-2'
+      : 'grid grid-cols-1'}"
+  >
+    {#if error}
+      <div class="absolute inset-x-0 top-10 z-10 p-3.5 font-mono text-[11px] text-studio-error">{error}</div>
     {/if}
-    <div class="terminal-pane" class:focused={focusedPane === 0} onfocusin={() => void focusPane(0)}>
-      <div class="terminal-pane-tabs" role="tablist" aria-label="Primary terminal pane">
+    {#if tabs.length === 0 && !error}
+      <button
+        type="button"
+        class="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-md border border-studio-purple/42 bg-studio-purple/18 px-3 py-2 text-[11px] text-studio-lavender-muted"
+        onclick={() => void addTerminal()}>New Terminal</button
+      >
+    {/if}
+    <div
+      class="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] overflow-hidden {focusedPane === 0
+        ? 'shadow-[inset_0_1px_0_var(--color-studio-purple-active)]'
+        : ''}"
+      onfocusin={() => void focusPane(0)}
+    >
+      <div
+        class="flex min-h-9 min-w-0 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
+        role="tablist"
+        aria-label="Primary terminal pane"
+      >
         {#each paneTabs[0] as id (id)}
           {@const tab = tabs.find((item) => item.id === id)}
-          {#if tab}<div class="terminal-tab-shell" class:active={tab.id === activeId}>{#if editingId === tab.id}<input class="terminal-rename" bind:this={renameInput} bind:value={editingTitle} aria-label="Terminal name" onblur={() => finishRename(true)} onkeydown={(event) => { if (event.key === 'Enter') finishRename(true); if (event.key === 'Escape') finishRename(false) }} />{:else}<button type="button" class="terminal-tab" role="tab" aria-selected={tab.id === activeId} onclick={() => void activateTerminal(tab.id, 0)} ondblclick={() => startRename(tab)}><span class="terminal-tab-dot" class:exited={tab.exited}></span>{tab.title}</button>{/if}<button type="button" class="terminal-tab-close" aria-label={`Close ${tab.title}`} onclick={() => void closeTerminal(tab.id)}>×</button></div>{/if}
+          {#if tab}
+            <div
+              class="flex items-center border-r border-white/5 {tab.id === activeId
+                ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]'
+                : ''}"
+            >
+              {#if editingId === tab.id}
+                <input
+                  class="mx-1 rounded border border-studio-purple/75 bg-black/38 px-1.5 py-0.5 font-mono text-[10px] text-studio-text outline-none"
+                  bind:this={renameInput}
+                  bind:value={editingTitle}
+                  aria-label="Terminal name"
+                  onblur={() => finishRename(true)}
+                  onkeydown={(event) => {
+                    if (event.key === 'Enter') finishRename(true)
+                    if (event.key === 'Escape') finishRename(false)
+                  }}
+                />
+              {:else}
+                <button
+                  type="button"
+                  class="flex items-center gap-1.5 px-1.5 py-2 pl-2.5 font-mono text-[10px] {tab.id === activeId
+                    ? 'text-studio-text'
+                    : 'text-studio-text-dim hover:text-studio-text'}"
+                  role="tab"
+                  aria-selected={tab.id === activeId}
+                  onclick={() => void activateTerminal(tab.id, 0)}
+                  ondblclick={() => startRename(tab)}
+                >
+                  <span
+                    class="size-1.5 rounded-lg {tab.exited ? 'bg-studio-text-dim' : 'bg-studio-success'}"
+                  ></span>
+                  {tab.title}
+                </button>
+              {/if}
+              <button
+                type="button"
+                class="mx-1 rounded px-1 py-1 font-mono text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                aria-label={`Close ${tab.title}`}
+                onclick={() => void closeTerminal(tab.id)}>×</button
+              >
+            </div>
+          {/if}
         {/each}
-        <button type="button" class="terminal-new" aria-label="New terminal" title="New terminal" onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}>+</button>
+        <button
+          type="button"
+          class="ml-1.5 rounded px-1.5 py-1 font-mono text-base text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          aria-label="New terminal"
+          title="New terminal"
+          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}>+</button
+        >
       </div>
-      <div class="terminal-host" bind:this={primaryHost}></div>
+      <div class="box-border h-full min-h-0 w-full p-3" bind:this={primaryHost}></div>
     </div>
-    <div class="terminal-pane secondary" class:visible={Boolean(paneIds[1])} class:focused={focusedPane === 1} onfocusin={() => void focusPane(1)}>
-      <div class="terminal-pane-tabs" role="tablist" aria-label="Secondary terminal pane">
+    <div
+      class="min-h-0 min-w-0 overflow-hidden border-l border-white/8 {paneIds[1]
+        ? 'grid grid-rows-[36px_minmax(0,1fr)]'
+        : 'hidden'} {focusedPane === 1 ? 'shadow-[inset_0_1px_0_var(--color-studio-purple-active)]' : ''}"
+      onfocusin={() => void focusPane(1)}
+    >
+      <div
+        class="flex min-h-9 min-w-0 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
+        role="tablist"
+        aria-label="Secondary terminal pane"
+      >
         {#each paneTabs[1] as id (id)}
           {@const tab = tabs.find((item) => item.id === id)}
-          {#if tab}<div class="terminal-tab-shell" class:active={tab.id === activeId}>{#if editingId === tab.id}<input class="terminal-rename" bind:this={renameInput} bind:value={editingTitle} aria-label="Terminal name" onblur={() => finishRename(true)} onkeydown={(event) => { if (event.key === 'Enter') finishRename(true); if (event.key === 'Escape') finishRename(false) }} />{:else}<button type="button" class="terminal-tab" role="tab" aria-selected={tab.id === activeId} onclick={() => void activateTerminal(tab.id, 1)} ondblclick={() => startRename(tab)}><span class="terminal-tab-dot" class:exited={tab.exited}></span>{tab.title}</button>{/if}<button type="button" class="terminal-tab-close" aria-label={`Close ${tab.title}`} onclick={() => void closeTerminal(tab.id)}>×</button></div>{/if}
+          {#if tab}
+            <div
+              class="flex items-center border-r border-white/5 {tab.id === activeId
+                ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]'
+                : ''}"
+            >
+              {#if editingId === tab.id}
+                <input
+                  class="mx-1 rounded border border-studio-purple/75 bg-black/38 px-1.5 py-0.5 font-mono text-[10px] text-studio-text outline-none"
+                  bind:this={renameInput}
+                  bind:value={editingTitle}
+                  aria-label="Terminal name"
+                  onblur={() => finishRename(true)}
+                  onkeydown={(event) => {
+                    if (event.key === 'Enter') finishRename(true)
+                    if (event.key === 'Escape') finishRename(false)
+                  }}
+                />
+              {:else}
+                <button
+                  type="button"
+                  class="flex items-center gap-1.5 px-1.5 py-2 pl-2.5 font-mono text-[10px] {tab.id === activeId
+                    ? 'text-studio-text'
+                    : 'text-studio-text-dim hover:text-studio-text'}"
+                  role="tab"
+                  aria-selected={tab.id === activeId}
+                  onclick={() => void activateTerminal(tab.id, 1)}
+                  ondblclick={() => startRename(tab)}
+                >
+                  <span
+                    class="size-1.5 rounded-lg {tab.exited ? 'bg-studio-text-dim' : 'bg-studio-success'}"
+                  ></span>
+                  {tab.title}
+                </button>
+              {/if}
+              <button
+                type="button"
+                class="mx-1 rounded px-1 py-1 font-mono text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                aria-label={`Close ${tab.title}`}
+                onclick={() => void closeTerminal(tab.id)}>×</button
+              >
+            </div>
+          {/if}
         {/each}
-        <button type="button" class="terminal-new" aria-label="New terminal in split pane" title="New terminal in split pane" onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}>+</button>
-        <button type="button" class="terminal-tab-close" aria-label="Close split pane" title="Close split pane" onclick={(event) => { event.stopPropagation(); void closeSplit() }}>×</button>
+        <button
+          type="button"
+          class="ml-1.5 rounded px-1.5 py-1 font-mono text-base text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          aria-label="New terminal in split pane"
+          title="New terminal in split pane"
+          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}>+</button
+        >
+        <button
+          type="button"
+          class="mx-1 rounded px-1 py-1 font-mono text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          aria-label="Close split pane"
+          title="Close split pane"
+          onclick={(event) => {
+            event.stopPropagation()
+            void closeSplit()
+          }}>×</button
+        >
       </div>
-      <div class="terminal-host" bind:this={secondaryHost}></div>
+      <div class="box-border h-full min-h-0 w-full p-3" bind:this={secondaryHost}></div>
     </div>
   </section>
 </div>
+
+<!-- xterm injects .xterm; host needs height chain -->
+<style>
+  :global(.xterm) {
+    height: 100%;
+  }
+  :global(.xterm-viewport) {
+    overflow-y: auto !important;
+  }
+</style>

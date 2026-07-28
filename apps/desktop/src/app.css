@@ -2,24 +2,75 @@
 
 /* Design tokens → Tailwind theme (docs/design/code.html). */
 @theme {
-  --color-studio-dark: #040303;
-  --color-studio-card: #141414;
-  --color-studio-panel: #0c0c0c;
+  /* Anchors (locked): purple #3D348B · gold #E6AF2E */
   --color-studio-purple: #3d348b;
   --color-studio-gold: #e6af2e;
-  --color-studio-grey: #1f1f1f;
-  --color-studio-text: #e2e2e2;
-  --color-studio-text-dim: #8e8e8e;
-  --color-border-subtle: rgba(255, 255, 255, 0.05);
+
+  /* Void canvas — cool ink, not pure OLED black */
+  --color-studio-dark: #06050a;
+  --color-studio-panel: #0c0b12;
+  --color-studio-card: #14131c;
+  --color-studio-grey: #1c1b26;
+  --color-studio-text: #eceaf4;
+  --color-studio-text-dim: #9a97a8;
+  --color-border-subtle: rgba(198, 192, 255, 0.07);
   --color-danger: #ffb4ab;
   --color-danger-bg: rgba(147, 0, 10, 0.35);
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-  --radius-md: 12px;
+
+  /* Lavender = intelligence / plan / ask (tints of locked purple) */
+  --color-studio-lavender: #aba3ff;
+  --color-studio-lavender-bright: #c6c0ff;
+  --color-studio-lavender-soft: #c9c4ff;
+  --color-studio-lavender-muted: #bcb6ff;
+  --color-studio-lavender-deep: #897fff;
+  --color-studio-violet: #9e83ff;
+  --color-studio-purple-bright: #665bd6;
+  --color-studio-purple-active: #6e65d9;
+
+  /* Success — cool mint, never competes with gold */
+  --color-studio-success: #3dba8b;
+  --color-studio-success-bright: #7dcea0;
+  --color-studio-success-soft: #69ce9b;
+  --color-studio-success-text: #79d9a7;
+  --color-studio-success-shell: #8bd49c;
+  --color-studio-success-out: #c8e6c9;
+
+  /* Soft UI errors */
+  --color-studio-error: #ff8a9b;
+  --color-studio-error-soft: #ff9b9b;
+  --color-studio-error-bright: #ff6b81;
+
+  /* Surfaces — purple-ink lift */
+  --color-studio-shell: #09080f;
+  --color-studio-shell-deep: #05040a;
+  --color-studio-shell-green: #0a0f0c;
+  --color-studio-diff-bg: #0c0f16;
+  --color-studio-elevated: #1a1924;
+  --color-studio-popover: #1f1e2a;
+  --color-studio-sidebar: #090811;
+
+  /* Misc */
+  --color-studio-amber: #e8c66e;
+  --color-studio-link: #a8b8ff;
+  --color-studio-scrollbar: #3a3850;
+  --color-studio-scrollbar-hover: #5a5770;
+
+  /* Chrome panes = 24. Everything else = 18. No pills / full / 999. */
   --radius-sm: 8px;
-  --radius-control: 999px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 24px;
+  --radius-3xl: 24px;
+
+  /* Structure vs signal */
+  --color-chrome-border: color-mix(in srgb, var(--color-studio-purple) 22%, transparent);
+  --color-chrome-border-hover: color-mix(in srgb, var(--color-studio-purple) 45%, transparent);
+  --ease-studio: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Mock wants Inter + JetBrains Mono; CSP blocks CDN — system stacks closest. */
   --font-sans: Inter, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 @layer base {
@@ -29,14 +80,15 @@
     box-sizing: border-box;
   }
 
+  /* Mock: 4px ghost scrollbar (docs/design/code.html). */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+    scrollbar-color: var(--color-studio-scrollbar) transparent;
   }
 
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 4px;
+    height: 4px;
   }
 
   *::-webkit-scrollbar-track,
@@ -45,16 +97,12 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.18);
-    border: 2px solid transparent;
-    background-clip: padding-box;
-    border-radius: 999px;
+    background: var(--color-studio-scrollbar);
+    border-radius: 10px;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border: 2px solid transparent;
-    background-clip: padding-box;
+    background: var(--color-studio-scrollbar-hover);
   }
 
   html,
@@ -69,6 +117,47 @@
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-studio-purple) 45%, transparent);
+    color: var(--color-studio-text);
+  }
+
+  /* Section eyebrows — mono, tracked, application UI vs project data */
+  .studio-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-studio-text-dim);
+  }
+
+  /* Gold = only warm signal (running / send / pending) */
+  @keyframes studio-signal {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-studio-gold) 0%, transparent);
+      opacity: 1;
+    }
+    50% {
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-studio-gold) 22%, transparent);
+      opacity: 0.92;
+    }
+  }
+
+  .studio-signal {
+    background: var(--color-studio-gold);
+    animation: studio-signal 1.6s var(--ease-studio) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .studio-signal {
+      animation: none;
+    }
   }
 
   button,
@@ -97,5 +186,29 @@
     resize: none;
     border: none;
     background: transparent;
+  }
+
+  /* Keyboard focus: gold ring (matches Switch). Mouse clicks stay clean. */
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-studio-gold) 55%, transparent);
+    outline-offset: 2px;
+  }
+
+  /* Inputs already show border shift — keep ring subtle, not double-heavy. */
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline-offset: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

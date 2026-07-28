@@ -70,7 +70,7 @@
   {/if}
   <div class="relative flex items-stretch">
     <input
-      class="w-full rounded-sm border bg-studio-dark py-2 pl-3 pr-9 text-[13px] text-studio-text tabular-nums outline-none hover:border-studio-purple/35 focus:border-studio-purple/70 disabled:opacity-50 {error
+      class="w-full rounded-sm border bg-studio-dark py-2 pl-3 pr-9 text-[13px] text-studio-text tabular-nums outline-none hover:border-studio-purple/35 focus:border-studio-purple/70 focus-visible:border-studio-purple/70 disabled:opacity-50 {error
         ? 'border-danger/45'
         : 'border-border-subtle'}"
       type="text"
@@ -79,6 +79,8 @@
       bind:value={text}
       {placeholder}
       {disabled}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={error && inputId ? `${inputId}-err` : undefined}
       onblur={() => commit(text)}
       onkeydown={(e) => {
         if (e.key === 'Enter') commit(text)
@@ -96,7 +98,7 @@
     <div class="absolute right-1 top-1/2 flex -translate-y-1/2 flex-col gap-px">
       <button
         type="button"
-        class="grid h-3.5 w-[22px] place-items-center rounded p-0 text-[7px] leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
+        class="grid h-3.5 min-h-0 w-[22px] place-items-center rounded p-0 text-[7px] leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
         tabindex="-1"
         {disabled}
         onclick={() => bump(1)}
@@ -104,7 +106,7 @@
       >
       <button
         type="button"
-        class="grid h-3.5 w-[22px] place-items-center rounded p-0 text-[7px] leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
+        class="grid h-3.5 min-h-0 w-[22px] place-items-center rounded p-0 text-[7px] leading-none text-studio-text-dim hover:bg-white/6 hover:text-white"
         tabindex="-1"
         {disabled}
         onclick={() => bump(-1)}
@@ -113,7 +115,7 @@
     </div>
   </div>
   {#if error}
-    <span class="text-[11px] text-danger">{error}</span>
+    <span id={inputId ? `${inputId}-err` : undefined} class="text-[11px] text-danger" role="alert">{error}</span>
   {:else if hint}
     <span class="text-[11px] text-studio-text-dim">{hint}</span>
   {/if}

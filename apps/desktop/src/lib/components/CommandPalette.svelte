@@ -154,7 +154,7 @@
     }}
   >
     <div
-      class="w-full max-w-lg overflow-hidden rounded-xl border border-border-subtle bg-studio-card shadow-2xl"
+      class="w-full max-w-lg overflow-hidden rounded-lg border border-border-subtle bg-studio-card shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-label="Command Palette"
@@ -166,14 +166,14 @@
         placeholder="Search commands…"
         aria-label="Search commands"
       />
-      <div class="max-h-72 overflow-y-auto p-1.5">
+      <div class="max-h-72 overflow-y-auto p-4">
         {#if filtered.length === 0}
-          <div class="px-3 py-6 text-center text-xs text-studio-text-dim">No matching command.</div>
+          <div class="p-4 text-center text-xs text-studio-text-dim">No matching command.</div>
         {/if}
         {#each filtered as action, index (action.id)}
           <button
             type="button"
-            class="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm {index === active
+            class="flex w-full items-center justify-between rounded-md p-4 text-left text-sm {index === active
               ? 'bg-studio-purple/30 text-white'
               : 'text-studio-text hover:bg-white/5'}"
             onclick={() => execute(action)}
@@ -185,7 +185,7 @@
         {/each}
       </div>
       <footer
-        class="flex gap-4 border-t border-border-subtle px-3 py-2 text-[10px] text-studio-text-dim"
+        class="flex gap-4 border-t border-border-subtle p-4 text-[10px] text-studio-text-dim"
       >
         <span>↑↓ Navigate</span><span>Enter Run</span><span>Esc Close</span>
       </footer>

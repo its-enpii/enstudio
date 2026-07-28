@@ -9,6 +9,7 @@
   import { EditorView, drawSelection, keymap, lineNumbers } from '@codemirror/view'
   import { state as app } from '../store.svelte'
   import { createProjectEntry, editProjectFileExact, formatProjectFile, getProjectDiagnostics, listProjectDir, readProjectFile, searchProjectFiles, type ProjectDiagnostic } from '../enpii'
+  import { color } from '../theme'
   import { ConfirmDialog } from './ui'
 
   type Entry = { kind: 'd' | 'f'; name: string; path: string; depth: number }
@@ -169,13 +170,13 @@
   const enpiiEditorTheme = EditorView.theme({
     '&': {
       backgroundColor: 'transparent',
-      color: '#e2e2e2',
+      color: color.text,
       fontFamily: "'JetBrains Mono', ui-monospace, monospace",
       fontSize: '12px',
     },
     '&.cm-focused': { outline: 'none' },
-    '.cm-content': { caretColor: '#e6af2e', padding: '18px 32px' },
-    '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#e6af2e', borderLeftWidth: '2px' },
+    '.cm-content': { caretColor: color.gold, padding: '18px 32px' },
+    '.cm-cursor, .cm-dropCursor': { borderLeftColor: color.gold, borderLeftWidth: '2px' },
     '.cm-activeLine': { backgroundColor: 'transparent' },
     '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(86, 132, 255, 0.38)' },
     '.cm-gutters': { backgroundColor: 'rgba(255, 255, 255, 0.018)', borderRight: '1px solid rgba(255, 255, 255, 0.04)', color: 'rgba(255, 255, 255, 0.28)' },
@@ -183,19 +184,19 @@
   }, { dark: true })
 
   const enpiiHighlightStyle = HighlightStyle.define([
-    { tag: tags.comment, color: '#737884', fontStyle: 'italic' },
-    { tag: [tags.keyword, tags.controlKeyword, tags.definitionKeyword, tags.modifier], color: '#c792ea' },
-    { tag: [tags.operator, tags.operatorKeyword], color: '#89a7ff' },
-    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: '#a8d98f' },
-    { tag: [tags.number, tags.bool, tags.null, tags.atom], color: '#e6af2e' },
-    { tag: [tags.function(tags.variableName), tags.labelName], color: '#7dd3fc' },
-    { tag: [tags.definition(tags.variableName), tags.variableName], color: '#e2e2e2' },
-    { tag: [tags.propertyName, tags.attributeName], color: '#82aaff' },
-    { tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: '#d6a9ff' },
-    { tag: [tags.heading, tags.strong], color: '#f0c96a', fontWeight: '600' },
-    { tag: [tags.link, tags.url], color: '#67d4d0', textDecoration: 'underline' },
-    { tag: [tags.meta, tags.annotation, tags.processingInstruction], color: '#ff9f7a' },
-    { tag: [tags.invalid], color: '#ff6b81', textDecoration: 'underline wavy' },
+    { tag: tags.comment, color: color.comment, fontStyle: 'italic' },
+    { tag: [tags.keyword, tags.controlKeyword, tags.definitionKeyword, tags.modifier], color: color.keyword },
+    { tag: [tags.operator, tags.operatorKeyword], color: color.operator },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: color.string },
+    { tag: [tags.number, tags.bool, tags.null, tags.atom], color: color.gold },
+    { tag: [tags.function(tags.variableName), tags.labelName], color: color.fn },
+    { tag: [tags.definition(tags.variableName), tags.variableName], color: color.text },
+    { tag: [tags.propertyName, tags.attributeName], color: color.operator },
+    { tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: color.lavenderSoft },
+    { tag: [tags.heading, tags.strong], color: color.amber, fontWeight: '600' },
+    { tag: [tags.link, tags.url], color: color.link, textDecoration: 'underline' },
+    { tag: [tags.meta, tags.annotation, tags.processingInstruction], color: color.errorSoft },
+    { tag: [tags.invalid], color: color.errorBright, textDecoration: 'underline wavy' },
   ])
 
   function joinPath(base: string, name: string): string {
@@ -560,86 +561,232 @@
 
 <svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
 
-<div class="stage code-stage">
+<div class="flex h-full min-h-0 w-full flex-col">
   {#if !app.activeProject}
-    <div class="placeholder-stage"><div><div class="ph-title">Open a project</div><div class="muted">Code mode needs a workspace.</div></div></div>
+    <div class="m-4 grid h-[calc(100%-32px)] place-items-center rounded-lg border border-dashed border-border-subtle text-studio-text-dim">
+      <div class="text-center">
+        <div class="mb-1.5 font-semibold text-white">Open a project</div>
+        <div class="text-xs">Code mode needs a workspace.</div>
+      </div>
+    </div>
   {:else}
-    <div class="code-layout mac-code-layout">
-      <aside class="code-tree custom-scrollbar">
-        <div class="code-tree-toolbar">
-          <div class="code-search-wrap">
-            <span class="code-search-icon">⌕</span>
-            <input class="code-search" value={searchQuery} placeholder="Search files" aria-label="Search project files" oninput={(event) => scheduleSearch(event.currentTarget.value)} />
+    <div class="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)]">
+      <aside class="overflow-auto border-r border-border-subtle p-4">
+        <div class="mb-2 flex items-center gap-1">
+          <div class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border-subtle bg-studio-dark px-2 py-1">
+            <span class="text-studio-text-dim">⌕</span>
+            <input
+              class="min-w-0 flex-1 bg-transparent text-xs text-studio-text outline-none placeholder:text-studio-text-dim"
+              value={searchQuery}
+              placeholder="Search files"
+              aria-label="Search project files"
+              oninput={(event) => scheduleSearch(event.currentTarget.value)}
+            />
           </div>
-          <details class="code-tree-menu" bind:this={toolsMenu} bind:open={toolsOpen}>
-            <summary title="File actions" aria-label="File actions">•••</summary>
-            <div class="code-tree-menu-popover">
-              <button type="button" onclick={() => { toolsOpen = false; beginCreate('file') }}>New File</button>
-              <button type="button" onclick={() => { toolsOpen = false; beginCreate('directory') }}>New Folder</button>
+          <details class="relative" bind:this={toolsMenu} bind:open={toolsOpen}>
+            <summary
+              class="cursor-pointer list-none rounded-md px-2 py-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text [&::-webkit-details-marker]:hidden"
+              title="File actions"
+              aria-label="File actions">•••</summary
+            >
+            <div class="absolute right-0 z-20 mt-1 grid min-w-[140px] gap-0.5 rounded-lg border border-border-subtle bg-studio-card p-1 shadow-xl">
+              <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('file') }}>New File</button>
+              <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('directory') }}>New Folder</button>
             </div>
           </details>
         </div>
-        <button type="button" class="tree-root" class:selected={activeDir === '.'} onclick={toggleRoot}><span class="tree-chevron">{expanded['.'] ? '⌄' : '›'}</span><span class="folder-icon">▰</span><span>{app.activeProject.name}</span></button>
+        <button
+          type="button"
+          class="mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs {activeDir === '.'
+            ? 'bg-studio-card text-studio-text'
+            : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+          onclick={toggleRoot}
+        >
+          <span class="w-3 text-[10px]">{expanded['.'] ? '⌄' : '›'}</span>
+          <span class="text-studio-gold">▰</span>
+          <span class="truncate">{app.activeProject.name}</span>
+        </button>
         {#if creating}
-          <form class="tree-create-row" onsubmit={(event) => { event.preventDefault(); void submitCreate() }}>
-            <span>{creating === 'file' ? '◻' : '▰'}</span>
-            <input bind:this={createInput} bind:value={createName} placeholder={creating === 'file' ? 'filename' : 'folder name'} onblur={() => { creating = null; createName = '' }} onkeydown={(event) => { if (event.key === 'Escape') { creating = null; createName = '' } }} />
+          <form class="mb-1 flex items-center gap-1.5 px-2" onsubmit={(event) => { event.preventDefault(); void submitCreate() }}>
+            <span class="text-studio-text-dim">{creating === 'file' ? '◻' : '▰'}</span>
+            <input
+              class="min-w-0 flex-1 rounded border border-studio-purple/50 bg-studio-dark px-1.5 py-0.5 text-xs text-studio-text outline-none"
+              bind:this={createInput}
+              bind:value={createName}
+              placeholder={creating === 'file' ? 'filename' : 'folder name'}
+              onblur={() => { creating = null; createName = '' }}
+              onkeydown={(event) => { if (event.key === 'Escape') { creating = null; createName = '' } }}
+            />
           </form>
         {/if}
         {#if searchQuery.trim()}
-          {#if searching}<div class="muted tree-loading">Searching…</div>
-          {:else if searchResults.length === 0}<div class="muted tree-loading">No files found</div>
-          {:else}{#each searchResults as file (file)}
-            <button type="button" class="code-entry search-result" class:selected={selectedPath === file} onclick={() => void revealPath(file)}>
-              <span class="tree-file-icon">◻</span><span class="tree-name">{file}</span>
-            </button>
-          {/each}{/if}
+          {#if searching}
+            <div class="p-4 text-xs text-studio-text-dim">Searching…</div>
+          {:else if searchResults.length === 0}
+            <div class="p-4 text-xs text-studio-text-dim">No files found</div>
+          {:else}
+            {#each searchResults as file (file)}
+              <button
+                type="button"
+                class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs {selectedPath === file
+                  ? 'bg-studio-card text-studio-text'
+                  : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+                onclick={() => void revealPath(file)}
+              >
+                <span>◻</span><span class="truncate">{file}</span>
+              </button>
+            {/each}
+          {/if}
         {:else}
-          {#if loadingDirs['.'] && rows.length === 0}<div class="muted tree-loading">Loading…</div>{/if}
+          {#if loadingDirs['.'] && rows.length === 0}
+            <div class="p-4 text-xs text-studio-text-dim">Loading…</div>
+          {/if}
           {#each rows as entry (entry.path)}
-            <button type="button" class="code-entry" class:directory={entry.kind === 'd'} class:selected={selectedPath === entry.path || activeDir === entry.path} style={`padding-left:${10 + entry.depth * 16}px`} onclick={() => void openEntry(entry)}>
-              <span class="tree-chevron">{entry.kind === 'd' ? expanded[entry.path] ? '⌄' : '›' : ''}</span>
-              <span class="tree-file-icon">{entry.kind === 'd' ? '▰' : '◻'}</span>
-              <span class="tree-name">{entry.name}</span>
-              {#if loadingDirs[entry.path]}<span class="tree-spinner">···</span>{/if}
+            <button
+              type="button"
+              class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-xs {selectedPath === entry.path || activeDir === entry.path
+                ? 'bg-studio-card text-studio-text'
+                : entry.kind === 'd'
+                  ? 'text-studio-gold hover:bg-studio-card'
+                  : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+              style={`padding-left:${10 + entry.depth * 16}px`}
+              onclick={() => void openEntry(entry)}
+            >
+              <span class="w-3 text-[10px]">{entry.kind === 'd' ? (expanded[entry.path] ? '⌄' : '›') : ''}</span>
+              <span>{entry.kind === 'd' ? '▰' : '◻'}</span>
+              <span class="min-w-0 truncate">{entry.name}</span>
+              {#if loadingDirs[entry.path]}<span class="ml-auto text-studio-text-dim">···</span>{/if}
             </button>
           {/each}
         {/if}
       </aside>
-      <section class="code-preview">
-        {#if error}<div class="code-error">{error}</div>
+      <section class="relative flex min-h-0 min-w-0 flex-col overflow-hidden">
+        {#if error}
+          <div class="grid flex-1 place-items-center p-6 text-center text-sm text-danger">{error}</div>
         {:else if selectedPath}
-          <div class="code-tabs" role="tablist" aria-label="Open files">
+          <div class="flex min-h-9 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95" role="tablist" aria-label="Open files">
             {#each tabs as tab (tab.path)}
-              <div class="code-tab-shell" class:active={tab.path === selectedPath}>
-                <button type="button" class="code-tab" role="tab" aria-selected={tab.path === selectedPath} onclick={() => void activateTab(tab)}>
-                  {#if tab.content !== tab.originalContent}<span class="code-tab-dirty" aria-label="Unsaved changes">●</span>{/if}
-                  <span class="code-tab-name">{tab.path.split('/').at(-1)}</span>
+              <div
+                class="flex max-w-[220px] items-center border-r border-white/5 {tab.path === selectedPath
+                  ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]'
+                  : ''}"
+              >
+                <button
+                  type="button"
+                  class="flex min-w-0 items-center gap-1 px-1 py-2 pl-2.5 text-left font-mono text-[10px] {tab.path === selectedPath
+                    ? 'text-studio-text'
+                    : 'text-studio-text-dim hover:text-studio-text'}"
+                  role="tab"
+                  aria-selected={tab.path === selectedPath}
+                  onclick={() => void activateTab(tab)}
+                >
+                  {#if tab.content !== tab.originalContent}
+                    <span class="text-[9px] text-studio-gold" aria-label="Unsaved changes">●</span>
+                  {/if}
+                  <span class="truncate">{tab.path.split('/').at(-1)}</span>
                 </button>
-                <button type="button" class="code-tab-close" aria-label={`Close ${tab.path}`} onclick={() => requestCloseTab(tab.path)}>×</button>
+                <button
+                  type="button"
+                  class="mr-1 rounded px-1 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                  aria-label={`Close ${tab.path}`}
+                  onclick={() => requestCloseTab(tab.path)}>×</button
+                >
               </div>
             {/each}
-            <button type="button" class="code-problems-toggle" class:has-errors={diagnosticErrors > 0} class:has-warnings={diagnosticErrors === 0 && diagnosticWarnings > 0} disabled={diagnosticsBusy} title={dirty ? 'Showing saved-file diagnostics; save to refresh' : 'Open Problems'} onclick={() => { diagnosticsOpen = !diagnosticsOpen; if (diagnosticsOpen && !diagnosticsLoaded && !dirty) void runDiagnostics() }}><span>Problems</span>{#if diagnosticErrors > 0}<span class="problem-badge error">{diagnosticErrors}</span>{:else if diagnosticWarnings > 0}<span class="problem-badge warning">{diagnosticWarnings}</span>{/if}{#if diagnosticsBusy}<span class="problem-spinner">···</span>{/if}</button>
+            <button
+              type="button"
+              class="ml-auto flex items-center gap-1 px-2.5 text-[10px] text-studio-text-dim hover:text-studio-text disabled:opacity-45 {diagnosticErrors > 0
+                ? 'text-danger'
+                : diagnosticWarnings > 0
+                  ? 'text-studio-gold'
+                  : ''}"
+              disabled={diagnosticsBusy}
+              title={dirty ? 'Showing saved-file diagnostics; save to refresh' : 'Open Problems'}
+              onclick={() => {
+                diagnosticsOpen = !diagnosticsOpen
+                if (diagnosticsOpen && !diagnosticsLoaded && !dirty) void runDiagnostics()
+              }}
+            >
+              <span>Problems</span>
+              {#if diagnosticErrors > 0}
+                <span class="rounded-lg bg-danger-bg px-1.5 text-[9px] text-danger">{diagnosticErrors}</span>
+              {:else if diagnosticWarnings > 0}
+                <span class="rounded-lg bg-studio-gold/15 px-1.5 text-[9px] text-studio-gold">{diagnosticWarnings}</span>
+              {/if}
+              {#if diagnosticsBusy}<span>···</span>{/if}
+            </button>
           </div>
-          <div class="code-file-head mono"><span>{selectedPath}</span><span class="code-file-actions"><button type="button" disabled={formatting} title="Format Document (Cmd/Ctrl+Shift+F)" onclick={() => void formatDocument()}>{formatting ? 'Formatting…' : 'Format'}</button>{#if dirty}<span class="dirty-dot">Edited · Cmd/Ctrl+S</span>{/if}</span></div>
-          <div class="cm-editor-host" bind:this={editorHost}></div>
+          <div class="flex items-center justify-between gap-2 border-b border-border-subtle bg-studio-card/90 px-3 py-1.5 font-mono text-[11px] text-studio-text-dim">
+            <span class="truncate">{selectedPath}</span>
+            <span class="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                class="rounded px-2 py-0.5 text-[10px] hover:bg-white/5 hover:text-studio-text disabled:opacity-45"
+                disabled={formatting}
+                title="Format Document (Cmd/Ctrl+Shift+F)"
+                onclick={() => void formatDocument()}>{formatting ? 'Formatting…' : 'Format'}</button
+              >
+              {#if dirty}<span class="text-studio-gold">Edited · Cmd/Ctrl+S</span>{/if}
+            </span>
+          </div>
+          <div class="min-h-0 flex-1 overflow-hidden" bind:this={editorHost}></div>
           {#if diagnosticsOpen}
-            <section class="problems-panel">
-              <header><strong>Problems</strong><span>{diagnostics.length}</span><button type="button" disabled={diagnosticsBusy} onclick={() => void runDiagnostics()}>Refresh</button><button type="button" aria-label="Close problems" onclick={() => (diagnosticsOpen = false)}>×</button></header>
-              <div class="problems-list custom-scrollbar">
-                {#if dirty}<div class="problems-notice">File belum disimpan. Badge diperbarui otomatis setelah save.</div>{/if}
-                {#if diagnosticsLoaded && diagnostics.length === 0}<div class="problems-empty">No problems found.</div>{:else if !diagnosticsLoaded}<div class="problems-empty">Save file or click Refresh to run diagnostics.</div>{/if}
+            <section class="max-h-48 border-t border-border-subtle bg-studio-panel">
+              <header class="flex items-center gap-2 border-b border-border-subtle px-3 py-1.5 text-[11px]">
+                <strong class="text-studio-text">Problems</strong>
+                <span class="text-studio-text-dim">{diagnostics.length}</span>
+                <button type="button" class="ml-auto text-studio-text-dim hover:text-studio-text disabled:opacity-45" disabled={diagnosticsBusy} onclick={() => void runDiagnostics()}>Refresh</button>
+                <button type="button" class="text-studio-text-dim hover:text-studio-text" aria-label="Close problems" onclick={() => (diagnosticsOpen = false)}>×</button>
+              </header>
+              <div class="max-h-36 overflow-auto p-4">
+                {#if dirty}
+                  <div class="pb-2 text-[10px] text-studio-gold">File belum disimpan. Badge diperbarui otomatis setelah save.</div>
+                {/if}
+                {#if diagnosticsLoaded && diagnostics.length === 0}
+                  <div class="py-4 text-center text-xs text-studio-text-dim">No problems found.</div>
+                {:else if !diagnosticsLoaded}
+                  <div class="py-4 text-center text-xs text-studio-text-dim">Save file or click Refresh to run diagnostics.</div>
+                {/if}
                 {#each diagnostics as problem, index (`${problem.path}:${problem.line}:${problem.column}:${index}`)}
-                  <button type="button" class="problem-row {problem.severity}" onclick={() => void openDiagnostic(problem)}><span class="problem-icon">{problem.severity === 'error' ? '×' : '!'}</span><span class="problem-copy"><strong>{problem.message}</strong><small>{problem.path}:{problem.line}:{problem.column} · {problem.source}{#if problem.code} · {problem.code}{/if}</small></span></button>
+                  <button
+                    type="button"
+                    class="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/5"
+                    onclick={() => void openDiagnostic(problem)}
+                  >
+                    <span class="mt-0.5 text-xs {problem.severity === 'error' ? 'text-danger' : 'text-studio-gold'}">{problem.severity === 'error' ? '×' : '!'}</span>
+                    <span class="min-w-0">
+                      <strong class="block text-xs text-studio-text">{problem.message}</strong>
+                      <small class="text-[10px] text-studio-text-dim"
+                        >{problem.path}:{problem.line}:{problem.column} · {problem.source}{#if problem.code} · {problem.code}{/if}</small
+                      >
+                    </span>
+                  </button>
                 {/each}
               </div>
             </section>
           {/if}
-        {:else}<div class="code-empty"><div class="ph-title">Select a file</div><div class="muted">Expand folders in the sidebar. Root stays visible.</div></div>{/if}
+        {:else}
+          <div class="grid flex-1 place-items-center text-center text-studio-text-dim">
+            <div>
+              <div class="mb-1.5 font-semibold text-white">Select a file</div>
+              <div class="text-xs">Expand folders in the sidebar. Root stays visible.</div>
+            </div>
+          </div>
+        {/if}
       </section>
     </div>
   {/if}
 </div>
+
+<style>
+  /* CodeMirror needs height chain on host */
+  :global(.cm-editor) {
+    height: 100%;
+  }
+  :global(.cm-scroller) {
+    overflow: auto;
+  }
+</style>
 
 <ConfirmDialog
   open={pendingClosePath != null}

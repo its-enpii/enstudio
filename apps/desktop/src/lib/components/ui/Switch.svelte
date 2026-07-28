@@ -63,10 +63,10 @@
       onchange={onChange}
     />
     <span
-      class="pointer-events-none relative shrink-0 rounded-full border border-border-subtle bg-white/8 transition-[background,border-color] duration-150 peer-checked:border-studio-purple/90 peer-checked:bg-studio-purple/85 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-studio-gold/50 peer-hover:border-studio-purple/45 {track}"
+      class="pointer-events-none relative shrink-0 rounded-lg border border-border-subtle bg-white/8 transition-[background,border-color] duration-150 peer-checked:border-studio-purple/90 peer-checked:bg-studio-purple/85 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-studio-gold/50 peer-hover:border-studio-purple/45 {track}"
       aria-hidden="true"
     >
-      <span class="absolute rounded-full bg-studio-text transition-transform duration-150 {thumb}"
+      <span class="absolute rounded-lg bg-studio-text transition-transform duration-150 {thumb}"
       ></span>
     </span>
     {#if description}

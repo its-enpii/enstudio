@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte'
   import { state as app } from '../store.svelte'
+  import { color } from '../theme'
   import type { BrowserDownload } from '../../../electron/preload'
+  import { ConfirmDialog } from './ui'
 
   type BrowserElement = HTMLElement & {
     canGoBack: () => boolean
@@ -25,6 +27,8 @@
     url: string
     ready: boolean
     loading: boolean
+    canBack: boolean
+    canForward: boolean
   }
 
   type BrowserBookmark = { id: string; title: string; url: string }
@@ -52,7 +56,6 @@
   let historyOpen = $state(false)
   let historyQuery = $state('')
   let clearHistoryOpen = $state(false)
-  let cancelClearHistoryButton = $state<HTMLButtonElement>()
   let downloads = $state<BrowserDownload[]>([])
   let downloadsOpen = $state(false)
   let currentProjectId: string | null = null
@@ -72,8 +75,51 @@
   const filteredHistory = $derived(history.filter((entry) => `${entry.title} ${entry.url}`.toLowerCase().includes(historyQuery.trim().toLowerCase())))
   const activeDownloads = $derived(downloads.filter((download) => download.status === 'progressing').length)
 
+  const toolBtn =
+    'rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/5 hover:text-studio-text disabled:opacity-45'
+  const toolBtnActive = 'border-studio-purple/40 bg-studio-purple/15 text-studio-text'
+
   function newTab(): BrowserTab {
-    return { id: crypto.randomUUID(), title: 'New Tab', url: '', ready: false, loading: false }
+    return {
+      id: crypto.randomUUID(),
+      title: 'New Tab',
+      url: '',
+      ready: false,
+      loading: false,
+      canBack: false,
+      canForward: false,
+    }
+  }
+
+  function safeNav(view: BrowserElement | undefined, method: 'canGoBack' | 'canGoForward'): boolean {
+    if (!view) return false
+    try {
+      return view[method]()
+    } catch {
+      return false
+    }
+  }
+
+  function safeCall(view: BrowserElement | undefined, fn: (v: BrowserElement) => void): void {
+    if (!view) return
+    try {
+      fn(view)
+    } catch {
+      /* webview not attached / not ready */
+    }
+  }
+
+  function syncNav(tab: BrowserTab, view: BrowserElement): void {
+    tab.canBack = safeNav(view, 'canGoBack')
+    tab.canForward = safeNav(view, 'canGoForward')
+  }
+
+  function resetWebviews(): void {
+    for (const cleanup of cleanups.values()) cleanup()
+    cleanups.clear()
+    webviews.clear()
+    themeKeys.clear()
+    webviewElements = []
   }
 
   function workspaceFor(projectId: string): BrowserWorkspace {
@@ -112,15 +158,18 @@
       if (url && url !== 'about:blank') tab.url = url
       if (id === activeId) address = tab.url
       if (url && url !== 'about:blank') recordHistory(url, tab.title)
+      syncNav(tab, source)
     }
     const start = () => (tab.loading = true)
     const stop = () => {
       tab.loading = false
+      syncNav(tab, element)
       void applyTheme(id)
     }
     const ready = () => {
       tab.ready = true
-      if (tab.url) void element.loadURL(tab.url)
+      syncNav(tab, element)
+      if (tab.url) void element.loadURL(tab.url).catch(() => {})
     }
     const title = (event: Event) => {
       const pageTitle = (event as Event & { title?: string }).title?.trim()
@@ -164,12 +213,12 @@
     if (theme === 'light') return
     const key = await element.insertCSS(`
       :root { color-scheme: dark !important; }
-      html, body { background: #0f1115 !important; color: #e8eaed !important; }
+      html, body { background: ${color.browserBg} !important; color: ${color.browserText} !important; }
       body > * { color-scheme: dark !important; }
       input, textarea, select, [contenteditable="true"] {
-        background-color: #202124 !important; color: #e8eaed !important; border-color: #3c4043 !important;
+        background-color: ${color.browserSurface} !important; color: ${color.browserText} !important; border-color: ${color.browserBorder} !important;
       }
-      a { color: #8ab4f8 !important; }
+      a { color: ${color.link} !important; }
     `)
     themeKeys.set(id, key)
   }
@@ -210,6 +259,9 @@
       const tab = tabs[0]!
       tab.url = ''
       tab.title = 'New Tab'
+      tab.loading = false
+      tab.canBack = false
+      tab.canForward = false
       address = ''
       return
     }
@@ -234,18 +286,19 @@
   }
 
   function goBack(): void {
-    const view = activeTab && webviews.get(activeTab.id)
-    if (view?.canGoBack()) view.goBack()
+    const tab = activeTab
+    if (!tab?.canBack) return
+    safeCall(webviews.get(tab.id), (v) => v.goBack())
   }
 
   function goForward(): void {
-    const view = activeTab && webviews.get(activeTab.id)
-    if (view?.canGoForward()) view.goForward()
+    const tab = activeTab
+    if (!tab?.canForward) return
+    safeCall(webviews.get(tab.id), (v) => v.goForward())
   }
 
   function reload(): void {
-    const view = activeTab && webviews.get(activeTab.id)
-    view?.reload()
+    safeCall(activeTab ? webviews.get(activeTab.id) : undefined, (v) => v.reload())
   }
 
   async function toggleTheme(): Promise<void> {
@@ -264,7 +317,7 @@
     await tick()
     findInput?.focus()
     findInput?.select()
-    if (findQuery) findActiveTab()?.findInPage(findQuery)
+    if (findQuery) safeCall(findActiveTab(), (v) => v.findInPage(findQuery))
   }
 
   function findActiveTab(): BrowserElement | undefined {
@@ -273,18 +326,19 @@
 
   function searchPage(): void {
     const view = findActiveTab()
-    if (!view) return
     findMatches = 0
     findActive = 0
     if (!findQuery) {
-      view.stopFindInPage('clearSelection')
+      safeCall(view, (v) => v.stopFindInPage('clearSelection'))
       return
     }
-    view.findInPage(findQuery)
+    safeCall(view, (v) => {
+      v.findInPage(findQuery)
+    })
   }
 
   function closeFind(): void {
-    findActiveTab()?.stopFindInPage('clearSelection')
+    safeCall(findActiveTab(), (v) => v.stopFindInPage('clearSelection'))
     findOpen = false
     findQuery = ''
     findMatches = 0
@@ -346,7 +400,6 @@
 
   function requestClearHistory(): void {
     clearHistoryOpen = true
-    void tick().then(() => cancelClearHistoryButton?.focus())
   }
 
   function clearHistory(): void {
@@ -393,9 +446,17 @@
     const projectId = app.activeProjectId
     if (!projectId || currentProjectId === projectId) return
     saveWorkspace()
+    resetWebviews()
     currentProjectId = projectId
     const workspace = workspaceFor(projectId)
-    tabs = workspace.tabs
+    // heal tabs from older workspaces missing nav flags
+    tabs = workspace.tabs.map((t) => ({
+      ...t,
+      ready: false,
+      loading: false,
+      canBack: t.canBack ?? false,
+      canForward: t.canForward ?? false,
+    }))
     activeId = workspace.activeId
     bookmarks = workspace.bookmarks
     history = workspace.history
@@ -440,39 +501,43 @@
   })
 </script>
 
-<div class="browser-stage">
-  <div class="browser-tabs" role="tablist" aria-label="Open browser tabs">
+<div class="relative flex h-full min-h-0 flex-col bg-transparent">
+  <div class="flex min-h-9 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95" role="tablist" aria-label="Open browser tabs">
     {#each tabs as tab (tab.id)}
-      <div class="browser-tab-shell" class:active={tab.id === activeId}>
-        <button type="button" class="browser-tab" role="tab" aria-selected={tab.id === activeId} onclick={() => activateTab(tab.id)}>
-          <span class="browser-tab-dot" class:loading={tab.loading}></span>{tab.title}
+      <div class="flex items-center border-r border-white/5 {tab.id === activeId ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]' : ''}">
+        <button type="button" class="flex items-center gap-1.5 px-2 py-2 text-[11px] {tab.id === activeId ? 'text-studio-text' : 'text-studio-text-dim hover:text-studio-text'}" role="tab" aria-selected={tab.id === activeId} onclick={() => activateTab(tab.id)}>
+          <span class="size-1.5 rounded-lg {tab.loading ? 'animate-pulse bg-studio-gold' : 'bg-studio-success'}"></span>
+          <span class="max-w-[140px] truncate">{tab.title}</span>
         </button>
-        <button type="button" class="browser-tab-close" aria-label={`Close ${tab.title}`} onclick={() => closeTab(tab.id)}>×</button>
+        <button type="button" class="mx-1 rounded px-1 py-1 text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label={`Close ${tab.title}`} onclick={() => closeTab(tab.id)}>×</button>
       </div>
     {/each}
-    <button type="button" class="browser-tab-new" aria-label="New browser tab" onclick={addTab}>+</button>
+    <button type="button" class="ml-1.5 rounded px-1.5 py-1 text-base text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label="New browser tab" onclick={addTab}>+</button>
   </div>
-  <div class="browser-toolbar">
-    <div class="browser-nav-actions">
-      <button type="button" title="Back" aria-label="Back" disabled={!activeTab || !webviews.get(activeTab.id)?.canGoBack()} onclick={goBack}>‹</button>
-      <button type="button" title="Forward" aria-label="Forward" disabled={!activeTab || !webviews.get(activeTab.id)?.canGoForward()} onclick={goForward}>›</button>
-      <button type="button" title="Reload" aria-label="Reload" onclick={reload}>{loading ? '×' : '↻'}</button>
+
+  <div class="flex flex-wrap items-center gap-1.5 border-b border-border-subtle bg-studio-card/90 px-2 py-1.5">
+    <div class="flex items-center gap-0.5">
+      <button type="button" class="{toolBtn} min-w-7" title="Back" aria-label="Back" disabled={!activeTab?.canBack} onclick={goBack}>‹</button>
+      <button type="button" class="{toolBtn} min-w-7" title="Forward" aria-label="Forward" disabled={!activeTab?.canForward} onclick={goForward}>›</button>
+      <button type="button" class="{toolBtn} min-w-7" title="Reload" aria-label="Reload" onclick={reload}>{loading ? '×' : '↻'}</button>
     </div>
-    <div class="browser-address-wrap">
-      <span class="browser-lock">⌁</span>
-      <input bind:this={input} bind:value={address} aria-label="Address" placeholder="Enter URL" onkeydown={(event) => event.key === 'Enter' && void navigate()} />
-      <button type="button" class="browser-go" onclick={() => void navigate()}>Go</button>
+    <div class="flex min-w-[200px] flex-1 items-center gap-1.5 rounded-lg border border-border-subtle bg-studio-dark px-2.5 py-1">
+      <span class="text-[10px] text-studio-text-dim">⌁</span>
+      <input class="min-w-0 flex-1 bg-transparent text-xs text-studio-text outline-none placeholder:text-studio-text-dim" bind:this={input} bind:value={address} aria-label="Address" placeholder="Enter URL" onkeydown={(event) => event.key === 'Enter' && void navigate()} />
+      <button type="button" class="rounded-lg bg-studio-purple px-2.5 py-0.5 text-[10px] text-white" onclick={() => void navigate()}>Go</button>
     </div>
-    <button type="button" class="browser-home" title="Focus address" aria-label="Focus address" onclick={() => void focusAddress()}>⌘L</button>
-    <button type="button" class="browser-home" title="Find in page" aria-label="Find in page" onclick={() => void openFind()}>⌘F</button>
-    <button type="button" class="browser-bookmark-toggle" class:active={Boolean(activeBookmark)} title={activeBookmark ? 'Remove bookmark' : 'Bookmark page'} aria-label={activeBookmark ? 'Remove bookmark' : 'Bookmark page'} disabled={!activeTab?.url} onclick={toggleBookmark}>{activeBookmark ? '★' : '☆'}</button>
-    <button type="button" class="browser-bookmarks-button" class:active={bookmarksOpen} title="Bookmarks" aria-label="Bookmarks" onclick={() => { historyOpen = false; downloadsOpen = false; bookmarksOpen = !bookmarksOpen }}>Bookmarks</button>
-    <button type="button" class="browser-history-button" class:active={historyOpen} title="History" aria-label="History" onclick={() => { bookmarksOpen = false; downloadsOpen = false; historyOpen = !historyOpen }}>History</button>
-    <button type="button" class="browser-downloads-button" class:active={downloadsOpen} title="Downloads" aria-label="Downloads" onclick={() => { bookmarksOpen = false; historyOpen = false; downloadsOpen = !downloadsOpen }}>Downloads{#if activeDownloads}<span>{activeDownloads}</span>{/if}</button>
-    <button type="button" class="browser-theme" title="Toggle browser theme" aria-label="Toggle browser theme" onclick={() => void toggleTheme()}>{theme === 'dark' ? '☼' : '☾'}</button>
+    <button type="button" class={toolBtn} title="Focus address" aria-label="Focus address" onclick={() => void focusAddress()}>⌘L</button>
+    <button type="button" class={toolBtn} title="Find in page" aria-label="Find in page" onclick={() => void openFind()}>⌘F</button>
+    <button type="button" class="{toolBtn} {activeBookmark ? toolBtnActive : ''}" title={activeBookmark ? 'Remove bookmark' : 'Bookmark page'} aria-label={activeBookmark ? 'Remove bookmark' : 'Bookmark page'} disabled={!activeTab?.url} onclick={toggleBookmark}>{activeBookmark ? '★' : '☆'}</button>
+    <button type="button" class="{toolBtn} {bookmarksOpen ? toolBtnActive : ''}" title="Bookmarks" aria-label="Bookmarks" onclick={() => { historyOpen = false; downloadsOpen = false; bookmarksOpen = !bookmarksOpen }}>Bookmarks</button>
+    <button type="button" class="{toolBtn} {historyOpen ? toolBtnActive : ''}" title="History" aria-label="History" onclick={() => { bookmarksOpen = false; downloadsOpen = false; historyOpen = !historyOpen }}>History</button>
+    <button type="button" class="{toolBtn} {downloadsOpen ? toolBtnActive : ''}" title="Downloads" aria-label="Downloads" onclick={() => { bookmarksOpen = false; historyOpen = false; downloadsOpen = !downloadsOpen }}>
+      Downloads{#if activeDownloads}<span class="ml-1 rounded-lg bg-studio-gold/20 px-1.5 text-[9px] text-studio-gold">{activeDownloads}</span>{/if}
+    </button>
+    <button type="button" class={toolBtn} title="Toggle browser theme" aria-label="Toggle browser theme" onclick={() => void toggleTheme()}>{theme === 'dark' ? '☼' : '☾'}</button>
     <button
       type="button"
-      class="browser-home"
+      class={toolBtn}
       title="Open page DevTools"
       aria-label="Open page DevTools"
       disabled={!activeTab}
@@ -486,89 +551,134 @@
       }}
     >DevTools</button>
     {#if findOpen}
-      <div class="browser-find">
-        <input bind:this={findInput} bind:value={findQuery} aria-label="Find in page" placeholder="Find" oninput={searchPage} onkeydown={(event) => event.key === 'Escape' && closeFind()} />
-        <span>{findMatches ? `${findActive}/${findMatches}` : '—'}</span>
-        <button type="button" aria-label="Close find" onclick={closeFind}>×</button>
+      <div class="flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-1.5 py-0.5">
+        <input class="w-28 bg-transparent px-1 text-xs text-studio-text outline-none" bind:this={findInput} bind:value={findQuery} aria-label="Find in page" placeholder="Find" oninput={searchPage} onkeydown={(event) => event.key === 'Escape' && closeFind()} />
+        <span class="text-[10px] text-studio-text-dim">{findMatches ? `${findActive}/${findMatches}` : '—'}</span>
+        <button type="button" class="px-1 text-studio-text-dim hover:text-studio-text" aria-label="Close find" onclick={closeFind}>×</button>
       </div>
     {/if}
   </div>
+
   {#if bookmarksOpen}
-    <button type="button" class="browser-bookmarks-backdrop" aria-label="Close bookmarks" onclick={() => (bookmarksOpen = false)}></button>
-    <section class="browser-bookmarks-panel" aria-label="Bookmarks">
-      <header><strong>Bookmarks</strong><span>{bookmarks.length}</span></header>
-      <div class="browser-bookmarks-list">
+    <button type="button" class="fixed inset-0 z-[60] cursor-default bg-black/20" aria-label="Close bookmarks" onclick={() => (bookmarksOpen = false)}></button>
+    <section class="absolute right-3 top-[76px] z-[61] flex max-h-[min(420px,60vh)] w-80 flex-col overflow-hidden rounded-lg border border-white/11 bg-studio-popover shadow-[0_18px_50px_rgba(0,0,0,0.5)]" aria-label="Bookmarks">
+      <header class="flex items-center justify-between border-b border-border-subtle px-3 py-2 text-[11px]"><strong class="text-studio-text">Bookmarks</strong><span class="text-studio-text-dim">{bookmarks.length}</span></header>
+      <div class="min-h-0 flex-1 overflow-auto p-1.5">
         {#each bookmarks as bookmark (bookmark.id)}
-          <div class="browser-bookmark-row">
+          <div class="mb-0.5 flex items-start gap-1 rounded-md p-1 hover:bg-white/[0.04]">
             {#if editingBookmarkId === bookmark.id}
-              <input bind:this={bookmarkRenameInput} bind:value={editingBookmarkTitle} aria-label="Bookmark name" onblur={() => finishBookmarkRename(true)} onkeydown={(event) => { if (event.key === 'Enter') finishBookmarkRename(true); else if (event.key === 'Escape') finishBookmarkRename(false) }} />
+              <input class="w-full rounded-md border border-white/9 bg-black/25 px-2 py-1 text-xs text-studio-text outline-none" bind:this={bookmarkRenameInput} bind:value={editingBookmarkTitle} aria-label="Bookmark name" onblur={() => finishBookmarkRename(true)} onkeydown={(event) => { if (event.key === 'Enter') finishBookmarkRename(true); else if (event.key === 'Escape') finishBookmarkRename(false) }} />
             {:else}
-              <button type="button" class="browser-bookmark-open" onclick={() => void openBookmark(bookmark)} ondblclick={() => startBookmarkRename(bookmark)}><strong>{bookmark.title}</strong><span>{bookmark.url}</span></button>
-              <button type="button" class="browser-bookmark-edit" aria-label={`Rename ${bookmark.title}`} onclick={() => startBookmarkRename(bookmark)}>Rename</button>
-              <button type="button" class="browser-bookmark-remove" aria-label={`Remove ${bookmark.title}`} onclick={() => removeBookmark(bookmark.id)}>×</button>
+              <button type="button" class="min-w-0 flex-1 truncate text-left" onclick={() => void openBookmark(bookmark)} ondblclick={() => startBookmarkRename(bookmark)}>
+                <strong class="block truncate text-xs text-studio-text">{bookmark.title}</strong>
+                <span class="block truncate text-[10px] text-studio-text-dim">{bookmark.url}</span>
+              </button>
+              <button type="button" class="shrink-0 px-1 text-[10px] text-studio-text-dim hover:text-studio-text" aria-label={`Rename ${bookmark.title}`} onclick={() => startBookmarkRename(bookmark)}>Rename</button>
+              <button type="button" class="shrink-0 px-1 text-[11px] text-danger" aria-label={`Remove ${bookmark.title}`} onclick={() => removeBookmark(bookmark.id)}>×</button>
             {/if}
           </div>
         {:else}
-          <div class="browser-bookmarks-empty">No bookmarks yet.</div>
+          <div class="px-2 py-6 text-center text-[11px] text-studio-text-dim">No bookmarks yet.</div>
         {/each}
       </div>
     </section>
   {/if}
+
   {#if downloadsOpen}
-    <button type="button" class="browser-bookmarks-backdrop" aria-label="Close downloads" onclick={() => (downloadsOpen = false)}></button>
-    <section class="browser-bookmarks-panel browser-downloads-panel" aria-label="Downloads">
-      <header><strong>Downloads</strong><span>{downloads.length}</span></header>
-      <div class="browser-bookmarks-list">
+    <button type="button" class="fixed inset-0 z-[60] cursor-default bg-black/20" aria-label="Close downloads" onclick={() => (downloadsOpen = false)}></button>
+    <section class="absolute right-3 top-[76px] z-[61] flex max-h-[min(420px,60vh)] w-96 flex-col overflow-hidden rounded-lg border border-white/11 bg-studio-popover shadow-[0_18px_50px_rgba(0,0,0,0.5)]" aria-label="Downloads">
+      <header class="flex items-center justify-between border-b border-border-subtle px-3 py-2 text-[11px]"><strong class="text-studio-text">Downloads</strong><span class="text-studio-text-dim">{downloads.length}</span></header>
+      <div class="min-h-0 flex-1 overflow-auto p-1.5">
         {#each downloads as download (download.id)}
-          <div class="browser-download-row">
-            <div class="browser-download-copy"><strong>{download.filename}</strong><span>{download.status === 'progressing' ? `${downloadSize(download.receivedBytes)} / ${download.totalBytes ? downloadSize(download.totalBytes) : '—'}` : download.status}</span></div>
-            {#if download.status === 'progressing'}
-              <button type="button" onclick={() => void window.enpiistudio.browser.downloads.cancel(download.id)}>Cancel</button>
-            {:else if download.status === 'completed'}
-              <button type="button" onclick={() => void openDownload(download)}>Open</button><button type="button" onclick={() => void revealDownload(download)}>Folder</button>
-            {/if}
-            <div class="browser-download-progress"><span style={`width:${downloadProgress(download)}%`}></span></div>
+          <div class="mb-1 rounded-md border border-border-subtle bg-studio-card p-2">
+            <div class="flex items-start gap-1">
+              <div class="min-w-0 flex-1">
+                <strong class="block truncate text-xs text-studio-text">{download.filename}</strong>
+                <span class="text-[10px] text-studio-text-dim">{download.status === 'progressing' ? `${downloadSize(download.receivedBytes)} / ${download.totalBytes ? downloadSize(download.totalBytes) : '—'}` : download.status}</span>
+              </div>
+              {#if download.status === 'progressing'}
+                <button type="button" class={toolBtn} onclick={() => void window.enpiistudio.browser.downloads.cancel(download.id)}>Cancel</button>
+              {:else if download.status === 'completed'}
+                <button type="button" class={toolBtn} onclick={() => void openDownload(download)}>Open</button>
+                <button type="button" class={toolBtn} onclick={() => void revealDownload(download)}>Folder</button>
+              {/if}
+            </div>
+            <div class="mt-1.5 h-1 overflow-hidden rounded-lg bg-white/5">
+              <span class="block h-full rounded-lg bg-studio-purple" style={`width:${downloadProgress(download)}%`}></span>
+            </div>
           </div>
         {:else}
-          <div class="browser-bookmarks-empty">No downloads yet.</div>
+          <div class="px-2 py-6 text-center text-[11px] text-studio-text-dim">No downloads yet.</div>
         {/each}
       </div>
     </section>
   {/if}
+
   {#if historyOpen}
-    <button type="button" class="browser-bookmarks-backdrop" aria-label="Close history" onclick={() => (historyOpen = false)}></button>
-    <section class="browser-bookmarks-panel browser-history-panel" aria-label="Browser history">
-      <header><strong>History</strong><button type="button" disabled={!history.length} onclick={requestClearHistory}>Clear</button></header>
-      <div class="browser-history-search"><input bind:value={historyQuery} placeholder="Search history" aria-label="Search history" /></div>
-      <div class="browser-bookmarks-list">
+    <button type="button" class="fixed inset-0 z-[60] cursor-default bg-black/20" aria-label="Close history" onclick={() => (historyOpen = false)}></button>
+    <section class="absolute right-3 top-[76px] z-[61] flex max-h-[min(480px,70vh)] w-96 flex-col overflow-hidden rounded-lg border border-white/11 bg-studio-popover shadow-[0_18px_50px_rgba(0,0,0,0.5)]" aria-label="Browser history">
+      <header class="flex items-center justify-between border-b border-border-subtle px-3 py-2 text-[11px]">
+        <strong class="text-studio-text">History</strong>
+        <button type="button" class={toolBtn} disabled={!history.length} onclick={requestClearHistory}>Clear</button>
+      </header>
+      <div class="border-b border-border-subtle p-2">
+        <input class="w-full rounded-md border border-white/9 bg-black/25 px-2.5 py-1.5 text-xs text-studio-text outline-none focus:border-studio-purple-bright/80" bind:value={historyQuery} placeholder="Search history" aria-label="Search history" />
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto p-1.5">
         {#each filteredHistory as entry (entry.id)}
-          <button type="button" class="browser-history-row" onclick={() => void openHistoryEntry(entry)}><div><strong>{entry.title}</strong><span>{entry.url}</span></div><time>{historyTime(entry.visitedAt)}</time></button>
+          <button type="button" class="mb-0.5 flex w-full items-start justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.04]" onclick={() => void openHistoryEntry(entry)}>
+            <div class="min-w-0">
+              <strong class="block truncate text-xs text-studio-text">{entry.title}</strong>
+              <span class="block truncate text-[10px] text-studio-text-dim">{entry.url}</span>
+            </div>
+            <time class="shrink-0 text-[10px] text-studio-text-dim">{historyTime(entry.visitedAt)}</time>
+          </button>
         {:else}
-          <div class="browser-bookmarks-empty">{history.length ? 'No matching history.' : 'No history yet.'}</div>
+          <div class="px-2 py-6 text-center text-[11px] text-studio-text-dim">{history.length ? 'No matching history.' : 'No history yet.'}</div>
         {/each}
       </div>
     </section>
   {/if}
-  {#if clearHistoryOpen}
-    <div class="confirm-backdrop" role="presentation">
-      <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="Clear browser history">
-        <div class="confirm-icon">!</div>
-        <div><div class="confirm-title">Clear browser history?</div><div class="confirm-message">Semua riwayat browser project ini akan dihapus.</div></div>
-        <div class="confirm-actions"><button bind:this={cancelClearHistoryButton} type="button" class="confirm-cancel" onclick={() => (clearHistoryOpen = false)}>Batal</button><button type="button" class="confirm-danger" onclick={clearHistory}>Clear</button></div>
+
+  {#if error}<div class="px-3 py-1.5 font-mono text-[11px] text-danger">{error}</div>{/if}
+
+  <div class="relative min-h-0 flex-1 overflow-hidden bg-studio-dark">
+    {#key browserPartition}
+      {#each tabs as tab, index (tab.id)}
+        <webview
+          bind:this={webviewElements[index]}
+          class="absolute inset-0 h-full w-full {tab.id !== activeId ? 'invisible pointer-events-none' : ''}"
+          src="about:blank"
+          partition={browserPartition}
+          allowpopups
+        ></webview>
+      {/each}
+    {/key}
+    {#if !activeTab?.url && !loading}
+      <div class="absolute inset-0 grid place-items-center text-center text-studio-text-dim">
+        <div>
+          <strong class="mb-1 block text-sm text-studio-text">Browser</strong>
+          <span class="text-xs">Masukkan URL untuk mulai.</span>
+        </div>
       </div>
-    </div>
-  {/if}
-  {#if error}<div class="browser-error">{error}</div>{/if}
-  <div class="browser-content">
-    {#each tabs as tab, index (tab.id)}
-      <webview
-        bind:this={webviewElements[index]}
-        class:hidden={tab.id !== activeId}
-        src="about:blank"
-        partition={browserPartition}
-        allowpopups
-      ></webview>
-    {/each}
-    {#if !activeTab?.url && !loading}<div class="browser-empty"><strong>Browser</strong><span>Masukkan URL untuk mulai.</span></div>{/if}
+    {/if}
   </div>
 </div>
+
+<style>
+  /* electron webview is replaced element — force fill */
+  :global(webview) {
+    display: flex;
+  }
+</style>
+
+<ConfirmDialog
+  open={clearHistoryOpen}
+  title="Clear browser history?"
+  message="Semua riwayat browser project ini akan dihapus."
+  cancelLabel="Batal"
+  confirmLabel="Clear"
+  danger
+  onCancel={() => (clearHistoryOpen = false)}
+  onConfirm={clearHistory}
+/>

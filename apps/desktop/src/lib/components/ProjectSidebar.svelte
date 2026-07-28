@@ -45,23 +45,24 @@
 </script>
 
 <aside
-  class="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border-subtle bg-studio-panel p-4"
+  class="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-[color:var(--color-chrome-border)] bg-studio-panel p-4 transition-[border-color] duration-150 hover:border-[color:var(--color-chrome-border-hover)]"
 >
-  <div class="mb-4 flex items-center gap-3">
+  <div class="mb-6 flex items-center gap-2.5 px-1">
     <div
-      class="grid size-8 place-items-center rounded-lg bg-studio-purple text-xs font-bold text-white"
+      class="grid size-6 place-items-center rounded-md border border-studio-lavender/25 bg-studio-purple shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-studio-purple)_40%,transparent)]"
     >
-      E
+      <span class="font-mono text-[11px] font-semibold tracking-tight text-studio-lavender-bright">E</span>
     </div>
-    <div class="text-sm font-semibold tracking-tight text-studio-text">enpiistudio</div>
+    <div class="min-w-0">
+      <h1 class="m-0 text-sm font-semibold tracking-tight text-studio-text">enpiistudio</h1>
+      <p class="m-0 font-mono text-[9px] tracking-[0.12em] text-studio-text-dim uppercase">local agent</p>
+    </div>
   </div>
 
-  <div class="mb-3 flex items-center gap-2">
-    <div
-      class="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-border-subtle bg-studio-dark px-3 py-1.5"
-    >
+  <div class="mb-6 flex items-center gap-2">
+    <div class="relative min-w-0 flex-1">
       <svg
-        class="size-3.5 shrink-0 text-studio-text-dim"
+        class="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-studio-text-dim"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -75,7 +76,7 @@
         ></path>
       </svg>
       <input
-        class="min-w-0 flex-1 bg-transparent text-xs text-studio-text outline-none placeholder:text-studio-text-dim"
+        class="w-full rounded-lg border border-white/5 bg-studio-dark py-2 pl-9 pr-3 text-xs text-studio-text outline-none placeholder:text-studio-text-dim/50 focus:ring-1 focus:ring-studio-purple/50"
         type="text"
         placeholder="Search projects..."
         bind:value={filter}
@@ -84,7 +85,7 @@
     </div>
     <button
       type="button"
-      class="grid size-8 shrink-0 place-items-center rounded-full border border-border-subtle text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
+      class="grid size-8 shrink-0 place-items-center rounded-lg border border-white/5 text-studio-text-dim hover:bg-white/5 hover:text-white"
       title="Open folder"
       aria-label="Open folder"
       onclick={openProject}
@@ -101,49 +102,54 @@
     </button>
   </div>
   {#if openError}
-    <div class="mb-2 rounded-md border border-danger/30 bg-danger-bg/40 px-2 py-1.5 text-[11px] text-danger">
+    <div class="mb-2 rounded-lg border border-danger/30 bg-danger-bg/40 p-4 text-[11px] text-danger" role="alert">
       {openError}
     </div>
   {/if}
 
   <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto">
     {#if app.projects.length === 0}
-      <div class="px-1 py-6 text-center text-xs text-studio-text-dim">Open a folder to start</div>
+      <div class="p-4 text-center text-xs text-studio-text-dim">Open a folder to start</div>
     {:else if filtered.length === 0}
-      <div class="px-1 py-6 text-center text-xs text-studio-text-dim">No match</div>
+      <div class="p-4 text-center text-xs text-studio-text-dim">No match</div>
     {:else}
       {#each filtered as project (project.id)}
         <div
-          class="cursor-pointer rounded-lg border px-2.5 py-2 transition-colors {app.activeProjectId ===
+          class="relative cursor-pointer rounded-lg border p-4 transition-colors {app.activeProjectId ===
           project.id
-            ? 'border-studio-purple/40 bg-studio-purple/15'
-            : 'border-transparent hover:border-border-subtle hover:bg-white/[0.03]'}"
+            ? 'border-studio-purple/20 bg-studio-purple/10'
+            : 'border-transparent hover:bg-white/5'}"
           role="button"
           tabindex="0"
           onclick={() => onSelect(project.id)}
           onkeydown={(e) => e.key === 'Enter' && onSelect(project.id)}
         >
-          <div class="flex items-center gap-2">
-            <span class="min-w-0 flex-1 truncate text-[13px] font-medium text-studio-text"
+          <div class="mb-1 flex items-start justify-between gap-2">
+            <span
+              class="min-w-0 flex-1 truncate text-sm font-medium {app.activeProjectId === project.id
+                ? 'text-studio-text'
+                : 'text-studio-text-dim'}"
               >{project.name}</span
             >
-            <button
-              type="button"
-              class="text-xs {project.pinned
-                ? 'text-studio-gold'
-                : 'text-studio-text-dim/40 hover:text-studio-gold'}"
-              title={project.pinned ? 'Unpin' : 'Pin'}
-              aria-label={project.pinned ? 'Unpin project' : 'Pin project'}
-              onclick={(e) => onPin(e, project.id)}
-            >★</button>
-            <div
-              class="size-1.5 shrink-0 rounded-full bg-studio-gold {app.activeProjectId !== project.id
-                ? 'opacity-30'
-                : ''}"
-              title="project"
-            ></div>
+            <div class="mt-1 flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                class="text-[10px] {project.pinned
+                  ? 'text-studio-gold'
+                  : 'text-studio-text-dim/40 hover:text-studio-gold'}"
+                title={project.pinned ? 'Unpin' : 'Pin'}
+                aria-label={project.pinned ? 'Unpin project' : 'Pin project'}
+                onclick={(e) => onPin(e, project.id)}
+              >★</button>
+              <div
+                class="size-2 rounded-lg bg-studio-gold {app.activeProjectId === project.id
+                  ? 'shadow-[0_0_8px_var(--color-studio-gold)]'
+                  : 'opacity-60'}"
+                title="project"
+              ></div>
+            </div>
           </div>
-          <div class="mt-0.5 truncate font-mono text-[10px] text-studio-text-dim" title={project.path}>
+          <div class="truncate font-mono text-[10px] text-studio-text-dim" title={project.path}>
             {project.path}
           </div>
         </div>

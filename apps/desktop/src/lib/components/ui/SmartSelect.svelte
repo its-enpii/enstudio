@@ -13,6 +13,8 @@
     hint = '',
     error = '',
     placeholder = 'Select…',
+    searchPlaceholder = 'Search…',
+    searchable = false,
     disabled = false,
     ariaLabel = '',
     title = '',
@@ -25,6 +27,9 @@
     hint?: string
     error?: string
     placeholder?: string
+    searchPlaceholder?: string
+    /** Show filter input in menu. Auto-on when options.length > 8 if omitted false only when explicit. */
+    searchable?: boolean
     disabled?: boolean
     ariaLabel?: string
     title?: string
@@ -36,11 +41,24 @@
   let rootEl: HTMLDivElement | undefined = $state()
   let triggerEl: HTMLButtonElement | undefined = $state()
   let listEl: HTMLDivElement | undefined = $state()
+  let searchEl: HTMLInputElement | undefined = $state()
   let activeIdx = $state(-1)
   let menuStyle = $state('')
+  let query = $state('')
 
+  const showSearch = $derived(searchable || options.length > 8)
+  const filtered = $derived.by(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return options
+    return options.filter(
+      (o) =>
+        o.label.toLowerCase().includes(q) ||
+        o.value.toLowerCase().includes(q) ||
+        (o.description?.toLowerCase().includes(q) ?? false),
+    )
+  })
   const selected = $derived(options.find((o) => o.value === value))
-  const enabled = $derived(options.map((o, i) => ({ o, i })).filter((x) => !x.o.disabled))
+  const enabled = $derived(filtered.map((o, i) => ({ o, i })).filter((x) => !x.o.disabled))
 
   function placeMenu(): void {
     if (!triggerEl) return
@@ -48,7 +66,8 @@
     const vw = window.innerWidth
     const vh = window.innerHeight
     const gap = 4
-    const maxH = Math.min(280, options.length * 52 + 12)
+    const searchH = showSearch ? 40 : 0
+    const maxH = Math.min(320, filtered.length * 52 + 12 + searchH)
     let top = r.bottom + gap
     let left = r.left
     let width = Math.max(r.width, 180)
@@ -64,18 +83,22 @@
   function close(): void {
     open = false
     activeIdx = -1
+    query = ''
   }
 
   function toggle(): void {
     if (disabled) return
     open = !open
     if (open) {
-      const idx = options.findIndex((o) => o.value === value)
+      const idx = filtered.findIndex((o) => o.value === value)
       activeIdx = idx >= 0 ? idx : enabled[0]?.i ?? -1
       queueMicrotask(() => {
         placeMenu()
-        listEl?.focus()
+        if (showSearch) searchEl?.focus()
+        else listEl?.focus()
       })
+    } else {
+      query = ''
     }
   }
 
@@ -97,28 +120,42 @@
     if (open) placeMenu()
   }
 
+  function moveActive(dir: 1 | -1): void {
+    if (!enabled.length) return
+    const cur = enabled.findIndex((x) => x.i === activeIdx)
+    const next =
+      dir === 1
+        ? enabled[(cur + 1) % enabled.length]!
+        : enabled[(cur - 1 + enabled.length) % enabled.length]!
+    activeIdx = next.i
+  }
+
   function onListKey(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       e.preventDefault()
       close()
       return
     }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault()
-      if (!enabled.length) return
-      const cur = enabled.findIndex((x) => x.i === activeIdx)
-      const next =
-        e.key === 'ArrowDown'
-          ? enabled[(cur + 1) % enabled.length]!
-          : enabled[(cur - 1 + enabled.length) % enabled.length]!
-      activeIdx = next.i
+      moveActive(1)
       return
     }
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.key === 'ArrowUp') {
       e.preventDefault()
-      const opt = options[activeIdx]
+      moveActive(-1)
+      return
+    }
+    if (e.key === 'Enter' || (e.key === ' ' && !showSearch)) {
+      e.preventDefault()
+      const opt = filtered[activeIdx]
       if (opt) pick(opt)
     }
+  }
+
+  function onSearchInput(): void {
+    activeIdx = enabled[0]?.i ?? -1
+    placeMenu()
   }
 </script>
 
@@ -131,7 +168,7 @@
 
   <button
     type="button"
-    class="flex min-h-[38px] w-full items-center justify-between gap-2 rounded-sm border bg-studio-dark px-3 py-2 text-left text-[13px] text-studio-text hover:border-studio-purple/35 focus-visible:border-studio-purple/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 {error
+    class="flex min-h-[38px] w-full items-center justify-between gap-2 rounded-sm border bg-studio-dark px-3 py-2 text-left text-[13px] text-studio-text hover:border-studio-purple/35 focus-visible:border-studio-purple/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-gold/50 disabled:cursor-not-allowed disabled:opacity-50 {error
       ? 'border-danger/45'
       : open
         ? 'border-studio-purple/70'
@@ -173,32 +210,52 @@
 
   {#if open}
     <div
-      class="fixed z-[200] overflow-y-auto rounded-[10px] border border-studio-purple/35 bg-studio-card p-1 shadow-[0_16px_40px_rgba(0,0,0,0.55)] outline-none"
+      class="fixed z-[200] flex flex-col overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card shadow-[0_16px_40px_rgba(0,0,0,0.55)] outline-none"
       role="listbox"
       tabindex="-1"
       bind:this={listEl}
       style={menuStyle}
       onkeydown={onListKey}
     >
-      {#each options as opt, i (opt.value)}
-        <button
-          type="button"
-          class="flex w-full flex-col gap-0.5 rounded-sm px-2.5 py-2 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 {opt.value ===
-          value
-            ? 'text-white'
-            : 'text-studio-text'} {i === activeIdx ? 'bg-studio-purple/25' : 'hover:bg-studio-purple/25'}"
-          role="option"
-          aria-selected={opt.value === value}
-          disabled={opt.disabled}
-          onmouseenter={() => (activeIdx = i)}
-          onclick={() => pick(opt)}
-        >
-          <span class="font-medium">{opt.label}</span>
-          {#if opt.description}
-            <span class="text-[11px] text-studio-text-dim">{opt.description}</span>
-          {/if}
-        </button>
-      {/each}
+      {#if showSearch}
+        <div class="shrink-0 border-b border-border-subtle p-1.5">
+          <input
+            bind:this={searchEl}
+            class="w-full rounded-sm border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] text-studio-text outline-none placeholder:text-studio-text-dim/50 focus:border-studio-purple/60"
+            type="text"
+            placeholder={searchPlaceholder}
+            bind:value={query}
+            oninput={onSearchInput}
+            onkeydown={onListKey}
+            aria-label={searchPlaceholder}
+          />
+        </div>
+      {/if}
+      <div class="min-h-0 flex-1 overflow-y-auto p-1">
+        {#if filtered.length === 0}
+          <div class="px-2.5 py-3 text-center text-[12px] text-studio-text-dim">No matches</div>
+        {:else}
+          {#each filtered as opt, i (opt.value)}
+            <button
+              type="button"
+              class="flex w-full flex-col gap-0.5 rounded-sm px-2.5 py-2 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 {opt.value ===
+              value
+                ? 'text-white'
+                : 'text-studio-text'} {i === activeIdx ? 'bg-studio-purple/25' : 'hover:bg-studio-purple/25'}"
+              role="option"
+              aria-selected={opt.value === value}
+              disabled={opt.disabled}
+              onmouseenter={() => (activeIdx = i)}
+              onclick={() => pick(opt)}
+            >
+              <span class="font-medium">{opt.label}</span>
+              {#if opt.description}
+                <span class="text-[11px] text-studio-text-dim">{opt.description}</span>
+              {/if}
+            </button>
+          {/each}
+        {/if}
+      </div>
     </div>
   {/if}
 

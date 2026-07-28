@@ -6,6 +6,7 @@
   import { state as app, COMPOSER_MODES, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
   import { acceptAgentCheckpoint, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshSessionList, respondAllApprovals, respondApproval, respondAsk, rollbackAgentCheckpoint, saveProviderConfig, searchProjectFiles, sendPrompt, stopAgentTurn, undoCompactSession } from '../enpii'
   import { renderMarkdown } from '../markdown'
+  import { xtermTheme } from '../theme'
   import SmartSelect from './ui/SmartSelect.svelte'
   import ConfirmDialog from './ui/ConfirmDialog.svelte'
 
@@ -114,23 +115,7 @@
         lineHeight: 1.25,
         scrollback: 5_000,
         drawBoldTextInBrightColors: false,
-        theme: {
-          background: '#090909',
-          foreground: '#d9d9dc',
-          cursor: '#e6af2e',
-          cursorAccent: '#090909',
-          selectionBackground: '#384f8f99',
-          black: '#171717',
-          red: '#ff6b81',
-          green: '#8bd49c',
-          yellow: '#e6af2e',
-          blue: '#82aaff',
-          magenta: '#c792ea',
-          cyan: '#67d4d0',
-          white: '#d9d9dc',
-          brightBlack: '#737884',
-          brightWhite: '#ffffff',
-        },
+        theme: { ...xtermTheme },
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
@@ -437,28 +422,28 @@
 
   function diffLineClass(line: string): string {
     if (line.startsWith('+++') || line.startsWith('---')) return 'text-studio-text-dim'
-    if (line.startsWith('@@')) return 'bg-sky-500/12 text-sky-300'
-    if (line.startsWith('+')) return 'bg-emerald-500/20 text-emerald-400'
-    if (line.startsWith('-')) return 'bg-red-500/20 text-red-400'
+    if (line.startsWith('@@')) return 'bg-studio-link/12 text-studio-link'
+    if (line.startsWith('+')) return 'bg-studio-success/20 text-studio-success-bright'
+    if (line.startsWith('-')) return 'bg-studio-error/20 text-studio-error'
     return 'text-studio-text/75'
   }
 
   function toolBorder(status: string): string {
-    if (status === 'ok') return 'border-l-emerald-500'
-    if (status === 'error') return 'border-l-red-400'
+    if (status === 'ok') return 'border-l-studio-success'
+    if (status === 'error') return 'border-l-studio-error'
     return 'border-l-studio-gold'
   }
 
   function toolAccent(status: string): string {
-    if (status === 'ok') return 'text-emerald-400'
-    if (status === 'error') return 'text-red-400'
+    if (status === 'ok') return 'text-studio-success-bright'
+    if (status === 'error') return 'text-studio-error'
     return 'text-studio-gold'
   }
 
   function toolDot(status: string): string {
-    if (status === 'ok') return 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
-    if (status === 'error') return 'bg-red-400'
-    return 'bg-studio-gold shadow-[0_0_8px_#e6af2e]'
+    if (status === 'ok') return 'bg-studio-success shadow-[0_0_8px_var(--color-studio-success)]'
+    if (status === 'error') return 'bg-studio-error'
+    return 'bg-studio-gold shadow-[0_0_8px_var(--color-studio-gold)]'
   }
 
   function isUnifiedDiff(text: string): boolean {
@@ -1300,13 +1285,13 @@
 >
   {#if draggingFiles}
     <div
-      class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[inherit] border border-dashed border-[#897fff]/80 bg-[rgba(17,14,35,0.92)] text-[11px] text-[#c9c4ff]"
+      class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[inherit] border border-dashed border-studio-lavender-deep/80 bg-studio-panel/95 text-[11px] text-studio-lavender-soft"
     >
       Drop files to attach
     </div>
   {/if}
   <div
-    class="relative z-30 flex min-h-[34px] shrink-0 items-stretch gap-0.5 overflow-visible border-b border-border-subtle bg-[rgba(16,16,17,0.6)] px-2.5 pt-1.5"
+    class="relative z-30 flex min-h-[34px] shrink-0 items-stretch gap-0.5 overflow-visible border-b border-white/5 bg-transparent px-2.5 pt-1.5"
     role="tablist"
     aria-label="Agent model"
   >
@@ -1341,7 +1326,7 @@
           >{cli.label}</button>
           <button
             type="button"
-            class="cursor-pointer border-0 bg-transparent py-0 pr-2 text-sm leading-none text-studio-text-dim opacity-70 hover:text-[#ff8a9b] hover:opacity-100"
+            class="cursor-pointer border-0 bg-transparent py-0 pr-2 text-sm leading-none text-studio-text-dim opacity-70 hover:text-studio-error hover:opacity-100"
             aria-label={`Close ${cli.label}`}
             title={`Close ${cli.label}`}
             onclick={(e) => {
@@ -1355,7 +1340,7 @@
     <div class="relative ml-auto flex-none self-center" bind:this={vendorMenuEl}>
       <button
         type="button"
-        class="h-[26px] cursor-pointer rounded-full border border-white/12 bg-white/5 px-2.5 text-sm font-semibold leading-none text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
+        class="h-[26px] cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 text-sm font-semibold leading-none text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
         aria-label="Add vendor agent"
         aria-haspopup="menu"
         aria-expanded={vendorMenuOpen}
@@ -1365,7 +1350,7 @@
       >+</button>
       {#if vendorMenuOpen}
         <div
-          class="fixed z-[200] grid min-w-[200px] gap-0.5 rounded-[10px] border border-white/12 bg-[#1a1a1c] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+          class="fixed z-[200] grid min-w-[200px] gap-0.5 rounded-lg border border-white/12 bg-studio-elevated p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
           role="menu"
           style={vendorMenuStyle}
         >
@@ -1377,7 +1362,7 @@
             {#each vendorAvailable as cli (cli.id)}
               <button
                 type="button"
-                class="flex cursor-pointer justify-between gap-2 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-xs text-[#ddd] hover:bg-white/6 hover:text-white"
+                class="flex cursor-pointer justify-between gap-2 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-xs text-studio-text hover:bg-white/6 hover:text-white"
                 role="menuitem"
                 onclick={() => void addVendorTab(cli.id)}
               >
@@ -1399,7 +1384,7 @@
   <div
     class="col-start-1 row-start-2 min-h-0 flex-col {agentPane !== 'enpii' ? 'flex' : 'hidden'}"
   >
-    {#if vendorError}<div class="px-3 py-2 text-xs text-[#ff8a9b]">{vendorError}</div>{/if}
+    {#if vendorError}<div class="px-3 py-2 text-xs text-studio-error">{vendorError}</div>{/if}
     {#if vendorBusy && !vendorTerms.has(agentPane)}
       <div class="px-3 py-2 text-xs text-studio-text-dim">Starting…</div>
     {/if}
@@ -1415,7 +1400,7 @@
   {#if !app.activeProject}
     <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
       <div>
-        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-full bg-studio-purple text-sm font-bold text-white">e</div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">e</div>
         <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
         <div class="mx-auto max-w-md text-[13px] leading-relaxed">Open a project from the left to start.</div>
       </div>
@@ -1423,7 +1408,7 @@
   {:else if app.messages.length === 0}
     <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
       <div>
-        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-full bg-studio-purple text-sm font-bold text-white">e</div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">e</div>
         <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
         <div class="mx-auto max-w-md text-[13px] leading-relaxed">
           Ask anything about <strong class="text-white">{app.activeProject.name}</strong>.
@@ -1435,37 +1420,37 @@
   {:else}
     {#if app.planMode}
       <div
-        class="mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-xl border border-[#aba3ff]/35 bg-[#aba3ff]/10 px-3.5 py-2.5 text-xs text-studio-text"
+        class="mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-lg border border-studio-lavender/35 bg-studio-lavender/10 px-3.5 py-2.5 text-xs text-studio-text"
         role="status"
       >
-        <strong class="text-[10px] uppercase tracking-wide text-[#aba3ff]">Plan mode</strong>
+        <strong class="text-[10px] uppercase tracking-wide text-studio-lavender">Plan mode</strong>
         <span>Writes, shell, git, MCP, and sub-agents blocked until exit_plan_mode</span>
       </div>
     {/if}
     {#if app.ask && !app.messages.some((m) => m.tool?.callId === app.ask?.toolCallId || m.tool?.callId === app.ask?.requestId)}
-      <div class="mb-3 overflow-hidden rounded-2xl border border-[#aba3ff]/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
-        <div class="flex items-center justify-between gap-3 border-b border-[#aba3ff]/20 bg-[#aba3ff]/10 px-4 py-2">
-          <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#aba3ff]">
+      <div class="mb-3 overflow-hidden rounded-lg border border-studio-lavender/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+        <div class="flex items-center justify-between gap-3 border-b border-studio-lavender/20 bg-studio-lavender/10 px-4 py-2">
+          <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-lavender">
             <span>Question</span>
             {#if app.pendingAsks.length > 1}
               <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
             {/if}
           </div>
-          <span class="text-[9px] font-bold uppercase tracking-widest text-[#aba3ff]/60">ask_user</span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-studio-lavender/60">ask_user</span>
         </div>
         <div class="p-5">
           <p class="mb-4 text-xs leading-relaxed text-studio-text">{app.ask.question}</p>
           {#if app.ask.options?.length}
             <div class="mb-3 flex flex-wrap gap-2">
               {#each app.ask.options as opt (opt)}
-                <button type="button" class="min-w-[120px] flex-1 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(app.ask!.requestId, opt)}>{opt}</button>
+                <button type="button" class="min-w-[120px] flex-1 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(app.ask!.requestId, opt)}>{opt}</button>
               {/each}
             </div>
           {/if}
           <div class="grid grid-cols-[1fr_auto] gap-2">
             <input
               type="text"
-              class="min-h-[42px] w-full rounded-xl border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-[#aba3ff]/55"
+              class="min-h-[42px] w-full rounded-lg border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-studio-lavender/55"
               placeholder="Type an answer…"
               value={askDraft(app.ask.requestId)}
               oninput={(e) => setAskDraft(app.ask!.requestId, (e.currentTarget as HTMLInputElement).value)}
@@ -1478,7 +1463,7 @@
             />
             <button
               type="button"
-              class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
+              class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
               disabled={!askDraft(app.ask.requestId).trim()}
               onclick={() => submitAsk(app.ask!.requestId)}
             >Submit</button>
@@ -1487,7 +1472,7 @@
       </div>
     {/if}
     {#if app.run}
-      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-[10px] border border-white/7 bg-[rgba(18,18,24,0.96)] p-2">
+      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-lg border border-white/7 bg-studio-panel/95 p-2">
         <div class="flex items-center justify-between px-1 pb-1.5 pt-0.5">
           <div class="flex items-center gap-1.5">
             <strong class="text-[10px] text-studio-text">Task</strong>
@@ -1496,7 +1481,7 @@
           </div>
           <div class="flex items-center gap-1.5">
             {#if app.busy}
-              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-[#ff9b9b] hover:bg-white/10" onclick={() => void stopAgentTurn()}>Stop</button>
+              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-error-soft hover:bg-white/10" onclick={() => void stopAgentTurn()}>Stop</button>
             {:else}
               <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text disabled:opacity-45" disabled={!lastUserPrompt()} onclick={() => void retryRun()}>Retry</button>
               <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text" onclick={() => void continueRun()}>Continue</button>
@@ -1508,8 +1493,8 @@
         {/if}
         <div class="grid gap-0.5">
           {#each app.run.tasks as task (task.id)}
-            <div class="flex min-h-[25px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] {task.status === 'running' ? 'bg-violet-500/7 text-studio-text' : task.status === 'completed' ? 'text-white/34' : 'text-white/50'}">
-              <span class="size-1.5 shrink-0 rounded-full {task.status === 'running' ? 'bg-[#9e83ff] shadow-[0_0_0_3px_rgba(143,106,255,0.12)]' : task.status === 'completed' ? 'bg-[#69ce9b]' : 'bg-white/20'}"></span>
+            <div class="flex min-h-[25px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] {task.status === 'running' ? 'bg-studio-violet/10 text-studio-text' : task.status === 'completed' ? 'text-white/34' : 'text-white/50'}">
+              <span class="size-1.5 shrink-0 rounded-lg {task.status === 'running' ? 'bg-studio-violet shadow-[0_0_0_3px_var(--color-studio-violet)/20]' : task.status === 'completed' ? 'bg-studio-success-soft' : 'bg-white/20'}"></span>
               <div class="flex min-w-0 flex-col">
                 <span class="truncate">{task.title}</span>
                 {#if task.detail}<small class="truncate text-[8px] text-white/32 normal-case opacity-55">{task.detail}</small>{/if}
@@ -1525,7 +1510,7 @@
             {#each app.approvals.slice(0, 8) as approval (`${approval.ts}-${approval.name}`)}
               <details class="border-t border-white/[0.035]">
                 <summary class="flex min-h-[23px] cursor-pointer list-none items-center gap-1.5 px-1.5 py-0.5 text-[8px] text-white/44 [&::-webkit-details-marker]:hidden">
-                  <span class="rounded px-1 py-0.5 uppercase {approval.decision === 'allow' ? 'text-[#79d9a7]' : 'text-[#ff9b9b]'}">{approval.decision}</span>
+                  <span class="rounded px-1 py-0.5 uppercase {approval.decision === 'allow' ? 'text-studio-success-text' : 'text-studio-error-soft'}">{approval.decision}</span>
                   <span class="min-w-0 flex-1 truncate">{approval.summary}</span>
                   <time class="ml-auto opacity-45">{new Date(approval.ts).toLocaleTimeString()}</time>
                 </summary>
@@ -1538,7 +1523,7 @@
       </section>
     {/if}
     {#if app.checkpoints.length > 0}
-      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-[10px] border border-white/7 bg-[rgba(18,18,24,0.92)] p-2">
+      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-lg border border-white/7 bg-studio-panel/90 p-2">
         <div class="flex items-center justify-between px-1 pb-1.5 pt-0.5 text-[10px] text-studio-text-dim">
           <strong>Agent Checkpoints</strong>
           <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void loadCheckpoints()}>Refresh</button>
@@ -1564,7 +1549,7 @@
                 {#if checkpoint.prompt}
                   <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy || app.busy} onclick={() => requestRetryCheckpoint(checkpoint.id, checkpoint.prompt)}>Retry</button>
                 {/if}
-                <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-[#ff9b9b] disabled:opacity-45" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id)}>Revert turn</button>
+                <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-error-soft disabled:opacity-45" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id)}>Revert turn</button>
               </div>
             </div>
           </details>
@@ -1576,19 +1561,19 @@
         {#if g.kind === 'user'}
           <div class="flex justify-end">
             <div
-              class="flex max-w-[70%] flex-col gap-2.5 break-words rounded-2xl rounded-tr-none border border-border-subtle bg-studio-card/80 p-4 text-sm leading-relaxed"
+              class="flex max-w-[70%] flex-col gap-2.5 break-words rounded-lg rounded-tr-none border border-border-subtle bg-studio-card/80 p-4 text-sm leading-relaxed"
             >
               {#if g.m.text}<div class="whitespace-pre-wrap">{g.m.text}</div>{/if}
             </div>
           </div>
         {:else if g.kind === 'system'}
-          <div class="rounded-xl border border-dashed border-border-subtle p-3 text-center text-xs text-studio-text-dim">
+          <div class="rounded-lg border border-dashed border-border-subtle p-3 text-center text-xs text-studio-text-dim">
             {g.m.text}
           </div>
         {:else}
           <div class="flex items-start justify-center gap-4">
             <div
-              class="grid size-8 shrink-0 place-items-center rounded-full bg-studio-purple text-xs font-bold text-white"
+              class="grid size-8 shrink-0 place-items-center rounded-lg bg-studio-purple text-xs font-bold text-white"
             >
               e
             </div>
@@ -1604,29 +1589,29 @@
                   {@const pending = pendingForTool(m.tool.callId)}
                   {@const askPending = pendingAskForTool(m.tool.callId)}
                   {#if askPending}
-                    <div class="overflow-hidden rounded-2xl border border-[#aba3ff]/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
-                      <div class="flex items-center justify-between gap-3 border-b border-[#aba3ff]/20 bg-[#aba3ff]/10 px-4 py-2">
-                        <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#aba3ff]">
+                    <div class="overflow-hidden rounded-lg border border-studio-lavender/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+                      <div class="flex items-center justify-between gap-3 border-b border-studio-lavender/20 bg-studio-lavender/10 px-4 py-2">
+                        <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-lavender">
                           <span>Question</span>
                           {#if app.pendingAsks.length > 1}
                             <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
                           {/if}
                         </div>
-                        <span class="text-[9px] font-bold uppercase tracking-widest text-[#aba3ff]/60">ask_user</span>
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-studio-lavender/60">ask_user</span>
                       </div>
                       <div class="p-5">
                         <p class="mb-4 text-xs leading-relaxed text-studio-text">{askPending.question}</p>
                         {#if askPending.options?.length}
                           <div class="mb-3 flex flex-wrap gap-2">
                             {#each askPending.options as opt (opt)}
-                              <button type="button" class="min-w-[120px] flex-1 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
+                              <button type="button" class="min-w-[120px] flex-1 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
                             {/each}
                           </div>
                         {/if}
                         <div class="grid grid-cols-[1fr_auto] gap-2">
                           <input
                             type="text"
-                            class="min-h-[42px] w-full rounded-xl border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-[#aba3ff]/55"
+                            class="min-h-[42px] w-full rounded-lg border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-studio-lavender/55"
                             placeholder="Type an answer…"
                             value={askDraft(askPending.requestId)}
                             oninput={(e) => setAskDraft(askPending.requestId, (e.currentTarget as HTMLInputElement).value)}
@@ -1639,7 +1624,7 @@
                           />
                           <button
                             type="button"
-                            class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
+                            class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
                             disabled={!askDraft(askPending.requestId).trim()}
                             onclick={() => submitAsk(askPending.requestId)}
                           >Submit</button>
@@ -1647,7 +1632,7 @@
                       </div>
                     </div>
                   {:else if pending}
-                    <div class="overflow-hidden rounded-2xl border border-studio-gold/30 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+                    <div class="overflow-hidden rounded-lg border border-studio-gold/30 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
                       <div class="flex items-center justify-between gap-3 border-b border-studio-gold/20 bg-studio-gold/10 px-4 py-2">
                         <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-gold">
                           <svg class="size-4 shrink-0 text-studio-gold" width="16" height="16" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
@@ -1663,11 +1648,11 @@
                       <div class="p-5">
                         <p class="mb-4 text-xs leading-relaxed text-studio-text">
                           <span class="font-bold text-studio-purple">enpii</span> wants to {approvalVerb(pending.name)}
-                          <code class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[12px] text-[#c6c0ff]">{approvalPath(pending)}</code>
+                          <code class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[12px] text-studio-lavender-bright">{approvalPath(pending)}</code>
                         </p>
                         {#if pending.preview}
                           {#if isUnifiedDiff(pending.preview)}
-                            <div class="mb-5 max-h-55 overflow-auto rounded-lg border border-white/6 bg-[#0d1117] py-1 font-mono text-[11px] leading-snug">
+                            <div class="mb-5 max-h-55 overflow-auto rounded-lg border border-white/6 bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug">
                               {#each pending.preview.split('\n') as line, li (`d-${li}`)}
                                 <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-3 {diffLineClass(line)}">{line || ' '}</div>
                               {/each}
@@ -1677,31 +1662,31 @@
                           {/if}
                         {/if}
                         <div class="grid grid-cols-2 gap-4">
-                          <button type="button" class="rounded-xl bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondApproval('deny', pending.requestId)}>Deny</button>
-                          <button type="button" class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondApproval('allow', pending.requestId)}>{approvalButton(pending.name)}</button>
-                          <button type="button" class="col-span-2 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Auto-allow this action kind for the rest of the session" onclick={() => void respondApproval('allow', pending.requestId, 'session')}>Allow for session</button>
+                          <button type="button" class="rounded-lg bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondApproval('deny', pending.requestId)}>Deny</button>
+                          <button type="button" class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondApproval('allow', pending.requestId)}>{approvalButton(pending.name)}</button>
+                          <button type="button" class="col-span-2 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Auto-allow this action kind for the rest of the session" onclick={() => void respondApproval('allow', pending.requestId, 'session')}>Allow for session</button>
                         </div>
                         {#if app.pendingApprovals.length > 1 && app.pendingApprovals[0]?.requestId === pending.requestId}
                           <div class="mt-3 grid grid-cols-2 gap-2 border-t border-studio-gold/15 pt-3">
-                            <button type="button" class="rounded-xl bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondAllApprovals('deny')}>Deny all ({app.pendingApprovals.length})</button>
-                            <button type="button" class="rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondAllApprovals('allow')}>Allow all ({app.pendingApprovals.length})</button>
-                            <button type="button" class="col-span-2 rounded-xl bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Allow these kinds for the rest of the session" onclick={() => void respondAllApprovals('allow', 'session')}>Allow all for session</button>
+                            <button type="button" class="rounded-lg bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondAllApprovals('deny')}>Deny all ({app.pendingApprovals.length})</button>
+                            <button type="button" class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondAllApprovals('allow')}>Allow all ({app.pendingApprovals.length})</button>
+                            <button type="button" class="col-span-2 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Allow these kinds for the rest of the session" onclick={() => void respondAllApprovals('allow', 'session')}>Allow all for session</button>
                           </div>
                         {/if}
                       </div>
                     </div>
                   {:else if isTerminalTool(m.tool.name)}
-                    <details class="rounded-r-lg border-l-2 bg-[#0b0f0c] font-mono text-xs {toolBorder(m.tool.status)}">
+                    <details class="rounded-r-lg border-l-2 bg-studio-shell-green font-mono text-xs {toolBorder(m.tool.status)}">
                       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none [&::-webkit-details-marker]:hidden">
                         <div class="flex min-w-0 items-center gap-3">
-                          <span class="size-2 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
-                          <span class="shrink-0 font-bold text-[#7dcea0]">tool:{m.tool.name}</span>
+                          <span class="size-2 shrink-0 rounded-lg {toolDot(m.tool.status)}"></span>
+                          <span class="shrink-0 font-bold text-studio-success-bright">tool:{m.tool.name}</span>
                           <span class="truncate font-mono text-studio-text-dim">{shellCommand(m)}</span>
                         </div>
                         <span class="shrink-0 text-[10px] uppercase tracking-widest text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
                       <div class="flex items-center gap-2 px-3 pb-2 font-mono text-[11px]">
-                        <span class="shrink-0 text-[#7dcea0]">$</span>
+                        <span class="shrink-0 text-studio-success-bright">$</span>
                         <code class="min-w-0 flex-1 truncate text-studio-text/90">{shellCommand(m)}</code>
                         {#if m.tool.preview && m.tool.status !== 'running'}
                           <button
@@ -1717,18 +1702,18 @@
                         {/if}
                       </div>
                       {#if m.tool.preview && m.tool.status !== 'running'}
-                        <pre class="mx-2 mb-2.5 max-h-70 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/6 bg-[#050705] p-3 font-mono text-[11px] text-[#c8e6c9]">{m.tool.preview}</pre>
+                        <pre class="mx-2 mb-2.5 max-h-70 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-success-out">{m.tool.preview}</pre>
                       {:else if m.tool.status === 'running'}
-                        <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-[#050705] p-3 font-mono text-[11px] text-studio-text-dim">Running…</div>
+                        <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
-                        <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-[#050705] p-3 font-mono text-[11px] text-studio-text-dim">No output</div>
+                        <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-text-dim">No output</div>
                       {/if}
                     </details>
                   {:else}
                     <details class="rounded-r-lg border-l-2 bg-studio-dark/40 font-mono text-xs {toolBorder(m.tool.status)}">
                       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none [&::-webkit-details-marker]:hidden">
                         <div class="flex min-w-0 items-center gap-3">
-                          <span class="size-2 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
+                          <span class="size-2 shrink-0 rounded-lg {toolDot(m.tool.status)}"></span>
                           <span class="shrink-0 font-bold {toolAccent(m.tool.status)}">tool:{m.tool.name}</span>
                           <span class="truncate text-studio-text-dim">{toolLabel(m)}</span>
                         </div>
@@ -1755,12 +1740,12 @@
 
 <footer class="row-start-3 shrink-0 px-6 pb-6 pt-2 {agentPane !== 'enpii' ? 'hidden' : ''}">
   <div
-    class="composer-inner relative flex flex-col gap-4 rounded-3xl border border-border-subtle bg-studio-dark/50 p-4"
+    class="composer-inner relative flex flex-col gap-4 rounded-lg border border-studio-purple/25 bg-studio-dark/60 p-4 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--color-studio-lavender)_8%,transparent)] transition-[border-color,box-shadow] duration-150 focus-within:border-studio-purple/55 focus-within:shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-studio-purple)_35%,transparent)]"
     role="group"
     aria-label="Message composer"
   >
     <textarea
-      class="min-h-[60px] w-full resize-none bg-transparent text-sm text-studio-text outline-none placeholder:text-studio-text-dim disabled:opacity-45"
+      class="min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-studio-text outline-none placeholder:text-studio-text-dim disabled:opacity-45"
       rows="3"
       bind:this={composerEl}
       placeholder={app.activeProject
@@ -1783,7 +1768,7 @@
           options={[...COMPOSER_MODES]}
           ariaLabel="Composer mode"
           title="Shift+Tab: cycle composer mode"
-          class="w-[92px] min-w-0 [&_button]:min-h-7 [&_button]:rounded-full [&_button]:border-studio-purple/30 [&_button]:bg-studio-purple/15 [&_button]:px-2 [&_button]:py-1 [&_button]:text-[9px] [&_button]:text-[#bcb6ff]"
+          class="w-[92px] min-w-0 [&_button]:min-h-7 [&_button]:rounded-lg [&_button]:border-studio-purple/30 [&_button]:bg-studio-purple/15 [&_button]:px-2 [&_button]:py-1 [&_button]:text-[9px] [&_button]:text-studio-lavender-muted"
           disabled={app.busy}
           onChange={(value) => void changeComposerMode(value)}
         />
@@ -1814,7 +1799,9 @@
       </div>
       <button
         type="button"
-        class="flex items-center gap-2 rounded-full bg-studio-gold px-4 py-2 pl-5 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
+        class="flex items-center gap-2 rounded-lg bg-studio-gold px-4 py-2.5 pl-5 text-sm font-bold text-studio-dark shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-studio-gold)_40%,transparent)] transition-[filter,box-shadow] duration-150 hover:brightness-105 hover:shadow-[0_0_20px_color-mix(in_srgb,var(--color-studio-gold)_28%,transparent)] disabled:opacity-45 disabled:hover:shadow-none {app.busy
+          ? 'studio-signal'
+          : ''}"
         onclick={onSend}
         disabled={!app.activeProject || app.busy}
       >
@@ -1828,7 +1815,7 @@
     </div>
     {#if activeMention && (mentionResults.length > 0 || mentionLoading)}
       <div
-        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-white/12 bg-[rgba(27,27,29,0.98)] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-lg border border-white/12 bg-studio-elevated p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
         role="listbox"
         aria-label="File references"
       >
@@ -1856,7 +1843,7 @@
       </div>
     {:else if slashSuggestions.length > 0}
       <div
-        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-white/12 bg-[rgba(27,27,29,0.98)] p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-lg border border-white/12 bg-studio-elevated p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
         role="listbox"
         aria-label="Slash commands"
       >
@@ -1884,7 +1871,7 @@
       {@const preview = app.attachments.find((file) => file.id === attachmentPreviewId)}
       {#if preview}
         <section
-          class="absolute bottom-[74px] left-4 z-16 w-[min(500px,calc(100%-32px))] overflow-hidden rounded-[9px] border border-white/11 bg-[rgba(23,23,25,0.99)] shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+          class="absolute bottom-[74px] left-4 z-16 w-[min(500px,calc(100%-32px))] overflow-hidden rounded-lg border border-white/11 bg-studio-elevated shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
         >
           <header class="flex items-center gap-2 border-b border-white/7 px-2.5 py-2">
             <strong class="min-w-0 truncate text-[10px] text-studio-text">{preview.name}</strong>
@@ -1900,7 +1887,7 @@
             >
           </header>
           {#if preview.error}
-            <div class="max-h-60 overflow-auto p-2.5 font-mono text-[9px] text-[#e8c66e] whitespace-pre-wrap break-words">
+            <div class="max-h-60 overflow-auto p-2.5 font-mono text-[9px] text-studio-amber whitespace-pre-wrap break-words">
               {preview.error}
             </div>
           {:else}

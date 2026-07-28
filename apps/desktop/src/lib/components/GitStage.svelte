@@ -108,11 +108,11 @@
   }
 
   function diffClass(line: string): string {
-    if (line.startsWith('+++') || line.startsWith('---')) return 'meta'
-    if (line.startsWith('@@')) return 'hunk'
-    if (line.startsWith('+')) return 'add'
-    if (line.startsWith('-')) return 'del'
-    return ''
+    if (line.startsWith('+++') || line.startsWith('---')) return 'text-studio-text-dim'
+    if (line.startsWith('@@')) return 'bg-studio-link/12 text-studio-link'
+    if (line.startsWith('+')) return 'bg-studio-success/20 text-studio-success-bright'
+    if (line.startsWith('-')) return 'bg-studio-error/20 text-studio-error'
+    return 'text-studio-text/75'
   }
 
   async function loadDiff(file: GitFileStatus): Promise<void> {
@@ -247,13 +247,6 @@
     }
   }
 
-
-
-
-
-
-
-
   function requestResolve(file: GitFileStatus, resolution: 'ours' | 'theirs' | 'mark'): void {
     resolveTarget = { file, resolution }
   }
@@ -280,7 +273,6 @@
       busy = false
     }
   }
-
 
   async function confirmStashAndSwitch(): Promise<void> {
     const branch = pendingBranchSwitch
@@ -437,84 +429,109 @@
   }
 </script>
 
-<div class="git-stage">
+<div class="flex h-full min-h-0 flex-col bg-transparent">
   {#if !app.activeProject}
-    <div class="placeholder-stage"><div><div class="ph-title">Open a project</div><div class="muted">Git mode needs a workspace.</div></div></div>
+    <div class="m-4 grid h-[calc(100%-32px)] place-items-center rounded-lg border border-dashed border-border-subtle text-studio-text-dim">
+      <div class="text-center">
+        <div class="mb-1.5 font-semibold text-white">Open a project</div>
+        <div class="text-xs">Git mode needs a workspace.</div>
+      </div>
+    </div>
   {:else}
-    <header class="git-toolbar">
-      <button type="button" class="git-branch" aria-expanded={branchMenuOpen} onclick={() => (branchMenuOpen = !branchMenuOpen)}><span class="git-branch-dot"></span><strong>{status?.branch ?? 'Git'}</strong>{#if status?.upstream}<span>{status.upstream}</span>{/if}{#if status?.ahead}<span>↑{status.ahead}</span>{/if}{#if status?.behind}<span>↓{status.behind}</span>{/if}<span class="git-branch-caret">⌄</span></button>
+    <header class="flex min-h-10 items-center border-b border-border-subtle bg-studio-card/90 px-3">
+      <button type="button" class="flex min-w-0 items-center gap-2 font-mono text-[11px] text-studio-text-dim hover:text-studio-text" aria-expanded={branchMenuOpen} onclick={() => (branchMenuOpen = !branchMenuOpen)}>
+        <span class="size-1.5 rounded-lg bg-studio-gold"></span>
+        <strong class="font-semibold text-studio-text">{status?.branch ?? 'Git'}</strong>
+        {#if status?.upstream}<span>{status.upstream}</span>{/if}
+        {#if status?.ahead}<span>↑{status.ahead}</span>{/if}
+        {#if status?.behind}<span>↓{status.behind}</span>{/if}
+        <span class="ml-0.5 text-white/35">⌄</span>
+      </button>
     </header>
     {#if branchMenuOpen}
-      <div class="git-branch-backdrop" role="presentation" onclick={() => (branchMenuOpen = false)}>
-        <div class="git-branch-menu" role="dialog" aria-label="Branch manager" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => { event.stopPropagation(); if (event.key === 'Escape') branchMenuOpen = false }}>
-          <input class="git-branch-search" bind:value={branchSearch} placeholder="Search branches" aria-label="Search branches" />
-          <div class="git-branch-create"><input bind:value={newBranchName} placeholder="New branch" aria-label="New branch name" onkeydown={(event) => event.key === 'Enter' && createBranch()} /><button type="button" disabled={busy || !newBranchName.trim()} onclick={createBranch}>Create</button></div>
-          <div class="git-branch-list">
+      <div class="fixed inset-0 z-[70]" role="presentation" onclick={() => (branchMenuOpen = false)}>
+        <div class="absolute left-3 top-12 z-[71] w-80 rounded-lg border border-white/11 bg-studio-popover p-2 shadow-[0_18px_50px_rgba(0,0,0,0.5)]" role="dialog" aria-label="Branch manager" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => { event.stopPropagation(); if (event.key === 'Escape') branchMenuOpen = false }}>
+          <input class="mb-1.5 w-full rounded-md border border-white/9 bg-black/25 px-2.5 py-1.5 text-xs text-studio-text outline-none focus:border-studio-purple-bright/80" bind:value={branchSearch} placeholder="Search branches" aria-label="Search branches" />
+          <div class="mb-1.5 grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
+            <input class="w-full rounded-md border border-white/9 bg-black/25 px-2.5 py-1.5 text-xs text-studio-text outline-none focus:border-studio-purple-bright/80" bind:value={newBranchName} placeholder="New branch" aria-label="New branch name" onkeydown={(event) => event.key === 'Enter' && createBranch()} />
+            <button type="button" class="rounded-md bg-studio-purple px-2.5 text-[10px] text-white disabled:opacity-45" disabled={busy || !newBranchName.trim()} onclick={createBranch}>Create</button>
+          </div>
+          <div class="max-h-80 overflow-auto">
             {#each filteredBranches as branch (branch.name)}
-              <div class="git-branch-row" class:current={branch.current}>
+              <div class="grid min-h-[34px] grid-cols-[minmax(0,1fr)_25px_25px] items-center rounded-md px-1 {branch.current ? 'bg-white/[0.055]' : 'hover:bg-white/[0.055]'}">
                 {#if renamingBranch === branch.name}
-                  <input class="git-branch-rename" bind:value={renameBranchName} aria-label={`Rename ${branch.name}`} onkeydown={(event) => { if (event.key === 'Enter') renameBranch(branch); else if (event.key === 'Escape') renamingBranch = null }} />
+                  <input class="col-span-3 w-full rounded-md border border-white/9 bg-black/25 px-2 py-1 text-xs text-studio-text outline-none focus:border-studio-purple-bright/80" bind:value={renameBranchName} aria-label={`Rename ${branch.name}`} onkeydown={(event) => { if (event.key === 'Enter') renameBranch(branch); else if (event.key === 'Escape') renamingBranch = null }} />
                 {:else}
-                  <button type="button" class="git-branch-main" disabled={busy || branch.current} onclick={() => requestBranchSwitch(branch)}><span>{branch.current ? '●' : branch.remote ? '⇣' : '○'}</span><span><strong>{branch.name}</strong>{#if branch.upstream}<small>{branch.upstream}</small>{/if}</span></button>
-                  {#if !branch.remote}<button type="button" class="git-branch-action" title="Rename" aria-label={`Rename ${branch.name}`} onclick={() => startRename(branch)}>✎</button>{/if}
-                  {#if !branch.remote && !branch.current}<button type="button" class="git-branch-action danger" title="Delete" aria-label={`Delete ${branch.name}`} onclick={() => requestBranchDelete(branch)}>×</button>{/if}
+                  <button type="button" class="grid min-w-0 grid-cols-[13px_minmax(0,1fr)] items-center gap-1.5 px-1 py-1 text-left text-[10px] text-studio-text-dim disabled:opacity-50" disabled={busy || branch.current} onclick={() => requestBranchSwitch(branch)}>
+                    <span>{branch.current ? '●' : branch.remote ? '⇣' : '○'}</span>
+                    <span class="flex min-w-0 flex-col">
+                      <strong class="truncate font-medium text-studio-text">{branch.name}</strong>
+                      {#if branch.upstream}<small class="truncate text-[9px] text-white/30">{branch.upstream}</small>{/if}
+                    </span>
+                  </button>
+                  {#if !branch.remote}<button type="button" class="text-[11px] text-studio-text-dim hover:text-studio-text" title="Rename" aria-label={`Rename ${branch.name}`} onclick={() => startRename(branch)}>✎</button>{/if}
+                  {#if !branch.remote && !branch.current}<button type="button" class="text-[11px] text-danger" title="Delete" aria-label={`Delete ${branch.name}`} onclick={() => requestBranchDelete(branch)}>×</button>{/if}
                 {/if}
               </div>
             {/each}
-            {#if filteredBranches.length === 0}<div class="git-branch-empty">No matching branches.</div>{/if}
+            {#if filteredBranches.length === 0}<div class="px-2 py-3 text-center text-[11px] text-studio-text-dim">No matching branches.</div>{/if}
           </div>
         </div>
       </div>
     {/if}
-    <div class="git-layout">
-      <aside class="git-sidebar">
-        <div class="git-commit-box">
-          <textarea rows="3" bind:value={commitMessage} placeholder="Commit message"></textarea>
-          <button type="button" class="git-auto-commit" disabled={busy || stagedFiles.length === 0} onclick={() => void autoCommitMessage()}>Auto</button>
-          <button type="button" disabled={busy || !commitMessage.trim() || stagedFiles.length === 0} onclick={() => void commit()}>Commit {stagedFiles.length ? `(${stagedFiles.length})` : ''}</button>
-          <div class="git-sync-row">
-            <button type="button" class="git-sync" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('fetch')}>Fetch</button>
-            <button type="button" class="git-sync" disabled={busy || remotes.length === 0 || !status?.upstream || (status?.files.length ?? 0) > 0} onclick={() => void syncRemote('pull')}>Pull</button>
-            <button type="button" class="git-sync" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('push')}>Push</button>
+    <div class="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)]">
+      <aside class="flex min-h-0 flex-col overflow-y-auto border-r border-border-subtle">
+        <div class="flex flex-col gap-1.5 border-b border-border-subtle p-2.5">
+          <textarea class="min-h-[72px] w-full resize-y rounded-md border border-border-subtle bg-studio-dark px-2.5 py-2 text-xs text-studio-text outline-none placeholder:text-studio-text-dim" rows="3" bind:value={commitMessage} placeholder="Commit message"></textarea>
+          <div class="flex gap-1.5">
+            <button type="button" class="rounded-lg border border-border-subtle px-2.5 py-1 text-[11px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={busy || stagedFiles.length === 0} onclick={() => void autoCommitMessage()}>Auto</button>
+            <button type="button" class="flex-1 rounded-lg bg-studio-purple px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-45" disabled={busy || !commitMessage.trim() || stagedFiles.length === 0} onclick={() => void commit()}>Commit {stagedFiles.length ? `(${stagedFiles.length})` : ''}</button>
+          </div>
+          <div class="flex gap-1">
+            <button type="button" class="flex-1 rounded-lg border border-border-subtle px-2 py-1 text-[10px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('fetch')}>Fetch</button>
+            <button type="button" class="flex-1 rounded-lg border border-border-subtle px-2 py-1 text-[10px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={busy || remotes.length === 0 || !status?.upstream || (status?.files.length ?? 0) > 0} onclick={() => void syncRemote('pull')}>Pull</button>
+            <button type="button" class="flex-1 rounded-lg border border-border-subtle px-2 py-1 text-[10px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('push')}>Push</button>
           </div>
         </div>
-        <section class="git-group">
-          <div class="git-group-head"><span>Staged Changes</span><div><span>{stagedFiles.length}</span><button type="button" disabled={busy || stagedFiles.length === 0} title="Unstage all" onclick={() => void mutate(() => unstageAllGitFiles(app.activeProject!.path))}>− All</button></div></div>
+        <section class="border-b border-border-subtle p-2">
+          <div class="mb-1 flex items-center justify-between text-[10px] text-studio-text-dim">
+            <span class="font-bold uppercase tracking-widest">Staged Changes</span>
+            <div class="flex items-center gap-1"><span>{stagedFiles.length}</span><button type="button" class="rounded px-1.5 py-0.5 hover:bg-white/5 disabled:opacity-45" disabled={busy || stagedFiles.length === 0} title="Unstage all" onclick={() => void mutate(() => unstageAllGitFiles(app.activeProject!.path))}>− All</button></div>
+          </div>
           {#each stagedFiles as file (file.path)}
-            <div class="git-file" class:active={selectedPath === file.path}>
-              <button type="button" class="git-file-main" onclick={() => void loadDiff(file)}><span class="git-file-code">{statusCode(file)}</span><span class="git-file-name">{file.path}</span></button>
-              <button type="button" class="git-file-action" title="Unstage" aria-label={`Unstage ${file.path}`} onclick={() => void mutate(() => unstageGitFile(app.activeProject!.path, file.path))}>−</button>
+            <div class="flex items-center gap-0.5 rounded-md {selectedPath === file.path ? 'bg-studio-purple/15' : 'hover:bg-white/[0.03]'}">
+              <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left text-[11px]" onclick={() => void loadDiff(file)}><span class="shrink-0 font-mono text-[10px] text-studio-text-dim">{statusCode(file)}</span><span class="truncate text-studio-text">{file.path}</span></button>
+              <button type="button" class="px-1.5 text-studio-text-dim hover:text-studio-text" title="Unstage" aria-label={`Unstage ${file.path}`} onclick={() => void mutate(() => unstageGitFile(app.activeProject!.path, file.path))}>−</button>
             </div>
           {/each}
         </section>
-        <section class="git-group">
-          <div class="git-group-head"><span>Changes</span><div><span>{changedFiles.length}</span><button type="button" disabled={busy || changedFiles.length === 0} title="Stage all" onclick={() => void mutate(() => stageAllGitFiles(app.activeProject!.path))}>+ All</button></div></div>
+        <section class="border-b border-border-subtle p-2">
+          <div class="mb-1 flex items-center justify-between text-[10px] text-studio-text-dim">
+            <span class="font-bold uppercase tracking-widest">Changes</span>
+            <div class="flex items-center gap-1"><span>{changedFiles.length}</span><button type="button" class="rounded px-1.5 py-0.5 hover:bg-white/5 disabled:opacity-45" disabled={busy || changedFiles.length === 0} title="Stage all" onclick={() => void mutate(() => stageAllGitFiles(app.activeProject!.path))}>+ All</button></div>
+          </div>
           {#each changedFiles as file (file.path)}
-            <div class="git-file" class:active={selectedPath === file.path}>
-              <button type="button" class="git-file-main" onclick={() => void loadDiff(file)}><span class="git-file-code" class:conflict={file.conflicted}>{statusCode(file)}</span><span class="git-file-name">{file.path}</span></button>
-              <button type="button" class="git-file-action" title="Stage" aria-label={`Stage ${file.path}`} onclick={() => void mutate(() => stageGitFile(app.activeProject!.path, file.path))}>+</button>
+            <div class="flex items-center gap-0.5 rounded-md {selectedPath === file.path ? 'bg-studio-purple/15' : 'hover:bg-white/[0.03]'}">
+              <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left text-[11px]" onclick={() => void loadDiff(file)}><span class="shrink-0 font-mono text-[10px] {file.conflicted ? 'text-studio-gold' : 'text-studio-text-dim'}">{statusCode(file)}</span><span class="truncate text-studio-text">{file.path}</span></button>
+              <button type="button" class="px-1.5 text-studio-text-dim hover:text-studio-text" title="Stage" aria-label={`Stage ${file.path}`} onclick={() => void mutate(() => stageGitFile(app.activeProject!.path, file.path))}>+</button>
             </div>
           {/each}
         </section>
-        <section class="git-group git-history">
-          <div class="git-group-head"><span>History</span><span>{history.length}</span></div>
+        <section class="p-2">
+          <div class="mb-1 flex items-center justify-between text-[10px] text-studio-text-dim"><span class="font-bold uppercase tracking-widest">History</span><span>{history.length}</span></div>
           {#each history as commit (commit.hash)}
-            <div class="git-commit-node">
-              <button type="button" class="git-commit-row" class:active={selectedCommit?.hash === commit.hash && Boolean(selectedCommitPath)} onclick={() => void toggleCommit(commit)}>
-                <span class="git-tree-chevron">{expandedCommits[commit.hash] ? '⌄' : '›'}</span>
-                <span><span class="git-commit-subject">{commit.subject}</span><span class="git-commit-meta">{commit.shortHash} · {commit.author} · {new Date(commit.date).toLocaleDateString()}</span></span>
+            <div class="mb-0.5">
+              <button type="button" class="flex w-full items-start gap-1 rounded-md px-1 py-1 text-left hover:bg-white/[0.03] {selectedCommit?.hash === commit.hash && Boolean(selectedCommitPath) ? 'bg-studio-purple/10' : ''}" onclick={() => void toggleCommit(commit)}>
+                <span class="mt-0.5 w-3 shrink-0 text-[10px] text-studio-text-dim">{expandedCommits[commit.hash] ? '⌄' : '›'}</span>
+                <span class="min-w-0"><span class="block truncate text-[11px] text-studio-text">{commit.subject}</span><span class="block truncate font-mono text-[9px] text-studio-text-dim">{commit.shortHash} · {commit.author} · {new Date(commit.date).toLocaleDateString()}</span></span>
               </button>
               {#if expandedCommits[commit.hash]}
-                <div class="git-commit-tree">
+                <div class="ml-2 border-l border-border-subtle pl-1">
                   {#each treeRows(commitFiles[commit.hash] ?? [], commit.hash) as row (row.path)}
                     {#if row.file}
-                      <button type="button" class="git-tree-row file" class:active={selectedCommit?.hash === commit.hash && selectedCommitPath === row.path} style={`padding-left:${8 + row.depth * 14}px`} title={row.path} onclick={() => void loadCommitFile(commit, row.file!)}>
-                        <span class="git-tree-status">{row.file.status}</span><span>{row.name}</span>
-                      </button>
+                      <button type="button" class="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[10px] hover:bg-white/5 {selectedCommit?.hash === commit.hash && selectedCommitPath === row.path ? 'bg-studio-purple/15 text-studio-text' : 'text-studio-text-dim'}" style={`padding-left:${8 + row.depth * 14}px`} title={row.path} onclick={() => void loadCommitFile(commit, row.file!)}><span class="font-mono text-[9px]">{row.file.status}</span><span class="truncate">{row.name}</span></button>
                     {:else}
-                      <button type="button" class="git-tree-row folder" style={`padding-left:${8 + row.depth * 14}px`} title={row.path} onclick={() => toggleFolder(commit.hash, row.path)}>
-                        <span class="git-tree-chevron">{collapsedFolders[`${commit.hash}:${row.path}`] ? '›' : '⌄'}</span><span>{row.name}</span>
-                      </button>
+                      <button type="button" class="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[10px] text-studio-gold hover:bg-white/5" style={`padding-left:${8 + row.depth * 14}px`} title={row.path} onclick={() => toggleFolder(commit.hash, row.path)}><span class="w-3">{collapsedFolders[`${commit.hash}:${row.path}`] ? '›' : '⌄'}</span><span class="truncate">{row.name}</span></button>
                     {/if}
                   {/each}
                 </div>
@@ -523,23 +540,37 @@
           {/each}
         </section>
       </aside>
-      <section class="git-diff">
-        {#if error}<div class="git-error">{error}</div>{/if}
+      <section class="flex min-h-0 min-w-0 flex-col overflow-hidden">
+        {#if error}<div class="px-3 py-2 font-mono text-[11px] text-danger">{error}</div>{/if}
         {#if selectedCommit}
-          <div class="git-diff-head"><span>{selectedCommitPath ?? selectedCommit.subject} · {selectedCommit.shortHash}</span><span>{selectedCommit.author}</span></div>
-          <div class="git-diff-body">{#each (diff || 'No textual diff.').split('\n') as line, index (`commit-${index}-${line}`)}<div class="git-diff-line {diffClass(line)}">{line || ' '}</div>{/each}</div>
+          <div class="flex items-center justify-between gap-2 border-b border-border-subtle px-3 py-2 text-[11px] text-studio-text-dim"><span class="truncate">{selectedCommitPath ?? selectedCommit.subject} · {selectedCommit.shortHash}</span><span class="shrink-0">{selectedCommit.author}</span></div>
+          <div class="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-snug">{#each (diff || 'No textual diff.').split('\n') as line, index (`commit-${index}-${line}`)}<div class="min-h-[1.45em] whitespace-pre-wrap break-words px-3 {diffClass(line)}">{line || ' '}</div>{/each}</div>
         {:else if selected}
-          <div class="git-diff-head"><span>{selected.path}</span><div><button type="button" onclick={() => app.openCodeFile(selected.path)}>Open</button>{#if selected.conflicted}<button type="button" onclick={() => requestResolve(selected, 'ours')}>Use Current</button><button type="button" onclick={() => requestResolve(selected, 'theirs')}>Use Incoming</button><button type="button" onclick={() => requestResolve(selected, 'mark')}>Mark Resolved</button>{:else if selected.unstaged}<button type="button" class="danger" onclick={() => requestDiscard(selected)}>Discard</button>{/if}</div></div>
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2 text-[11px]">
+            <span class="truncate text-studio-text">{selected.path}</span>
+            <div class="flex flex-wrap gap-1">
+              <button type="button" class="rounded-lg border border-border-subtle px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" onclick={() => app.openCodeFile(selected.path)}>Open</button>
+              {#if selected.conflicted}
+                <button type="button" class="rounded-lg border border-border-subtle px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" onclick={() => requestResolve(selected, 'ours')}>Use Current</button>
+                <button type="button" class="rounded-lg border border-border-subtle px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" onclick={() => requestResolve(selected, 'theirs')}>Use Incoming</button>
+                <button type="button" class="rounded-lg border border-border-subtle px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" onclick={() => requestResolve(selected, 'mark')}>Mark Resolved</button>
+              {:else if selected.unstaged}
+                <button type="button" class="rounded-lg border border-danger/30 px-2 py-0.5 text-[10px] text-danger hover:bg-danger-bg" onclick={() => requestDiscard(selected)}>Discard</button>
+              {/if}
+            </div>
+          </div>
           {#if conflictDetail}
-            <div class="git-conflict-grid">
-              <section><header>Base</header><div>{#each (conflictDetail.base || '(no base)').split('\n') as line, index (`base-${index}-${line}`)}<pre>{line || ' '}</pre>{/each}</div></section>
-              <section><header>Current</header><div>{#each (conflictDetail.ours || '(no current)').split('\n') as line, index (`ours-${index}-${line}`)}<pre>{line || ' '}</pre>{/each}</div></section>
-              <section><header>Incoming</header><div>{#each (conflictDetail.theirs || '(no incoming)').split('\n') as line, index (`theirs-${index}-${line}`)}<pre>{line || ' '}</pre>{/each}</div></section>
+            <div class="grid min-h-0 flex-1 grid-cols-3 overflow-hidden border-t border-border-subtle">
+              <section class="flex min-h-0 flex-col border-r border-border-subtle"><header class="border-b border-border-subtle px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Base</header><div class="min-h-0 flex-1 overflow-auto font-mono text-[10px]">{#each (conflictDetail.base || '(no base)').split('\n') as line, index (`base-${index}-${line}`)}<pre class="m-0 whitespace-pre-wrap px-2">{line || ' '}</pre>{/each}</div></section>
+              <section class="flex min-h-0 flex-col border-r border-border-subtle"><header class="border-b border-border-subtle px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Current</header><div class="min-h-0 flex-1 overflow-auto font-mono text-[10px]">{#each (conflictDetail.ours || '(no current)').split('\n') as line, index (`ours-${index}-${line}`)}<pre class="m-0 whitespace-pre-wrap px-2">{line || ' '}</pre>{/each}</div></section>
+              <section class="flex min-h-0 flex-col"><header class="border-b border-border-subtle px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Incoming</header><div class="min-h-0 flex-1 overflow-auto font-mono text-[10px]">{#each (conflictDetail.theirs || '(no incoming)').split('\n') as line, index (`theirs-${index}-${line}`)}<pre class="m-0 whitespace-pre-wrap px-2">{line || ' '}</pre>{/each}</div></section>
             </div>
           {:else}
-            <div class="git-diff-body">{#each (diff || 'No textual diff.').split('\n') as line, index (`${index}-${line}`)}<div class="git-diff-line {diffClass(line)}">{line || ' '}</div>{/each}</div>
+            <div class="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-snug">{#each (diff || 'No textual diff.').split('\n') as line, index (`${index}-${line}`)}<div class="min-h-[1.45em] whitespace-pre-wrap break-words px-3 {diffClass(line)}">{line || ' '}</div>{/each}</div>
           {/if}
-        {:else if !loading}<div class="git-clean"><strong>Working tree clean</strong><span>No changed files.</span></div>{/if}
+        {:else if !loading}
+          <div class="grid flex-1 place-items-center text-center text-studio-text-dim"><div><strong class="block text-sm text-studio-text">Working tree clean</strong><span class="text-xs">No changed files.</span></div></div>
+        {/if}
       </section>
     </div>
   {/if}
@@ -570,7 +601,6 @@
   onConfirm={() => void confirmStashAndSwitch()}
 />
 
-
 <ConfirmDialog
   open={deleteBranchTarget != null}
   title="Delete branch?"
@@ -581,7 +611,6 @@
   onCancel={() => (deleteBranchTarget = null)}
   onConfirm={() => void confirmBranchDelete()}
 />
-
 
 <ConfirmDialog
   open={resolveTarget != null}

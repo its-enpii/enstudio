@@ -184,87 +184,159 @@
     }
     untrack(() => void refresh())
   })
+
+  const inputCls =
+    'w-full rounded-sm border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-xs text-studio-text outline-none placeholder:text-studio-text-dim focus:border-studio-purple/70'
+  const btnCls =
+    'rounded-lg border border-border-subtle px-2.5 py-1 text-[11px] text-studio-text-dim hover:bg-white/5 hover:text-studio-text disabled:opacity-45'
+  const dangerBtn =
+    'rounded-lg px-2 py-0.5 text-[11px] text-danger hover:bg-danger-bg disabled:opacity-45'
 </script>
 
-<div class="git-tools">
-  {#if error}<div class="git-error">{error}</div>{/if}
+<div class="flex flex-col gap-4">
+  {#if error}
+    <div class="rounded-md border border-danger/30 bg-danger-bg/30 px-2.5 py-1.5 text-[11px] text-danger">
+      {error}
+    </div>
+  {/if}
 
-  <section class="git-group">
-    <div class="git-group-head">
-      <span>Remote</span>
-      <button type="button" class="git-mini" disabled={loading || busy} onclick={() => void refresh()}>
+  <section class="flex flex-col gap-2">
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Remote</span>
+      <button type="button" class={btnCls} disabled={loading || busy} onclick={() => void refresh()}>
         {loading ? '…' : 'Refresh'}
       </button>
     </div>
-    <div class="git-remote-card">
-      <div class="git-remote-line"><span class="muted">Remote</span><strong>{remotes[0]?.name ?? '—'}</strong></div>
-      <div class="git-remote-line"><span class="muted">Branch</span><strong>{status?.branch ?? '—'}</strong></div>
-      <div class="git-remote-line"><span class="muted">Upstream</span><strong>{status?.upstream ?? 'none'}</strong></div>
-      <div class="git-remote-line">
-        <span class="muted">Sync</span>
-        <strong>
+    <div class="rounded-lg border border-border-subtle bg-studio-card p-4">
+      <div class="flex items-center justify-between gap-2 py-1 text-xs">
+        <span class="text-studio-text-dim">Remote</span>
+        <strong class="truncate text-studio-text">{remotes[0]?.name ?? '—'}</strong>
+      </div>
+      <div class="flex items-center justify-between gap-2 py-1 text-xs">
+        <span class="text-studio-text-dim">Branch</span>
+        <strong class="truncate text-studio-text">{status?.branch ?? '—'}</strong>
+      </div>
+      <div class="flex items-center justify-between gap-2 py-1 text-xs">
+        <span class="text-studio-text-dim">Upstream</span>
+        <strong class="truncate text-studio-text">{status?.upstream ?? 'none'}</strong>
+      </div>
+      <div class="flex items-center justify-between gap-2 py-1 text-xs">
+        <span class="text-studio-text-dim">Sync</span>
+        <strong class="text-studio-text">
           {#if status?.ahead || status?.behind}↑{status?.ahead ?? 0} ↓{status?.behind ?? 0}{:else}up to date{/if}
         </strong>
       </div>
     </div>
   </section>
 
-  <section class="git-group git-stashes">
-    <div class="git-group-head"><span>Stashes</span><span>{stashes.length}</span></div>
-    <div class="git-stash-create">
+  <section class="flex flex-col gap-2">
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Stashes</span>
+      <span class="text-[10px] text-studio-text-dim">{stashes.length}</span>
+    </div>
+    <div class="flex flex-col gap-1.5">
       <input
+        class={inputCls}
         bind:value={stashMessage}
         placeholder="Stash message"
         aria-label="Stash message"
         onkeydown={(e) => e.key === 'Enter' && void createStash()}
       />
       <Switch compact bind:checked={stashIncludeUntracked} description="Untracked" />
-      <button type="button" disabled={busy || (status?.files.length ?? 0) === 0} onclick={() => void createStash()}>Stash</button>
+      <button
+        type="button"
+        class={btnCls}
+        disabled={busy || (status?.files.length ?? 0) === 0}
+        onclick={() => void createStash()}>Stash</button
+      >
     </div>
     {#each stashes as stash (stash.ref)}
-      <div class="git-stash-row">
-        <div>
-          <strong>{stash.message}</strong>
-          <span>{stash.ref}{#if stash.branch} · {stash.branch}{/if}</span>
+      <div class="flex items-start gap-1 rounded-md border border-border-subtle bg-studio-card p-2">
+        <div class="min-w-0 flex-1">
+          <strong class="block truncate text-xs text-studio-text">{stash.message}</strong>
+          <span class="text-[10px] text-studio-text-dim"
+            >{stash.ref}{#if stash.branch} · {stash.branch}{/if}</span
+          >
         </div>
-        <button type="button" disabled={busy} onclick={() => void applyStash(stash, false)}>Apply</button>
-        <button type="button" disabled={busy} onclick={() => void applyStash(stash, true)}>Pop</button>
-        <button type="button" class="danger" disabled={busy} aria-label={`Drop ${stash.ref}`} onclick={() => (dropStashTarget = stash)}>×</button>
+        <button type="button" class={btnCls} disabled={busy} onclick={() => void applyStash(stash, false)}
+          >Apply</button
+        >
+        <button type="button" class={btnCls} disabled={busy} onclick={() => void applyStash(stash, true)}
+          >Pop</button
+        >
+        <button
+          type="button"
+          class={dangerBtn}
+          disabled={busy}
+          aria-label={`Drop ${stash.ref}`}
+          onclick={() => (dropStashTarget = stash)}>×</button
+        >
       </div>
     {/each}
   </section>
 
-  <section class="git-group git-release">
-    <div class="git-group-head"><span>Release</span></div>
-    <div class="git-release-create">
-      <input bind:value={releaseName} placeholder="v1.0.0" aria-label="Release version" onkeydown={(e) => e.key === 'Enter' && void createRelease()} />
-      <textarea rows="3" bind:value={releaseNotes} placeholder="Release notes (optional)" aria-label="Release notes"></textarea>
+  <section class="flex flex-col gap-2">
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Release</span>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <input
+        class={inputCls}
+        bind:value={releaseName}
+        placeholder="v1.0.0"
+        aria-label="Release version"
+        onkeydown={(e) => e.key === 'Enter' && void createRelease()}
+      />
+      <textarea
+        class="{inputCls} min-h-[72px] resize-y"
+        rows="3"
+        bind:value={releaseNotes}
+        placeholder="Release notes (optional)"
+        aria-label="Release notes"
+      ></textarea>
       <Switch compact bind:checked={releaseGithub} description="GitHub release" />
       <button
         type="button"
-        class="git-release-btn"
+        class="rounded-lg bg-studio-purple px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-45"
         disabled={busy || !releaseName.trim() || remotes.length === 0}
-        onclick={() => void createRelease()}
-      >Create release</button>
-      {#if releaseInfo}<div class="git-release-info">{releaseInfo}</div>{/if}
+        onclick={() => void createRelease()}>Create release</button
+      >
+      {#if releaseInfo}
+        <div class="text-[11px] text-studio-text-dim">{releaseInfo}</div>
+      {/if}
     </div>
   </section>
 
-  <section class="git-group git-tags">
-    <div class="git-group-head"><span>Tags</span><span>{tags.length}</span></div>
-    <div class="git-tag-create">
-      <input bind:value={tagName} placeholder="v1.0.0" aria-label="Tag name" onkeydown={(e) => e.key === 'Enter' && void createTag()} />
-      <input bind:value={tagMessage} placeholder="Optional message" aria-label="Tag message" />
-      <input bind:value={tagTarget} placeholder="HEAD" aria-label="Tag target" />
-      <button type="button" disabled={busy || !tagName.trim()} onclick={() => void createTag()}>Create</button>
+  <section class="flex flex-col gap-2">
+    <div class="flex items-center justify-between gap-2">
+      <span class="text-[10px] font-bold uppercase tracking-widest text-studio-text-dim">Tags</span>
+      <span class="text-[10px] text-studio-text-dim">{tags.length}</span>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <input
+        class={inputCls}
+        bind:value={tagName}
+        placeholder="v1.0.0"
+        aria-label="Tag name"
+        onkeydown={(e) => e.key === 'Enter' && void createTag()}
+      />
+      <input class={inputCls} bind:value={tagMessage} placeholder="Optional message" aria-label="Tag message" />
+      <input class={inputCls} bind:value={tagTarget} placeholder="HEAD" aria-label="Tag target" />
+      <button type="button" class={btnCls} disabled={busy || !tagName.trim()} onclick={() => void createTag()}
+        >Create</button
+      >
     </div>
     {#each tags as tag (tag.name)}
-      <div class="git-tag-row">
-        <div>
-          <strong>{tag.name}</strong>
-          <span>{tag.shortHash} · {tag.subject || 'lightweight tag'}</span>
+      <div class="flex items-start gap-1 rounded-md border border-border-subtle bg-studio-card p-2">
+        <div class="min-w-0 flex-1">
+          <strong class="block truncate text-xs text-studio-text">{tag.name}</strong>
+          <span class="text-[10px] text-studio-text-dim"
+            >{tag.shortHash} · {tag.subject || 'lightweight tag'}</span
+          >
         </div>
-        <button type="button" class="danger" disabled={busy} onclick={() => (deleteTagTarget = tag)}>×</button>
+        <button type="button" class={dangerBtn} disabled={busy} onclick={() => (deleteTagTarget = tag)}
+          >×</button
+        >
       </div>
     {/each}
   </section>

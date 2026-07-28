@@ -5,43 +5,37 @@
 </script>
 
 <header
-  class="flex h-14 shrink-0 items-center justify-between rounded-2xl border border-border-subtle bg-studio-card/70 px-6 backdrop-blur-md"
+  class="flex h-14 shrink-0 items-center justify-between rounded-xl border border-[color:var(--color-chrome-border)] bg-studio-card/70 px-6 backdrop-blur-[12px] transition-[border-color] duration-150 hover:border-[color:var(--color-chrome-border-hover)]"
 >
-  <div class="flex min-w-0 items-center gap-3">
-    <div class="flex items-center gap-1.5" aria-hidden="true">
-      <span class="size-2.5 rounded-full bg-[#ff5f57]"></span>
-      <span class="size-2.5 rounded-full bg-[#febc2e]"></span>
-      <span class="size-2.5 rounded-full bg-[#28c840]"></span>
-    </div>
-    <button
-      type="button"
-      class="grid place-items-center rounded-full p-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
-      title="Back"
-      aria-label="Back"
-    >
-      <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          d="M10 19l-7-7m0 0l7-7m-7 7h18"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-        ></path>
-      </svg>
-    </button>
-    <span class="truncate text-sm text-studio-text-dim"
-      >{state.activeProject?.name ?? 'No project'}</span
-    >
-  </div>
+  <button
+    type="button"
+    class="grid size-9 place-items-center rounded-lg text-studio-text-dim transition-colors hover:bg-white/5 hover:text-white"
+    title="Back"
+    aria-label="Back"
+  >
+    <svg class="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M10 19l-7-7m0 0l7-7m-7 7h18"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+      ></path>
+    </svg>
+  </button>
 
   <div
-    class="flex items-center gap-1 rounded-full border border-border-subtle bg-black/30 p-1 text-xs font-medium"
+    class="flex items-center gap-1 rounded-lg border border-studio-purple/20 bg-black/35 p-1 text-xs font-medium"
+    role="tablist"
+    aria-label="Workspace mode"
   >
     {#each MODES as m}
       <button
         type="button"
-        class="rounded-full px-4 py-1 transition-colors {state.mode === m.id
-          ? 'bg-studio-purple text-white'
-          : 'text-studio-text-dim hover:text-white'}"
+        role="tab"
+        aria-selected={state.mode === m.id}
+        class="rounded-md px-4 py-1.5 tracking-wide transition-[background,color,box-shadow] duration-150 {state.mode === m.id
+          ? 'bg-studio-purple text-white shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-studio-lavender)_25%,transparent)]'
+          : 'text-studio-text-dim hover:bg-white/[0.04] hover:text-white'}"
         onclick={() => state.setMode(m.id)}
       >
         {m.label}
@@ -49,17 +43,17 @@
     {/each}
   </div>
 
-  <div class="flex items-center gap-2">
+  <div class="flex items-center gap-1.5">
     <button
       type="button"
-      class="relative grid place-items-center rounded-full p-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text {state.notificationsOpen
-        ? 'text-studio-text'
+      class="relative grid size-9 place-items-center rounded-lg text-studio-text-dim transition-colors hover:bg-white/5 hover:text-studio-text {state.notificationsOpen
+        ? 'bg-white/5 text-studio-text'
         : ''}"
       title="Notifications"
       aria-label="Notifications"
       onclick={() => state.toggleNotifications()}
     >
-      <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -69,19 +63,19 @@
       </svg>
       {#if unreadNotifications}
         <span
-          class="absolute -right-0.5 -top-0.5 min-w-3.5 rounded-full bg-studio-gold px-1 text-center text-[9px] font-bold leading-[14px] text-black"
+          class="absolute right-1 top-1 min-w-3.5 rounded-md bg-studio-gold px-1 text-center font-mono text-[9px] font-bold leading-[14px] text-studio-dark"
           >{unreadNotifications > 9 ? '9+' : unreadNotifications}</span
         >
       {/if}
     </button>
     <button
       type="button"
-      class="grid place-items-center rounded-full p-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
+      class="grid size-9 place-items-center rounded-lg text-studio-text-dim transition-colors hover:bg-white/5 hover:text-studio-text"
       title="Settings"
       aria-label="Settings"
       onclick={() => (state.settingsOpen = true)}
     >
-      <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -97,10 +91,19 @@
       </svg>
     </button>
     <div
-      class="relative size-7 overflow-hidden rounded-full border border-border-subtle bg-studio-grey"
+      class="relative size-8 overflow-hidden rounded-lg border border-studio-purple/25 bg-studio-grey"
       title={state.activeProject?.name ?? 'No project'}
+      aria-hidden="true"
     >
-      <div class="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-studio-gold"></div>
+      <div
+        class="absolute inset-0 opacity-40"
+        style="background: radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--color-studio-purple) 55%, transparent), transparent 70%)"
+      ></div>
+      {#if state.busy}
+        <div class="studio-signal absolute bottom-1 right-1 size-1.5 rounded-sm"></div>
+      {:else}
+        <div class="absolute bottom-1 right-1 size-1.5 rounded-sm bg-studio-text-dim/50"></div>
+      {/if}
     </div>
   </div>
 </header>

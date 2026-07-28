@@ -68,7 +68,7 @@
   })
 </script>
 
-<div class="box-border grid h-full w-full gap-2 bg-studio-dark p-2" style={layoutStyle}>
+<div class="box-border grid h-full w-full gap-4 bg-studio-dark p-4" style={layoutStyle}>
   <div class="relative flex h-full w-full min-h-0 min-w-0 overflow-hidden">
     <ProjectSidebar />
     <div
@@ -83,11 +83,11 @@
     ></div>
   </div>
 
-  <main class="grid min-h-0 min-w-0 gap-2" style="grid-template-rows: auto minmax(0, 1fr)">
+  <main class="grid min-h-0 min-w-0 gap-4" style="grid-template-rows: auto minmax(0, 1fr)">
     <TopNav />
 
     <div
-      class="grid min-h-0 overflow-hidden rounded-3xl border border-border-subtle bg-studio-panel"
+      class="grid min-h-0 overflow-hidden rounded-xl border border-[color:var(--color-chrome-border)] bg-studio-panel transition-[border-color] duration-150"
       style="grid-template-rows: minmax(0, 1fr) auto"
     >
       {#if state.mode === 'agent'}

@@ -82,10 +82,10 @@ export interface ProjectLayout {
   inspectorWidth: number
 }
 
-/** Shell column floors / caps (px). */
+/** Shell column floors / caps (px). Design: w-64 / w-72. */
 export const LAYOUT_MIN = {
   sidebar: 200,
-  inspector: 300,
+  inspector: 288,
   center: 360,
 } as const
 export const LAYOUT_MAX = {
@@ -94,15 +94,15 @@ export const LAYOUT_MAX = {
 } as const
 export const LAYOUT_DEFAULT = {
   sidebar: 256,
-  inspector: 320,
+  inspector: 288,
 } as const
 
 /** Bump → wipe corrupted rail widths from localStorage once. */
-export const LAYOUT_VERSION = 2
+export const LAYOUT_VERSION = 3
 const LAYOUT_VERSION_KEY = 'enpiistudio.layoutVersion'
 
-/** Shell chrome: pad 8×2 + gap 8×2. */
-const LAYOUT_CHROME = 32
+/** Shell chrome: pad 16×2 + gap 16×2 (code.html p-4 gap-4). */
+const LAYOUT_CHROME = 64
 
 export function clampProjectLayout(
   patch: Partial<ProjectLayout>,
