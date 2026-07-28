@@ -98,6 +98,7 @@ export async function respondAsk(answer: string, requestId?: string): Promise<vo
 export type ProviderPublic = {
   baseUrl: string
   model: string
+  models?: string[]
   dialect: ProviderDialect
   permissionMode: PermissionMode
   denyGlobs?: string[]
@@ -134,6 +135,7 @@ export async function saveProviderConfig(patch: {
   baseUrl?: string
   apiKey?: string
   model?: string
+  models?: string[]
   dialect?: ProviderDialect
   permissionMode?: PermissionMode
   denyGlobs?: string[]
@@ -164,18 +166,36 @@ export type SshHostInfo = {
   host: string
   user?: string
   port: number
+  identityFile?: string
 }
 
 export async function listSsh(): Promise<{
+  configPath?: string
   hosts: SshHostInfo[]
   tunnels: SshTunnelInfo[]
   live: { name: string; pid?: number; startedAt: string; summary: string; lastError?: string }[]
 }> {
   return (await window.enpiistudio.enpii.request('ssh.list')) as {
+    configPath?: string
     hosts: SshHostInfo[]
     tunnels: SshTunnelInfo[]
     live: { name: string; pid?: number; startedAt: string; summary: string; lastError?: string }[]
   }
+}
+
+export async function upsertSshHost(input: {
+  name: string
+  host: string
+  user?: string
+  port?: number
+  identityFile?: string
+  previousName?: string
+}): Promise<{ name: string }> {
+  return (await window.enpiistudio.enpii.request('ssh.host_upsert', input)) as { name: string }
+}
+
+export async function deleteSshHost(name: string): Promise<{ deleted: boolean }> {
+  return (await window.enpiistudio.enpii.request('ssh.host_delete', { name })) as { deleted: boolean }
 }
 
 export type McpServerInfo = {
@@ -297,6 +317,8 @@ export async function readProjectFile(projectRoot: string, file: string): Promis
   return (await window.enpiistudio.enpii.request('project.read_file', {
     projectRoot,
     path: file,
+    // Code editor: user-initiated open may include .env / keys. Agent tools still denied.
+    bypassDeny: true,
   })) as { content: string }
 }
 

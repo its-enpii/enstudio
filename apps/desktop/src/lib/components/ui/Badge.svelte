@@ -14,16 +14,16 @@
   } = $props()
 
   const tones: Record<Tone, string> = {
-    neutral: 'bg-white/6 text-studio-text-dim border-white/10',
-    purple: 'bg-studio-purple/20 text-studio-lavender-bright border-studio-purple/35',
-    gold: 'bg-studio-gold/15 text-studio-gold border-studio-gold/35',
-    success: 'bg-studio-success/12 text-studio-success-bright border-studio-success/30',
-    danger: 'bg-danger-bg text-danger border-danger/30',
+    neutral: 'bg-white/[0.05] text-studio-text-dim border-border-subtle',
+    purple: 'bg-studio-purple/15 text-studio-lavender-bright border-studio-purple/30',
+    gold: 'bg-studio-gold/12 text-studio-gold border-studio-gold/30',
+    success: 'bg-studio-success/12 text-studio-success-bright border-studio-success/25',
+    danger: 'bg-danger-bg text-danger border-danger/25',
   }
 </script>
 
 <span
-  class="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] {tones[tone]} {className}"
+  class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide {tones[tone]} {className}"
 >
   {#if children}{@render children()}{/if}
 </span>

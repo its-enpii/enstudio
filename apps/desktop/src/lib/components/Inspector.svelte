@@ -361,15 +361,15 @@
     app.enpiiStatus === 'error'
       ? 'bg-studio-error'
       : app.enpiiStatus === 'ok' && !app.busy && app.session?.status !== 'running' && !app.approval
-        ? 'bg-studio-success shadow-[0_0_8px_var(--color-studio-success)]'
+        ? 'bg-studio-success'
         : app.enpiiStatus === 'ok' || app.busy || app.approval
-          ? 'bg-studio-gold shadow-[0_0_8px_var(--color-studio-gold)]'
+          ? 'bg-studio-gold'
           : 'bg-studio-text-dim',
   )
 </script>
 
 
-<aside class="flex h-full w-full min-h-0 min-w-0 flex-col gap-6 overflow-x-hidden overflow-y-auto rounded-xl border border-[color:var(--color-chrome-border)] bg-studio-panel p-5 transition-[border-color] duration-150 hover:border-[color:var(--color-chrome-border-hover)]">
+<aside class="flex h-full w-full min-h-0 min-w-0 flex-col gap-5 overflow-x-hidden overflow-y-auto bg-transparent p-3">
   {#if app.mode === 'git'}
     <GitTools />
   {:else}
@@ -378,7 +378,7 @@
       <h3 class="studio-label m-0">Run Status</h3>
       <button type="button" class="rounded-lg px-2.5 py-1 font-mono text-[11px] text-studio-text-dim transition-colors hover:bg-white/5 hover:text-studio-text" onclick={() => pingEnpii()}>Ping</button>
     </div>
-    <div class="flex min-w-0 items-center gap-3 rounded-lg border p-4 text-sm font-medium {statusTone}" title={app.enpiiInfo ?? undefined}>
+    <div class="flex min-w-0 items-center gap-2.5 rounded-md border p-2.5 text-[12px] font-medium {statusTone}" title={app.enpiiInfo ?? undefined}>
       <div class="size-2 shrink-0 rounded-sm {statusDot} {app.busy || app.approval ? 'studio-signal' : ''}"></div>
       <span class="truncate">{statusLabel}</span>
     </div>

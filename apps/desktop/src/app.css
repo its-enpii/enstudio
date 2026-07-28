@@ -1,76 +1,78 @@
 @import 'tailwindcss';
 
-/* Design tokens → Tailwind theme (docs/design/code.html). */
+/*
+  enpiistudio — macOS-inspired dark UI
+  Brand anchors: #3D348B · #E6AF2E
+  Soft materials, SF-like type, segmented chrome, gentle depth.
+*/
+
 @theme {
-  /* Anchors (locked): purple #3D348B · gold #E6AF2E */
+  /* Brand */
   --color-studio-purple: #3d348b;
   --color-studio-gold: #e6af2e;
+  --color-studio-purple-bright: #5a50b8;
+  --color-studio-purple-active: #6a60c8;
 
-  /* Void canvas — cool ink, not pure OLED black */
-  --color-studio-dark: #06050a;
-  --color-studio-panel: #0c0b12;
-  --color-studio-card: #14131c;
-  --color-studio-grey: #1c1b26;
-  --color-studio-text: #eceaf4;
-  --color-studio-text-dim: #9a97a8;
-  --color-border-subtle: rgba(198, 192, 255, 0.07);
-  --color-danger: #ffb4ab;
-  --color-danger-bg: rgba(147, 0, 10, 0.35);
+  /* macOS dark materials (softer than pure black) */
+  --color-studio-dark: #1c1c1e;
+  --color-studio-panel: #2c2c2e;
+  --color-studio-card: #3a3a3c;
+  --color-studio-grey: #48484a;
+  --color-studio-shell: #1e1e20;
+  --color-studio-shell-deep: #161618;
+  --color-studio-shell-green: #1a221c;
+  --color-studio-diff-bg: #1a1a1c;
+  --color-studio-elevated: #3a3a3c;
+  --color-studio-popover: #2c2c2e;
+  --color-studio-sidebar: #252528;
 
-  /* Lavender = intelligence / plan / ask (tints of locked purple) */
-  --color-studio-lavender: #aba3ff;
-  --color-studio-lavender-bright: #c6c0ff;
-  --color-studio-lavender-soft: #c9c4ff;
-  --color-studio-lavender-muted: #bcb6ff;
-  --color-studio-lavender-deep: #897fff;
-  --color-studio-violet: #9e83ff;
-  --color-studio-purple-bright: #665bd6;
-  --color-studio-purple-active: #6e65d9;
+  /* Text — Apple HIG-ish */
+  --color-studio-text: #f5f5f7;
+  --color-studio-text-dim: #98989d;
 
-  /* Success — cool mint, never competes with gold */
-  --color-studio-success: #3dba8b;
-  --color-studio-success-bright: #7dcea0;
-  --color-studio-success-soft: #69ce9b;
-  --color-studio-success-text: #79d9a7;
-  --color-studio-success-shell: #8bd49c;
-  --color-studio-success-out: #c8e6c9;
+  /* Hairline separators */
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-chrome-border: rgba(255, 255, 255, 0.1);
+  --color-chrome-border-hover: rgba(255, 255, 255, 0.16);
 
-  /* Soft UI errors */
-  --color-studio-error: #ff8a9b;
-  --color-studio-error-soft: #ff9b9b;
-  --color-studio-error-bright: #ff6b81;
+  /* Purple family */
+  --color-studio-lavender: #a8a0e0;
+  --color-studio-lavender-bright: #c0b8f0;
+  --color-studio-lavender-soft: #ccc6f2;
+  --color-studio-lavender-muted: #b4acd8;
+  --color-studio-lavender-deep: #8a82c8;
+  --color-studio-violet: #9a92d4;
+  --color-studio-link: #0a84ff;
+  --color-studio-amber: #e6af2e;
 
-  /* Surfaces — purple-ink lift */
-  --color-studio-shell: #09080f;
-  --color-studio-shell-deep: #05040a;
-  --color-studio-shell-green: #0a0f0c;
-  --color-studio-diff-bg: #0c0f16;
-  --color-studio-elevated: #1a1924;
-  --color-studio-popover: #1f1e2a;
-  --color-studio-sidebar: #090811;
+  /* Semantic — system-like */
+  --color-studio-success: #30d158;
+  --color-studio-success-bright: #64e887;
+  --color-studio-success-soft: #4ade80;
+  --color-studio-success-text: #64e887;
+  --color-studio-success-shell: #30d158;
+  --color-studio-success-out: #b8f5c8;
+  --color-studio-error: #ff453a;
+  --color-studio-error-soft: #ff6961;
+  --color-studio-error-bright: #ff6961;
+  --color-danger: #ff453a;
+  --color-danger-bg: rgba(255, 69, 58, 0.18);
 
-  /* Misc */
-  --color-studio-amber: #e8c66e;
-  --color-studio-link: #a8b8ff;
-  --color-studio-scrollbar: #3a3850;
-  --color-studio-scrollbar-hover: #5a5770;
+  --color-studio-scrollbar: rgba(255, 255, 255, 0.18);
+  --color-studio-scrollbar-hover: rgba(255, 255, 255, 0.28);
 
-  /* Chrome panes = 24. Everything else = 18. No pills / full / 999. */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-  --radius-2xl: 24px;
-  --radius-3xl: 24px;
+  /* Continuous curves */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
 
-  /* Structure vs signal */
-  --color-chrome-border: color-mix(in srgb, var(--color-studio-purple) 22%, transparent);
-  --color-chrome-border-hover: color-mix(in srgb, var(--color-studio-purple) 45%, transparent);
-  --ease-studio: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-studio: cubic-bezier(0.25, 0.1, 0.25, 1);
 
-  /* Mock wants Inter + JetBrains Mono; CSP blocks CDN — system stacks closest. */
-  --font-sans: Inter, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
@@ -80,15 +82,14 @@
     box-sizing: border-box;
   }
 
-  /* Mock: 4px ghost scrollbar (docs/design/code.html). */
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--color-studio-scrollbar) transparent;
   }
 
   *::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-track,
@@ -98,11 +99,15 @@
 
   *::-webkit-scrollbar-thumb {
     background: var(--color-studio-scrollbar);
-    border-radius: 10px;
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
   *::-webkit-scrollbar-thumb:hover {
     background: var(--color-studio-scrollbar-hover);
+    background-clip: padding-box;
+    border: 2px solid transparent;
   }
 
   html,
@@ -117,6 +122,7 @@
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
+    letter-spacing: -0.01em;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -126,32 +132,60 @@
     color: var(--color-studio-text);
   }
 
-  /* Section eyebrows — mono, tracked, application UI vs project data */
   .studio-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--color-studio-text-dim);
   }
 
-  /* Gold = only warm signal (running / send / pending) */
+  /* Soft glass panel */
+  .studio-glass {
+    background: color-mix(in srgb, var(--color-studio-panel) 88%, transparent);
+    border: 1px solid var(--color-border-subtle);
+    box-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.04) inset,
+      0 8px 28px rgba(0, 0, 0, 0.28);
+  }
+
+  /* Traffic lights (decorative on non-mac) */
+  .studio-traffic {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .studio-traffic > span {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25) inset;
+  }
+  .studio-traffic > span:nth-child(1) {
+    background: #ff5f57;
+  }
+  .studio-traffic > span:nth-child(2) {
+    background: #febc2e;
+  }
+  .studio-traffic > span:nth-child(3) {
+    background: #28c840;
+  }
+
   @keyframes studio-signal {
     0%,
     100% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-studio-gold) 0%, transparent);
       opacity: 1;
+      box-shadow: 0 0 0 0 transparent;
     }
     50% {
-      box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-studio-gold) 22%, transparent);
-      opacity: 0.92;
+      opacity: 0.8;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-studio-gold) 30%, transparent);
     }
   }
 
   .studio-signal {
     background: var(--color-studio-gold);
-    animation: studio-signal 1.6s var(--ease-studio) infinite;
+    animation: studio-signal 1.8s var(--ease-studio) infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -175,7 +209,7 @@
   }
 
   button:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
@@ -188,13 +222,11 @@
     background: transparent;
   }
 
-  /* Keyboard focus: gold ring (matches Switch). Mouse clicks stay clean. */
   :focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-studio-gold) 55%, transparent);
     outline-offset: 2px;
   }
 
-  /* Inputs already show border shift — keep ring subtle, not double-heavy. */
   input:focus-visible,
   textarea:focus-visible,
   select:focus-visible {

@@ -32,7 +32,7 @@
     <span class="text-xs font-medium text-studio-text-dim">{label}</span>
   {/if}
   <input
-    class="w-full rounded-sm border bg-studio-dark px-3 py-2 text-[13px] text-studio-text outline-none placeholder:text-studio-text-dim/55 hover:border-studio-purple/35 focus:border-studio-purple/70 focus-visible:border-studio-purple/70 disabled:cursor-not-allowed disabled:opacity-50 {error
+    class="min-h-[38px] w-full rounded-sm border bg-studio-dark px-3 py-2 text-[13px] text-studio-text outline-none placeholder:text-studio-text-dim/55 hover:border-studio-purple/35 focus:border-studio-purple/70 disabled:cursor-not-allowed disabled:opacity-50 {error
       ? 'border-danger/45'
       : 'border-border-subtle'}"
     {type}

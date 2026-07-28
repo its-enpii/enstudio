@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
-  import { onDestroy } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { EditorState } from '@codemirror/state'
   import { HighlightStyle, StreamLanguage, syntaxHighlighting, type StringStream } from '@codemirror/language'
   import { tags } from '@lezer/highlight'
@@ -13,7 +13,7 @@
   import { ConfirmDialog } from './ui'
 
   type Entry = { kind: 'd' | 'f'; name: string; path: string; depth: number }
-  type CodeTab = { path: string; content: string; originalContent: string }
+  type CodeTab = { path: string; content: string; originalContent: string; preview?: boolean }
   type CodeWorkspace = {
     children: Record<string, Entry[]>
     expanded: Record<string, boolean>
@@ -172,15 +172,16 @@
       backgroundColor: 'transparent',
       color: color.text,
       fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-      fontSize: '12px',
+      fontSize: '13px',
+      lineHeight: '1.55',
     },
     '&.cm-focused': { outline: 'none' },
-    '.cm-content': { caretColor: color.gold, padding: '18px 32px' },
+    '.cm-content': { caretColor: color.gold, padding: '8px 12px 8px 4px' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: color.gold, borderLeftWidth: '2px' },
     '.cm-activeLine': { backgroundColor: 'transparent' },
     '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(86, 132, 255, 0.38)' },
-    '.cm-gutters': { backgroundColor: 'rgba(255, 255, 255, 0.018)', borderRight: '1px solid rgba(255, 255, 255, 0.04)', color: 'rgba(255, 255, 255, 0.28)' },
-    '.cm-lineNumbers .cm-gutterElement': { minWidth: '36px', padding: '0 8px', textAlign: 'right' },
+    '.cm-gutters': { backgroundColor: 'transparent', borderRight: '1px solid rgba(255, 255, 255, 0.06)', color: 'rgba(255, 255, 255, 0.32)', paddingLeft: '4px' },
+    '.cm-lineNumbers .cm-gutterElement': { minWidth: '32px', padding: '0 8px 0 4px', textAlign: 'right', fontSize: '12px' },
   }, { dark: true })
 
   const enpiiHighlightStyle = HighlightStyle.define([
@@ -266,6 +267,12 @@
     if (event.key === 'Escape' && toolsOpen) toolsOpen = false
   }
 
+  function onAppShortcut(shortcut: string): void {
+    // main steals Mod+W via before-input-event → browser:shortcut
+    if (shortcut !== 'close-tab' || app.mode !== 'code' || !selectedPath) return
+    requestCloseTab(selectedPath)
+  }
+
   function onWindowClick(event: MouseEvent): void {
     if (toolsOpen && !toolsMenu?.contains(event.target as Node)) toolsOpen = false
   }
@@ -296,7 +303,7 @@
       expanded[activeDir] = true
       expanded = { ...expanded }
       await loadChildren(activeDir, true)
-      if (kind === 'file') await readPath(created.path)
+      if (kind === 'file') await readPath(created.path, { pin: true })
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     }
@@ -360,7 +367,14 @@
             if (update.docChanged) {
               content = update.state.doc.toString()
               const tab = tabs.find((item) => item.path === selectedPath)
-              if (tab) tab.content = content
+              if (tab) {
+                tab.content = content
+                // Edit pins preview → permanent tab
+                if (tab.preview && content !== tab.originalContent) {
+                  tab.preview = false
+                  tabs = [...tabs]
+                }
+              }
             }
             if (update.docChanged || update.selectionSet) {
               const main = update.state.selection.main
@@ -463,7 +477,7 @@
     }
   }
 
-  async function readPath(file: string): Promise<void> {
+  async function readPath(file: string, opts: { pin?: boolean } = {}): Promise<void> {
     const project = app.activeProject
     if (!project) return
     const projectId = project.id
@@ -471,6 +485,7 @@
     try {
       const result = await readProjectFile(project.path, file)
       if (app.activeProjectId !== projectId) return
+      syncCurrentTab()
       editorView?.destroy()
       editorView = undefined
       selectedPath = file
@@ -481,8 +496,21 @@
       if (existing) {
         content = existing.content
         originalContent = existing.originalContent
+        if (opts.pin) existing.preview = false
+        tabs = [...tabs]
+      } else if (opts.pin) {
+        // Permanent open (create/reveal/double-click)
+        tabs = [...tabs, { path: file, content: result.content, originalContent: result.content, preview: false }]
       } else {
-        tabs = [...tabs, { path: file, content: result.content, originalContent: result.content }]
+        // Single-click preview: replace existing clean preview tab
+        const previewIdx = tabs.findIndex((tab) => tab.preview && tab.content === tab.originalContent)
+        if (previewIdx >= 0) {
+          const next = [...tabs]
+          next[previewIdx] = { path: file, content: result.content, originalContent: result.content, preview: true }
+          tabs = next
+        } else {
+          tabs = [...tabs, { path: file, content: result.content, originalContent: result.content, preview: true }]
+        }
       }
       await tick()
       await mountEditor(content, file)
@@ -507,6 +535,11 @@
     else await readPath(entry.path)
   }
 
+  async function pinEntry(entry: Entry): Promise<void> {
+    if (entry.kind === 'd') await toggleDirectory(entry)
+    else await readPath(entry.path, { pin: true })
+  }
+
   async function revealPath(file: string): Promise<void> {
     const clean = file.replace(/\\/g, '/').replace(/^\.\//, '')
     let dir = '.'
@@ -517,7 +550,8 @@
       expanded[dir] = true
     }
     expanded = { ...expanded }
-    await readPath(clean)
+    // Agent/jump open pins — user likely wants it kept
+    await readPath(clean, { pin: true })
   }
 
   async function saveExact(): Promise<void> {
@@ -527,7 +561,10 @@
       await editProjectFileExact(file, originalContent, content)
       originalContent = content
       const tab = tabs.find((item) => item.path === file)
-      if (tab) tab.originalContent = content
+      if (tab) {
+        tab.originalContent = content
+        tab.preview = false
+      }
       app.pushLog(`[code] saved exact ${file}`)
       app.notify('success', 'File saved', file)
       void runDiagnostics(false)
@@ -551,6 +588,12 @@
     app.codePath = null
     app.codeLine = null
     void revealPath(requested).then(() => line && goToLine(line))
+  })
+
+  onMount(() => {
+    // Electron main routes Mod+W through browser:shortcut (always preventDefault)
+    const off = window.enpiistudio?.browser?.onShortcut?.(onAppShortcut)
+    return () => off?.()
   })
 
   onDestroy(() => {
@@ -603,7 +646,7 @@
           onclick={toggleRoot}
         >
           <span class="w-3 text-[10px]">{expanded['.'] ? '⌄' : '›'}</span>
-          <span class="text-studio-gold">▰</span>
+          <span class="text-studio-text-dim">▰</span>
           <span class="truncate">{app.activeProject.name}</span>
         </button>
         {#if creating}
@@ -646,11 +689,11 @@
               type="button"
               class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-xs {selectedPath === entry.path || activeDir === entry.path
                 ? 'bg-studio-card text-studio-text'
-                : entry.kind === 'd'
-                  ? 'text-studio-gold hover:bg-studio-card'
-                  : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+                : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
               style={`padding-left:${10 + entry.depth * 16}px`}
               onclick={() => void openEntry(entry)}
+              ondblclick={() => void pinEntry(entry)}
+              title={entry.kind === 'f' ? 'Click preview · double-click pin' : undefined}
             >
               <span class="w-3 text-[10px]">{entry.kind === 'd' ? (expanded[entry.path] ? '⌄' : '›') : ''}</span>
               <span>{entry.kind === 'd' ? '▰' : '◻'}</span>
@@ -664,30 +707,37 @@
         {#if error}
           <div class="grid flex-1 place-items-center p-6 text-center text-sm text-danger">{error}</div>
         {:else if selectedPath}
-          <div class="flex min-h-9 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95" role="tablist" aria-label="Open files">
+          <div class="flex min-h-10 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95" role="tablist" aria-label="Open files">
             {#each tabs as tab (tab.path)}
               <div
-                class="flex max-w-[220px] items-center border-r border-white/5 {tab.path === selectedPath
-                  ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]'
+                class="flex max-w-[240px] items-center border-r border-white/5 {tab.path === selectedPath
+                  ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
                   : ''}"
               >
                 <button
                   type="button"
-                  class="flex min-w-0 items-center gap-1 px-1 py-2 pl-2.5 text-left font-mono text-[10px] {tab.path === selectedPath
+                  class="flex min-w-0 items-center gap-1.5 px-2 py-2.5 pl-3 text-left font-mono text-[12px] {tab.path === selectedPath
                     ? 'text-studio-text'
-                    : 'text-studio-text-dim hover:text-studio-text'}"
+                    : 'text-studio-text-dim hover:text-studio-text'} {tab.preview ? 'italic opacity-80' : ''}"
                   role="tab"
                   aria-selected={tab.path === selectedPath}
+                  title={tab.preview ? 'Preview · double-click to pin' : tab.path}
                   onclick={() => void activateTab(tab)}
+                  ondblclick={() => {
+                    if (tab.preview) {
+                      tab.preview = false
+                      tabs = [...tabs]
+                    }
+                  }}
                 >
                   {#if tab.content !== tab.originalContent}
-                    <span class="text-[9px] text-studio-gold" aria-label="Unsaved changes">●</span>
+                    <span class="text-[10px] text-studio-gold" aria-label="Unsaved changes">●</span>
                   {/if}
                   <span class="truncate">{tab.path.split('/').at(-1)}</span>
                 </button>
                 <button
                   type="button"
-                  class="mr-1 rounded px-1 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                  class="mr-1.5 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
                   aria-label={`Close ${tab.path}`}
                   onclick={() => requestCloseTab(tab.path)}>×</button
                 >
@@ -695,7 +745,7 @@
             {/each}
             <button
               type="button"
-              class="ml-auto flex items-center gap-1 px-2.5 text-[10px] text-studio-text-dim hover:text-studio-text disabled:opacity-45 {diagnosticErrors > 0
+              class="ml-auto flex items-center gap-1.5 px-3 text-[12px] text-studio-text-dim hover:text-studio-text disabled:opacity-45 {diagnosticErrors > 0
                 ? 'text-danger'
                 : diagnosticWarnings > 0
                   ? 'text-studio-gold'
@@ -709,26 +759,19 @@
             >
               <span>Problems</span>
               {#if diagnosticErrors > 0}
-                <span class="rounded-lg bg-danger-bg px-1.5 text-[9px] text-danger">{diagnosticErrors}</span>
+                <span class="rounded-lg bg-danger-bg px-1.5 text-[10px] text-danger">{diagnosticErrors}</span>
               {:else if diagnosticWarnings > 0}
-                <span class="rounded-lg bg-studio-gold/15 px-1.5 text-[9px] text-studio-gold">{diagnosticWarnings}</span>
+                <span class="rounded-lg bg-studio-gold/15 px-1.5 text-[10px] text-studio-gold">{diagnosticWarnings}</span>
               {/if}
               {#if diagnosticsBusy}<span>···</span>{/if}
             </button>
           </div>
-          <div class="flex items-center justify-between gap-2 border-b border-border-subtle bg-studio-card/90 px-3 py-1.5 font-mono text-[11px] text-studio-text-dim">
-            <span class="truncate">{selectedPath}</span>
-            <span class="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                class="rounded px-2 py-0.5 text-[10px] hover:bg-white/5 hover:text-studio-text disabled:opacity-45"
-                disabled={formatting}
-                title="Format Document (Cmd/Ctrl+Shift+F)"
-                onclick={() => void formatDocument()}>{formatting ? 'Formatting…' : 'Format'}</button
-              >
+          {#if dirty || formatting}
+            <div class="flex items-center justify-end gap-2 border-b border-border-subtle bg-studio-sidebar/40 px-3 py-1 text-[11px] text-studio-text-dim">
               {#if dirty}<span class="text-studio-gold">Edited · Cmd/Ctrl+S</span>{/if}
-            </span>
-          </div>
+              {#if formatting}<span>Formatting…</span>{/if}
+            </div>
+          {/if}
           <div class="min-h-0 flex-1 overflow-hidden" bind:this={editorHost}></div>
           {#if diagnosticsOpen}
             <section class="max-h-48 border-t border-border-subtle bg-studio-panel">

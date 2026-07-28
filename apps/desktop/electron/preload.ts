@@ -39,7 +39,12 @@ const api = {
       cwd: string,
       cols: number,
       rows: number,
-      opts?: { command?: string; args?: string[]; injectProvider?: boolean },
+      opts?: {
+        command?: string
+        args?: string[]
+        injectProvider?: boolean
+        provider?: { baseUrl?: string; apiKey?: string; model?: string }
+      },
     ) =>
       ipcRenderer.invoke('terminal:create', {
         cwd,
@@ -48,6 +53,7 @@ const api = {
         command: opts?.command,
         args: opts?.args,
         injectProvider: opts?.injectProvider,
+        provider: opts?.provider,
       }) as Promise<{ id: string; shell: string; cwd: string; command?: string; args?: string[] }>,
     write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data) as Promise<void>,
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows) as Promise<void>,

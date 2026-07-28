@@ -12,12 +12,14 @@
     type ProviderDialect,
   } from '../store.svelte'
   import {
+    deleteSshHost,
     listMcpServers,
     listSsh,
     loadProviderConfig,
     saveProviderConfig,
     startSshTunnel,
     stopSshTunnel,
+    upsertSshHost,
     type McpServerInfo,
     type SshHostInfo,
     type SshTunnelInfo,
@@ -29,7 +31,6 @@
     Textarea,
     SmartSelect,
     Switch,
-    DatePicker,
     type SelectOption,
   } from './ui'
 
@@ -39,6 +40,8 @@
   let baseUrl = $state('')
   let apiKey = $state('')
   let model = $state('')
+  let models = $state<string[]>(['enpii'])
+  let modelDraft = $state('')
   let dialect = $state('openai')
   let permissionMode = $state('ask')
   let denyGlobsText = $state('')
@@ -55,14 +58,18 @@
   let recording = $state<KeybindingAction | null>(null)
   let sshHosts = $state<SshHostInfo[]>([])
   let sshTunnels = $state<SshTunnelInfo[]>([])
+  let sshConfigPath = $state('')
   let sshBusy = $state<string | null>(null)
+  let sshFormOpen = $state(false)
+  let sshEditing = $state<string | null>(null)
+  let sshForm = $state({ name: '', host: '', user: '', port: 22 as number | null, identityFile: '' })
+  let sshFormError = $state('')
   let mcpServers = $state<McpServerInfo[]>([])
 
-  // local-only UI prefs (not yet wired to backend) — demo reusable controls
+  // local-only UI prefs (not yet wired to backend)
   let maxTurns = $state<number | null>(40)
   let streamTokens = $state(true)
   let theme = $state('dark')
-  let reminderDate = $state('')
 
   const nav: { id: Section; label: string; blurb: string }[] = [
     { id: 'provider', label: 'Provider', blurb: 'Endpoint & model' },
@@ -77,8 +84,90 @@
       const data = await listSsh()
       sshHosts = data.hosts ?? []
       sshTunnels = data.tunnels ?? []
+      sshConfigPath = data.configPath ?? ''
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  function openSshConfig(): void {
+    if (!sshConfigPath) {
+      void hydrateSsh().then(() => {
+        if (sshConfigPath) void window.enpiistudio.shell.openPath(sshConfigPath)
+      })
+      return
+    }
+    void window.enpiistudio.shell.openPath(sshConfigPath)
+  }
+
+  function beginSshAdd(): void {
+    sshEditing = null
+    sshForm = { name: '', host: '', user: '', port: 22, identityFile: '' }
+    sshFormError = ''
+    sshFormOpen = true
+  }
+
+  function beginSshEdit(h: SshHostInfo): void {
+    sshEditing = h.name
+    sshForm = {
+      name: h.name,
+      host: h.host,
+      user: h.user ?? '',
+      port: h.port || 22,
+      identityFile: h.identityFile ?? '',
+    }
+    sshFormError = ''
+    sshFormOpen = true
+  }
+
+  function cancelSshForm(): void {
+    sshFormOpen = false
+    sshEditing = null
+    sshFormError = ''
+  }
+
+  async function saveSshHost(): Promise<void> {
+    const name = sshForm.name.trim()
+    const host = sshForm.host.trim()
+    if (!name || !host) {
+      sshFormError = 'Name and host required'
+      return
+    }
+    sshBusy = name
+    sshFormError = ''
+    error = ''
+    try {
+      await upsertSshHost({
+        name,
+        host,
+        user: sshForm.user.trim() || undefined,
+        port: typeof sshForm.port === 'number' && sshForm.port > 0 ? sshForm.port : 22,
+        identityFile: sshForm.identityFile.trim() || undefined,
+        previousName: sshEditing ?? undefined,
+      })
+      cancelSshForm()
+      await hydrateSsh()
+      app.notify('success', 'SSH host saved', name)
+    } catch (err) {
+      sshFormError = err instanceof Error ? err.message : String(err)
+    } finally {
+      sshBusy = null
+    }
+  }
+
+  async function removeSshHost(name: string): Promise<void> {
+    if (!confirm(`Delete SSH host “${name}”?`)) return
+    sshBusy = name
+    error = ''
+    try {
+      await deleteSshHost(name)
+      if (sshEditing === name) cancelSshForm()
+      await hydrateSsh()
+      app.notify('success', 'SSH host deleted', name)
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      sshBusy = null
     }
   }
 
@@ -128,12 +217,40 @@
     }
     baseUrl = cfg.baseUrl
     model = cfg.model
+    models = normalizeModelList(cfg.models, cfg.model)
+    modelDraft = ''
     dialect = cfg.dialect
     permissionMode = cfg.permissionMode
     denyGlobsText = (cfg.denyGlobs ?? []).join('\n')
     hasKey = cfg.hasKey
     envOverrides = { ...cfg.envOverrides }
     apiKey = ''
+  }
+
+  function normalizeModelList(list: string[] | undefined, active: string): string[] {
+    const out: string[] = []
+    for (const m of list ?? []) {
+      const t = m.trim()
+      if (t && !out.includes(t)) out.push(t)
+    }
+    const cur = active.trim()
+    if (cur && !out.includes(cur)) out.unshift(cur)
+    if (!out.length) out.push('enpii')
+    return out
+  }
+
+  function addModel(): void {
+    const id = modelDraft.trim()
+    if (!id) return
+    if (!models.includes(id)) models = [...models, id]
+    model = id
+    modelDraft = ''
+  }
+
+  function removeModel(id: string): void {
+    if (models.length <= 1) return
+    models = models.filter((m) => m !== id)
+    if (model === id) model = models[0] ?? 'enpii'
   }
 
   onMount(() => {
@@ -150,12 +267,16 @@
   })
 
   function close(): void {
+    if (saving) return
     app.settingsOpen = false
   }
 
   function onKey(e: KeyboardEvent): void {
-    if (recording) return
-    if (e.key === 'Escape' && !saving) close()
+    if (!app.settingsOpen || recording) return
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      close()
+    }
   }
 
   function recordKeybinding(event: KeyboardEvent, action: KeybindingAction): void {
@@ -186,16 +307,20 @@
         .split(/[\n,]+/)
         .map((g) => g.trim())
         .filter(Boolean)
+      const activeModel = model.trim()
+      const modelList = normalizeModelList(models, activeModel)
       const patch: {
         baseUrl: string
         model: string
+        models: string[]
         dialect: ProviderDialect
         permissionMode: PermissionMode
         apiKey?: string
         denyGlobs: string[]
       } = {
         baseUrl: baseUrl.trim(),
-        model: model.trim(),
+        model: activeModel,
+        models: modelList,
         dialect: knownDialect ?? 'openai',
         permissionMode: knownPermission ?? 'ask',
         denyGlobs,
@@ -203,6 +328,8 @@
       if (apiKey.trim()) patch.apiKey = apiKey.trim()
       const cfg = await saveProviderConfig(patch)
       denyGlobsText = (cfg.denyGlobs ?? []).join('\n')
+      models = normalizeModelList(cfg.models, cfg.model)
+      model = cfg.model
       hasKey = cfg.hasKey
       envOverrides = { ...cfg.envOverrides }
       apiKey = ''
@@ -229,14 +356,14 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 <div
-  class="fixed inset-0 z-[100] grid place-items-center bg-studio-dark/70 p-6 backdrop-blur-[6px]"
+  class="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-6 backdrop-blur-sm"
   role="presentation"
   onclick={(e) => {
     if (e.target === e.currentTarget && !saving) close()
   }}
 >
   <div
-    class="grid h-[min(720px,calc(100vh-48px))] w-[min(1100px,calc(100vw-48px))] grid-cols-[240px_minmax(0,1fr)] overflow-hidden rounded-lg border border-border-subtle bg-studio-panel shadow-[0_24px_64px_rgba(0,0,0,0.55)]"
+    class="studio-glass grid h-[min(720px,calc(100vh-48px))] w-[min(1100px,calc(100vw-48px))] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-2xl bg-studio-panel/95"
     role="dialog"
     aria-modal="true"
     aria-labelledby="settings-title"
@@ -295,12 +422,11 @@
               disabled={saving}
               hint={envOverrides.apiKey ? 'env ENPII_API_KEY active' : ''}
             />
-            <TextInput
-              label="Model"
+            <SmartSelect
+              label="Default model"
               bind:value={model}
-              placeholder="enpii"
-              autocomplete="off"
-              disabled={saving}
+              options={models.map((m) => ({ value: m, label: m }))}
+              disabled={saving || !models.length}
               hint={envOverrides.model ? 'env ENPII_MODEL active' : ''}
             />
             <SmartSelect
@@ -316,9 +442,59 @@
               min={1}
               max={200}
               step={1}
-              hint="Local UI pref — not persisted yet"
               disabled={saving}
             />
+            <div class="col-span-2 flex flex-col gap-2">
+              <div class="text-xs font-medium text-studio-text-dim">Models</div>
+              <div class="flex flex-wrap gap-1.5">
+                {#each models as m (m)}
+                  <span
+                    class="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] leading-none {m === model
+                      ? 'border-studio-purple/40 text-studio-text'
+                      : 'text-studio-text-dim'}"
+                  >
+                    <button
+                      type="button"
+                      class="leading-none hover:text-studio-text"
+                      disabled={saving}
+                      onclick={() => (model = m)}
+                    >{m}</button>
+                    {#if models.length > 1}
+                      <button
+                        type="button"
+                        class="grid size-4 place-items-center rounded leading-none text-studio-text-dim hover:bg-white/10 hover:text-danger"
+                        aria-label={`Remove ${m}`}
+                        disabled={saving}
+                        onclick={() => removeModel(m)}
+                      >×</button>
+                    {/if}
+                  </span>
+                {/each}
+              </div>
+              <div class="flex items-end gap-2">
+                <TextInput
+                  class="min-w-0 flex-1"
+                  label="Add model"
+                  bind:value={modelDraft}
+                  placeholder="claude-opus-5"
+                  autocomplete="off"
+                  disabled={saving}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addModel()
+                    }
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="min-h-[38px] self-end px-3.5"
+                  disabled={saving || !modelDraft.trim()}
+                  onclick={addModel}
+                >Add</Button>
+              </div>
+            </div>
           </div>
         {:else if section === 'permissions'}
           <div class="grid grid-cols-2 items-start gap-x-6 gap-y-5">
@@ -331,7 +507,6 @@
             <Textarea
               class="col-span-2"
               label="Extra deny globs"
-              hint="One pattern per line. Merged with built-in .env / keys / credentials blocks."
               rows={5}
               bind:value={denyGlobsText}
               disabled={saving}
@@ -344,45 +519,77 @@
               description="Show partial assistant text as it arrives"
               disabled={saving}
             />
-            <DatePicker
-              label="Reminder (demo)"
-              bind:value={reminderDate}
-              hint="Reusable DatePicker — not wired to backend"
-              disabled={saving}
-            />
           </div>
         {:else if section === 'network'}
           <div class="flex flex-col gap-2.5">
-            <p class="text-[11px] text-studio-text-dim">
-              Managed local forwards from <code class="font-mono">~/.enpiistudio/ssh.json</code> (BatchMode, no password prompts).
-            </p>
-            {#if sshHosts.length}
-              <div class="text-xs text-studio-text-dim">Hosts</div>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="text-xs font-medium text-studio-text">SSH hosts</div>
+              <div class="flex flex-wrap gap-1.5">
+                <Button variant="primary" size="sm" onclick={beginSshAdd}>+ Add host</Button>
+                <Button variant="ghost" size="sm" onclick={openSshConfig}>ssh.json</Button>
+                <Button variant="ghost" size="sm" onclick={() => void hydrateSsh()}>Refresh</Button>
+              </div>
+            </div>
+
+            {#if sshFormOpen}
+              <div class="grid gap-2 rounded-lg border border-studio-purple/35 bg-studio-purple/10 p-3">
+                <div class="text-xs font-medium text-studio-text">{sshEditing ? `Edit · ${sshEditing}` : 'New host'}</div>
+                <div class="grid grid-cols-2 gap-2">
+                  <TextInput label="Name" bind:value={sshForm.name} placeholder="prod" disabled={sshBusy !== null} />
+                  <TextInput label="Host / IP" bind:value={sshForm.host} placeholder="203.0.113.10" disabled={sshBusy !== null} />
+                  <TextInput label="User" bind:value={sshForm.user} placeholder="ubuntu" disabled={sshBusy !== null} />
+                  <NumberInput label="Port" bind:value={sshForm.port} min={1} max={65535} disabled={sshBusy !== null} />
+                </div>
+                <TextInput
+                  label="Identity file (optional)"
+                  bind:value={sshForm.identityFile}
+                  placeholder="~/.ssh/id_ed25519"
+                  disabled={sshBusy !== null}
+                />
+                {#if sshFormError}<p class="m-0 text-[11px] text-danger">{sshFormError}</p>{/if}
+                <div class="flex flex-wrap gap-1.5">
+                  <Button variant="primary" size="sm" loading={sshBusy !== null} onclick={() => void saveSshHost()}>Save</Button>
+                  <Button variant="ghost" size="sm" disabled={sshBusy !== null} onclick={cancelSshForm}>Cancel</Button>
+                </div>
+              </div>
+            {/if}
+
+            {#if sshHosts.length === 0 && !sshFormOpen}
+              <p class="text-[11px] text-studio-text-dim">No hosts yet.</p>
+            {:else if sshHosts.length}
               <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
                 {#each sshHosts as h (h.name)}
-                  <li class="flex flex-row items-center justify-between gap-3 rounded-lg border border-border-subtle p-4">
+                  <li class="flex flex-row items-center justify-between gap-3 rounded-lg border border-border-subtle p-3">
                     <div class="min-w-0">
                       <strong class="text-sm text-studio-text">{h.name}</strong>
-                      <code class="block font-mono text-[11px] text-studio-text-dim">{h.user ? `${h.user}@` : ''}{h.host}:{h.port}</code>
+                      <code class="block truncate font-mono text-[11px] text-studio-text-dim"
+                        >{h.user ? `${h.user}@` : ''}{h.host}:{h.port}{h.identityFile ? ` · ${h.identityFile}` : ''}</code
+                      >
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onclick={() => {
-                        app.setMode('terminal')
-                        close()
-                        app.notify('info', 'Open SSH', `Use Terminal → SSH → ${h.name}`)
-                      }}
-                    >
-                      Open in Terminal
-                    </Button>
+                    <div class="flex shrink-0 flex-wrap gap-1">
+                      <Button variant="ghost" size="sm" disabled={sshBusy !== null} onclick={() => beginSshEdit(h)}>Edit</Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={sshBusy !== null}
+                        onclick={() => {
+                          app.setMode('terminal')
+                          close()
+                          app.notify('info', 'Open SSH', `Terminal → SSH → ${h.name}`)
+                        }}
+                      >Connect</Button
+                      >
+                      <Button variant="danger" size="sm" disabled={sshBusy !== null} onclick={() => void removeSshHost(h.name)}
+                        >Delete</Button
+                      >
+                    </div>
                   </li>
                 {/each}
               </ul>
             {/if}
-            <div class="text-xs text-studio-text-dim">Tunnels</div>
+            <div class="text-xs font-medium text-studio-text">Tunnels</div>
             {#if sshTunnels.length === 0}
-              <p class="text-[11px] text-studio-text-dim">No tunnels configured. Edit <code class="font-mono">ssh.json</code> (see <code class="font-mono">_example</code>).</p>
+              <p class="text-[11px] text-studio-text-dim">None.</p>
             {:else}
               <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
                 {#each sshTunnels as t (t.name)}
@@ -405,14 +612,12 @@
                 {/each}
               </ul>
             {/if}
-            <div class="text-xs text-studio-text-dim">MCP servers</div>
-            <p class="text-[11px] text-studio-text-dim">
-              From <code class="font-mono">~/.enpiistudio/mcp.json</code> + project <code class="font-mono">.enpii/mcp.json</code>
-              (stdio <code class="font-mono">command</code> or HTTP <code class="font-mono">url</code>). Agent tools:
-              <code class="font-mono">mcp_list_tools</code> / <code class="font-mono">mcp_call_tool</code>.
-            </p>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="text-xs font-medium text-studio-text">MCP</div>
+              <Button variant="ghost" size="sm" onclick={() => void hydrateMcp()}>Refresh</Button>
+            </div>
             {#if mcpServers.length === 0}
-              <p class="text-[11px] text-studio-text-dim">No MCP servers configured.</p>
+              <p class="text-[11px] text-studio-text-dim">None.</p>
             {:else}
               <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
                 {#each mcpServers as s (s.name)}
@@ -430,10 +635,6 @@
                 {/each}
               </ul>
             {/if}
-            <div class="flex flex-wrap gap-2">
-              <Button variant="ghost" size="sm" onclick={() => void hydrateSsh()}>Refresh SSH</Button>
-              <Button variant="ghost" size="sm" onclick={() => void hydrateMcp()}>Refresh MCP</Button>
-            </div>
           </div>
         {:else if section === 'appearance'}
           <div class="grid grid-cols-2 items-start gap-x-6 gap-y-5">
@@ -442,7 +643,6 @@
               bind:value={theme}
               options={themeOpts}
               disabled={saving}
-              hint="Dark is the only live theme for now"
             />
             <Switch
               bind:checked={streamTokens}
@@ -453,7 +653,6 @@
           </div>
         {:else}
           <div class="flex flex-col gap-1.5">
-            <div class="mb-1 text-[11px] text-studio-text-dim">Click a shortcut, then press a modifier combination. Editor and browser shortcuts remain contextual.</div>
             {#each keybindingRows as item (item.id)}
               <div class="flex items-center justify-between gap-3 rounded-lg border border-border-subtle p-4">
                 <span class="text-sm text-studio-text">{item.label}</span>
@@ -478,34 +677,23 @@
         {/if}
       </div>
 
-      <footer class="flex items-center justify-between gap-3 border-t border-border-subtle px-6 py-4">
-        <span class="text-[11px] text-studio-text-dim">
+      <footer class="flex items-center justify-end gap-2 border-t border-border-subtle px-6 py-4">
+        {#if section === 'keybindings' || section === 'network'}
           {#if section === 'keybindings'}
-            Stored locally on this device
-          {:else if section === 'network'}
-            Tunnels live in the enpii sidecar process
-          {:else}
-            Env ENPII_* wins when set at process start
+            <Button variant="ghost" onclick={() => app.resetKeybindings()}>Reset Defaults</Button>
           {/if}
-        </span>
-        <div class="flex items-center gap-2">
-          {#if section === 'keybindings' || section === 'network'}
-            {#if section === 'keybindings'}
-              <Button variant="ghost" onclick={() => app.resetKeybindings()}>Reset Defaults</Button>
-            {/if}
-            <Button variant="primary" onclick={close}>Done</Button>
-          {:else}
-            <Button variant="ghost" onclick={close} disabled={saving}>Cancel</Button>
-            <Button
-              variant="primary"
-              loading={saving}
-              disabled={!baseUrl.trim() || !model.trim()}
-              onclick={() => void save()}
-            >
-              Save
-            </Button>
-          {/if}
-        </div>
+          <Button variant="primary" onclick={close}>Done</Button>
+        {:else}
+          <Button variant="ghost" onclick={close} disabled={saving}>Cancel</Button>
+          <Button
+            variant="primary"
+            loading={saving}
+            disabled={!baseUrl.trim() || !model.trim()}
+            onclick={() => void save()}
+          >
+            Save
+          </Button>
+        {/if}
       </footer>
     </div>
   </div>

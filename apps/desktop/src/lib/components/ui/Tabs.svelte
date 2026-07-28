@@ -30,8 +30,8 @@
 
 <div
   class={variant === 'pill'
-    ? `inline-flex items-center gap-1 rounded-lg border border-border-subtle bg-black/30 p-1 text-xs font-medium ${className}`
-    : `flex items-stretch gap-0.5 border-b border-white/5 text-xs font-medium ${className}`}
+    ? `inline-flex items-center gap-0.5 rounded-lg bg-black/25 p-0.5 text-[12px] font-medium ring-1 ring-white/8 ${className}`
+    : `flex items-stretch gap-0.5 border-b border-border-subtle text-[12px] font-medium ${className}`}
   role="tablist"
   aria-label={ariaLabel}
 >
@@ -42,15 +42,15 @@
       aria-selected={value === item.id}
       disabled={item.disabled}
       class={variant === 'pill'
-        ? `rounded-lg px-4 py-1.5 transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-gold/50 disabled:opacity-40 ${
+        ? `rounded-md px-3 py-1 transition-colors duration-100 disabled:opacity-40 ${
             value === item.id
-              ? 'bg-studio-purple text-white'
-              : 'text-studio-text-dim hover:text-white'
+              ? 'bg-studio-card text-studio-text shadow-sm ring-1 ring-white/10'
+              : 'text-studio-text-dim hover:text-studio-text'
           }`
-        : `border-b-2 px-3 py-2 transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-gold/50 disabled:opacity-40 ${
+        : `border-b-2 px-3 py-2 transition-colors duration-100 disabled:opacity-40 ${
             value === item.id
-              ? 'border-studio-purple text-white'
-              : 'border-transparent text-studio-text-dim hover:text-white'
+              ? 'border-studio-purple text-studio-text'
+              : 'border-transparent text-studio-text-dim hover:text-studio-text'
           }`}
       onclick={() => select(item.id, item.disabled)}
     >

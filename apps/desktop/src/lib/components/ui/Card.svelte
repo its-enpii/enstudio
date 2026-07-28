@@ -22,16 +22,15 @@
   } & Omit<HTMLAttributes<HTMLDivElement>, 'class'> = $props()
 
   const tones: Record<Tone, string> = {
-    panel: 'bg-studio-panel border-white/5',
-    card: 'bg-studio-card border-white/5',
-    dark: 'bg-studio-dark border-white/5',
+    panel: 'bg-studio-panel border-border-subtle',
+    card: 'bg-studio-card border-border-subtle',
+    dark: 'bg-studio-dark border-border-subtle',
   }
-  // Min surface pad = 16 (p-4). sm collapses to md.
   const pads: Record<'none' | 'sm' | 'md' | 'lg', string> = {
     none: 'p-0',
-    sm: 'p-4',
-    md: 'p-4',
-    lg: 'p-5',
+    sm: 'p-2.5',
+    md: 'p-3',
+    lg: 'p-4',
   }
 </script>
 
@@ -40,12 +39,12 @@
   {...rest}
 >
   {#if header}
-    <div class="mb-3 shrink-0">{@render header()}</div>
+    <div class="mb-2.5 shrink-0">{@render header()}</div>
   {/if}
   {#if children}
     <div class="min-h-0 min-w-0 flex-1">{@render children()}</div>
   {/if}
   {#if footer}
-    <div class="mt-3 shrink-0">{@render footer()}</div>
+    <div class="mt-2.5 shrink-0">{@render footer()}</div>
   {/if}
 </div>

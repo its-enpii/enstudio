@@ -8,7 +8,10 @@ export type PermissionMode = 'read_only' | 'ask' | 'autopilot_workspace' | 'full
 export interface ProviderConfig {
   baseUrl: string
   apiKey: string
+  /** Active / default model id. */
   model: string
+  /** Saved model ids for pickers (Settings + vendor launch). Always includes `model`. */
+  models: string[]
   dialect: 'openai' | 'anthropic'
   permissionMode: PermissionMode
   /** Extra deny globs merged with built-in sensitive defaults. */
@@ -30,8 +33,21 @@ const DEFAULTS: ProviderConfig = {
   baseUrl: 'https://ai.enpiistudio.com/v1',
   apiKey: '',
   model: 'enpii',
+  models: ['enpii'],
   dialect: 'openai',
   permissionMode: 'ask',
+}
+
+function normalizeModels(models: unknown, active?: string): string[] {
+  const raw = Array.isArray(models)
+    ? models.filter((m): m is string => typeof m === 'string' && m.trim().length > 0).map((m) => m.trim())
+    : []
+  const out: string[] = []
+  for (const m of raw) if (!out.includes(m)) out.push(m)
+  const cur = active?.trim()
+  if (cur && !out.includes(cur)) out.unshift(cur)
+  if (!out.length) out.push(DEFAULTS.model)
+  return out
 }
 
 function enpiiHome(): string {
@@ -59,6 +75,8 @@ function parsePermissionMode(v: unknown): PermissionMode | undefined {
 }
 
 function partialFromRecord(data: Record<string, unknown>): Partial<ProviderConfig> {
+  const model = typeof data.model === 'string' ? data.model : undefined
+  const modelsRaw = data.models ?? data.model_list
   return {
     baseUrl:
       typeof data.baseUrl === 'string'
@@ -72,7 +90,8 @@ function partialFromRecord(data: Record<string, unknown>): Partial<ProviderConfi
         : typeof data.api_key === 'string'
           ? data.api_key
           : undefined,
-    model: typeof data.model === 'string' ? data.model : undefined,
+    model,
+    models: Array.isArray(modelsRaw) ? normalizeModels(modelsRaw, model) : undefined,
     dialect:
       data.dialect === 'anthropic' || data.dialect === 'openai'
         ? data.dialect
@@ -96,10 +115,13 @@ function partialFromToml(table: TomlTable): Partial<ProviderConfig> {
   const modeRaw =
     tomlString(table, 'permissionMode', 'permission_mode', 'defaultPermissionMode') ??
     (typeof table.permissionMode === 'string' ? table.permissionMode : undefined)
+  const model = tomlString(table, 'model')
+  const modelsArr = tomlStringArray(table, 'models') ?? tomlStringArray(table, 'model_list')
   return {
     baseUrl: tomlString(table, 'baseUrl', 'base_url'),
     apiKey: tomlString(table, 'apiKey', 'api_key'),
-    model: tomlString(table, 'model'),
+    model,
+    models: modelsArr ? normalizeModels(modelsArr, model) : undefined,
     dialect: dialectRaw === 'anthropic' || dialectRaw === 'openai' ? dialectRaw : undefined,
     permissionMode: parsePermissionMode(modeRaw),
     denyGlobs: tomlStringArray(table, 'denyGlobs') ?? tomlStringArray(table, 'deny_globs'),
@@ -132,6 +154,7 @@ function mergePartial(...parts: Partial<ProviderConfig>[]): Partial<ProviderConf
     if (p.baseUrl !== undefined) out.baseUrl = p.baseUrl
     if (p.apiKey !== undefined) out.apiKey = p.apiKey
     if (p.model !== undefined) out.model = p.model
+    if (p.models !== undefined) out.models = p.models
     if (p.dialect !== undefined) out.dialect = p.dialect
     if (p.permissionMode !== undefined) out.permissionMode = p.permissionMode
     if (p.denyGlobs !== undefined) out.denyGlobs = p.denyGlobs
@@ -151,6 +174,7 @@ export function loadProviderConfig(projectRoot?: string): ProviderConfig {
   // later layers win for defined fields
   const file = mergePartial(userJson, userToml, projectToml)
 
+  const model = process.env.ENPII_MODEL || file.model || DEFAULTS.model
   return {
     baseUrl: (
       process.env.ENPII_BASE_URL ||
@@ -158,7 +182,8 @@ export function loadProviderConfig(projectRoot?: string): ProviderConfig {
       DEFAULTS.baseUrl
     ).replace(/\/+$/, ''),
     apiKey: process.env.ENPII_API_KEY || file.apiKey || DEFAULTS.apiKey,
-    model: process.env.ENPII_MODEL || file.model || DEFAULTS.model,
+    model,
+    models: normalizeModels(file.models ?? DEFAULTS.models, model),
     dialect:
       process.env.ENPII_DIALECT === 'anthropic' || process.env.ENPII_DIALECT === 'openai'
         ? process.env.ENPII_DIALECT
@@ -172,6 +197,7 @@ export function publicConfig(cfg: ProviderConfig): PublicProviderConfig {
   return {
     baseUrl: cfg.baseUrl,
     model: cfg.model,
+    models: normalizeModels(cfg.models, cfg.model),
     dialect: cfg.dialect,
     permissionMode: cfg.permissionMode,
     denyGlobs: cfg.denyGlobs,
@@ -190,6 +216,7 @@ export interface ProviderConfigPatch {
   /** omit or empty string = leave existing key; non-empty = replace */
   apiKey?: string
   model?: string
+  models?: string[]
   dialect?: 'openai' | 'anthropic'
   permissionMode?: PermissionMode
   denyGlobs?: string[]
@@ -200,6 +227,7 @@ function toTomlTable(cfg: ProviderConfig): TomlTable {
     baseUrl: cfg.baseUrl,
     apiKey: cfg.apiKey || '',
     model: cfg.model,
+    models: normalizeModels(cfg.models, cfg.model),
     dialect: cfg.dialect,
     permissionMode: cfg.permissionMode,
   }
@@ -216,13 +244,15 @@ export function saveProviderConfig(
   patch: ProviderConfigPatch,
   opts?: { projectRoot?: string; scope?: 'user' | 'project' },
 ): ProviderConfig {
+  const model = patch.model?.trim() || current.model
   const next: ProviderConfig = {
     baseUrl: (patch.baseUrl?.trim() || current.baseUrl).replace(/\/+$/, ''),
     apiKey:
       patch.apiKey !== undefined && patch.apiKey.trim() !== ''
         ? patch.apiKey.trim()
         : current.apiKey,
-    model: patch.model?.trim() || current.model,
+    model,
+    models: normalizeModels(patch.models ?? current.models, model),
     dialect: patch.dialect === 'anthropic' || patch.dialect === 'openai' ? patch.dialect : current.dialect,
     permissionMode: parsePermissionMode(patch.permissionMode) ?? current.permissionMode,
     denyGlobs:
@@ -243,6 +273,7 @@ export function saveProviderConfig(
     const overlay: TomlTable = {
       baseUrl: next.baseUrl,
       model: next.model,
+      models: next.models,
       dialect: next.dialect,
       permissionMode: next.permissionMode,
     }

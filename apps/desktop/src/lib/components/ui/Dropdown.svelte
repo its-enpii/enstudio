@@ -149,7 +149,7 @@
 
   {#if open}
     <div
-      class="fixed z-[200] overflow-y-auto rounded-lg border border-studio-purple/35 bg-studio-card p-1 shadow-[0_16px_40px_rgba(0,0,0,0.55)] outline-none"
+      class="fixed z-[200] overflow-y-auto rounded-lg border border-border-subtle bg-studio-popover p-1 outline-none"
       role="menu"
       tabindex="-1"
       bind:this={menuEl}

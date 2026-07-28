@@ -52,6 +52,7 @@ import {
   type DueCronJob,
 } from './cron.js'
 import {
+  deleteSshHost,
   ensureSshConfigScaffold,
   listLiveTunnels,
   listSshHosts,
@@ -61,6 +62,7 @@ import {
   stopAllTunnels,
   stopTunnel,
   tunnelArgv,
+  upsertSshHost,
 } from './ssh.js'
 
 const VERSION = '0.1.0'
@@ -331,8 +333,39 @@ async function main(): Promise<void> {
   })
 
   rpc.on('ssh.list', () => {
-    ensureSshConfigScaffold()
-    return { hosts: listSshHosts(), tunnels: listSshTunnels(), live: listLiveTunnels() }
+    const configPath = ensureSshConfigScaffold()
+    return {
+      configPath,
+      hosts: listSshHosts(),
+      tunnels: listSshTunnels(),
+      live: listLiveTunnels(),
+    }
+  })
+
+  rpc.on('ssh.host_upsert', (_method, params) => {
+    const p = (params ?? {}) as {
+      name?: string
+      host?: string
+      user?: string
+      port?: number
+      identityFile?: string
+      previousName?: string
+    }
+    if (!p.name?.trim() || !p.host?.trim()) throw new Error('name and host are required')
+    return upsertSshHost({
+      name: p.name,
+      host: p.host,
+      user: p.user,
+      port: p.port,
+      identityFile: p.identityFile,
+      previousName: p.previousName,
+    })
+  })
+
+  rpc.on('ssh.host_delete', (_method, params) => {
+    const p = (params ?? {}) as { name?: string }
+    if (!p.name?.trim()) throw new Error('name is required')
+    return deleteSshHost(p.name)
   })
 
   rpc.on('ssh.plan', (_method, params) => {
@@ -365,13 +398,22 @@ async function main(): Promise<void> {
   })
 
   rpc.on('project.read_file', async (_method, params) => {
-    const p = (params ?? {}) as { projectRoot?: string; path?: string; maxBytes?: number }
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      path?: string
+      maxBytes?: number
+      /** Editor UI may open secrets; agent tools still use DEFAULT_DENY_GLOBS. */
+      bypassDeny?: boolean
+    }
     if (!p.projectRoot) throw new Error('projectRoot is required')
     const result = await runTool(
       path.resolve(p.projectRoot),
       'read_file',
       JSON.stringify({ path: p.path, maxBytes: p.maxBytes ?? 120_000 }),
-      { denyGlobs: provider.denyGlobs ?? [] },
+      {
+        denyGlobs: provider.denyGlobs ?? [],
+        bypassDeny: p.bypassDeny === true,
+      },
     )
     if (!result.ok) throw new Error(result.content)
     return result

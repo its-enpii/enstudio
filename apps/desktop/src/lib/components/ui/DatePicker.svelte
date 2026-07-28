@@ -168,7 +168,7 @@
   {#if open}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="fixed z-[200] rounded-md border border-studio-purple/35 bg-studio-card p-3 shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
+      class="fixed z-[200] rounded-md border border-border-subtle bg-studio-popover p-3"
       role="dialog"
       aria-label="Calendar"
       tabindex="-1"

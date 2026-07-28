@@ -116,6 +116,66 @@ export function loadSshConfig(): { hosts: Record<string, SshHostConfig>; tunnels
   }
 }
 
+/** Read raw file so we preserve tunnels/_example when rewriting hosts. */
+function readRawSshFile(): SshConfigFile {
+  ensureSshConfigScaffold()
+  try {
+    const raw = fs.readFileSync(configPath(), 'utf8').replace(/^﻿/, '')
+    return JSON.parse(raw) as SshConfigFile
+  } catch {
+    return { hosts: {}, tunnels: {} }
+  }
+}
+
+function writeSshFile(data: SshConfigFile): void {
+  const file = ensureSshConfigScaffold()
+  fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+}
+
+export type SshHostInput = {
+  name: string
+  host: string
+  user?: string
+  port?: number
+  identityFile?: string
+  /** Rename: previous key when editing name */
+  previousName?: string
+}
+
+export function upsertSshHost(input: SshHostInput): { name: string } {
+  const name = input.name.trim()
+  if (!name || /[\\/]/.test(name)) throw new Error('invalid host name')
+  const host = input.host?.trim()
+  if (!host) throw new Error('host is required')
+  const port = typeof input.port === 'number' && input.port > 0 ? Math.floor(input.port) : 22
+  const entry: SshHostConfig = {
+    host,
+    port,
+    ...(input.user?.trim() ? { user: input.user.trim() } : {}),
+    ...(input.identityFile?.trim() ? { identityFile: input.identityFile.trim() } : {}),
+  }
+  const data = readRawSshFile()
+  const hosts = { ...(data.hosts ?? {}) }
+  const prev = input.previousName?.trim()
+  if (prev && prev !== name && hosts[prev]) delete hosts[prev]
+  hosts[name] = entry
+  data.hosts = hosts
+  writeSshFile(data)
+  return { name }
+}
+
+export function deleteSshHost(name: string): { deleted: boolean } {
+  const key = name.trim()
+  if (!key) throw new Error('name is required')
+  const data = readRawSshFile()
+  const hosts = { ...(data.hosts ?? {}) }
+  if (!(key in hosts)) return { deleted: false }
+  delete hosts[key]
+  data.hosts = hosts
+  writeSshFile(data)
+  return { deleted: true }
+}
+
 function expandHome(p: string): string {
   if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2))
   return p
@@ -161,13 +221,24 @@ export function tunnelArgv(tunnelName: string): { command: string; args: string[
   }
 }
 
-export function listSshHosts(): { name: string; host: string; user?: string; port: number }[] {
+export function sshConfigPath(): string {
+  return configPath()
+}
+
+export function listSshHosts(): {
+  name: string
+  host: string
+  user?: string
+  port: number
+  identityFile?: string
+}[] {
   const { hosts } = loadSshConfig()
   return Object.entries(hosts).map(([name, h]) => ({
     name,
     host: h.host,
     user: h.user,
     port: h.port ?? 22,
+    identityFile: h.identityFile,
   }))
 }
 

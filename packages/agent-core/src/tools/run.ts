@@ -114,7 +114,7 @@ export async function runTool(
   root: string,
   name: string,
   argsJson: string,
-  options?: { denyGlobs?: string[]; homeDir?: string },
+  options?: { denyGlobs?: string[]; homeDir?: string; bypassDeny?: boolean },
 ): Promise<ToolResult> {
   let args: Record<string, unknown> = {}
   try {
@@ -125,15 +125,16 @@ export async function runTool(
 
   const denyGlobs = options?.denyGlobs ?? []
   const homeDir = options?.homeDir ?? os.homedir()
+  const bypassDeny = options?.bypassDeny === true
 
-  // Block path tools on sensitive globs before any IO.
+  // Block path tools on sensitive globs before any IO (unless editor bypass).
   const pathArg =
     typeof args.path === 'string'
       ? args.path
       : name === 'glob' && typeof args.pattern === 'string'
         ? undefined
         : undefined
-  if (pathArg && isDeniedPath(pathArg, denyGlobs)) {
+  if (!bypassDeny && pathArg && isDeniedPath(pathArg, denyGlobs)) {
     return fail(`path denied by sensitive glob: ${pathArg}`)
   }
 
@@ -163,7 +164,8 @@ export async function runTool(
           root,
           String(args.path ?? ''),
           typeof args.maxBytes === 'number' ? args.maxBytes : DEFAULT_READ,
-          denyGlobs,
+          bypassDeny ? [] : denyGlobs,
+          bypassDeny,
         )
       case 'glob':
         return globFiles(
@@ -869,9 +871,15 @@ function listDir(root: string, rel: string): ToolResult {
   return ok(`list_dir ${rel || '.'} (${lines.length})`, lines.join('\n') || '(empty)')
 }
 
-function readFile(root: string, rel: string, maxBytes: number, denyGlobs: string[] = []): ToolResult {
+function readFile(
+  root: string,
+  rel: string,
+  maxBytes: number,
+  denyGlobs: string[] = [],
+  bypassDeny = false,
+): ToolResult {
   if (!rel) return fail('path required')
-  if (isDeniedPath(rel, denyGlobs)) return fail(`path denied by sensitive glob: ${rel}`)
+  if (!bypassDeny && isDeniedPath(rel, denyGlobs)) return fail(`path denied by sensitive glob: ${rel}`)
   const abs = resolveInRoot(root, rel)
   if (!isFile(abs)) return fail(`not a file: ${rel}`)
   const stat = fs.statSync(abs)

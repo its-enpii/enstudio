@@ -100,6 +100,7 @@ export {
 } from './mcp-http.js'
 export type { McpHttpServerConfig } from './mcp-http.js'
 export {
+  deleteSshHost,
   ensureSshConfigScaffold,
   listLiveTunnels,
   listSshHosts,
@@ -110,5 +111,7 @@ export {
   stopAllTunnels,
   stopTunnel,
   tunnelArgv,
+  upsertSshHost,
 } from './ssh.js'
+export type { SshHostInput } from './ssh.js'
 export type * from './types.js'

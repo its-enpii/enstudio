@@ -6,6 +6,7 @@
   import { listSsh, type SshHostInfo } from '../enpii'
   import { state as app } from '../store.svelte'
   import { xtermTheme } from '../theme'
+  import { Dropdown, type DropdownItem } from './ui'
 
   type TerminalTab = { id: string; title: string; exited: boolean }
   type PaneIds = [string | null, string | null]
@@ -144,6 +145,9 @@
     if (!terminal) return
     if (!terminal.element) terminal.open(host)
     else if (host.firstElementChild !== terminal.element) host.replaceChildren(terminal.element)
+    // Double rAF: layout settles after open before fit (kills tiny→full flash)
+    fitPane(pane, true)
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
     fitPane(pane, true)
   }
 
@@ -164,26 +168,63 @@
     terminal.focus()
   }
 
-  let sshMenuOpen = $state(false)
   let sshHosts = $state<SshHostInfo[]>([])
+  let sshConfigPath = $state('')
+  const sshMenuItems = $derived<DropdownItem[]>([
+    ...sshHosts.map((h) => ({
+      id: h.name,
+      label: h.name,
+      description: `${h.user ? `${h.user}@` : ''}${h.host}:${h.port}`,
+    })),
+    ...(sshHosts.length ? [{ id: '_sep', label: '', separator: true }] : []),
+    {
+      id: '_edit',
+      label: 'Edit ssh.json…',
+      description: sshConfigPath || '~/.enpiistudio/ssh.json',
+    },
+  ])
 
   async function refreshSshHosts(): Promise<void> {
     try {
       const data = await listSsh()
       sshHosts = data.hosts ?? []
+      sshConfigPath = data.configPath ?? ''
     } catch {
       sshHosts = []
     }
   }
 
+  async function onSshMenuSelect(id: string): Promise<void> {
+    if (id === '_edit') {
+      const path = sshConfigPath || (await listSsh().then((d) => d.configPath).catch(() => ''))
+      if (path) void window.enpiistudio.shell.openPath(path)
+      return
+    }
+    const host = sshHosts.find((h) => h.name === id)
+    if (host) void launchSshHost(host)
+  }
+
   function measureHost(pane: 0 | 1): { cols: number; rows: number } {
     const host = hostForPane(pane)
-    // ~7.2×15 for JetBrains Mono 12 / lineHeight 1.25 — good enough seed.
+    // JetBrains Mono 12 / lineHeight 1.25
     const cellW = 7.2
     const cellH = 15
-    const cols = Math.max(40, Math.floor((host?.clientWidth || 800) / cellW))
-    const rows = Math.max(12, Math.floor((host?.clientHeight || 400) / cellH))
+    const w = host?.clientWidth ?? 0
+    const h = host?.clientHeight ?? 0
+    // Prefer real host size; only fall back when not laid out yet
+    const cols = Math.max(80, Math.floor((w > 40 ? w : 900) / cellW))
+    const rows = Math.max(24, Math.floor((h > 40 ? h : 500) / cellH))
     return { cols, rows }
+  }
+
+  /** Wait until pane host has real layout (avoids tiny seed → jump-fit). */
+  async function waitHostSize(pane: 0 | 1, tries = 12): Promise<void> {
+    for (let i = 0; i < tries; i++) {
+      const host = hostForPane(pane)
+      if (host && host.clientWidth > 40 && host.clientHeight > 40) return
+      await tick()
+      await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    }
   }
 
   async function addTerminal(
@@ -202,7 +243,7 @@
     const targetPane: 0 | 1 = pane === 1 || paneIds[1] ? pane : 0
     error = ''
     try {
-      // Spawn at measured size so TUI CLIs don't start at 80×24 then thrash-resize.
+      await waitHostSize(targetPane)
       const seed = measureHost(targetPane)
       const created = await api.create(
         cwd,
@@ -258,7 +299,6 @@
   }
 
   async function launchSshHost(host: SshHostInfo): Promise<void> {
-    sshMenuOpen = false
     error = ''
     try {
       const plan = (await window.enpiistudio.enpii.request('ssh.plan', { host: host.name })) as {
@@ -388,12 +428,24 @@
       terminals.get(id)?.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)
     })
     resizeObserver = new ResizeObserver(() => fitVisible(false))
-    if (primaryHost) resizeObserver.observe(primaryHost)
-    if (secondaryHost) resizeObserver.observe(secondaryHost)
     return () => {
       offData()
       offExit()
       resizeObserver?.disconnect()
+    }
+  })
+
+  // Re-bind observer when hosts mount (bind:this is late vs onMount)
+  $effect(() => {
+    const a = primaryHost
+    const b = secondaryHost
+    const obs = resizeObserver
+    if (!obs) return
+    if (a) obs.observe(a)
+    if (b) obs.observe(b)
+    return () => {
+      if (a) obs.unobserve(a)
+      if (b) obs.unobserve(b)
     }
   })
 
@@ -418,47 +470,32 @@
       title="Split terminal"
       onclick={() => void splitTerminal()}>▥</button
     >
-    <div class="relative">
-      <button
-        type="button"
-        class="cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 py-1 text-xs text-studio-text-dim hover:border-studio-gold/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-        aria-haspopup="menu"
-        aria-expanded={sshMenuOpen}
-        title="Open SSH host"
-        disabled={!app.activeProject}
-        onclick={() => {
-          sshMenuOpen = !sshMenuOpen
-          if (sshMenuOpen) void refreshSshHosts()
-        }}
-      >
-        SSH ▾
-      </button>
-      {#if sshMenuOpen}
-        <div
-          class="absolute right-0 top-full z-20 mt-1 grid min-w-[200px] gap-0.5 rounded-lg border border-white/12 bg-studio-elevated p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
-          role="menu"
+    <Dropdown
+      items={sshMenuItems}
+      label="SSH"
+      align="end"
+      disabled={!app.activeProject}
+      onSelect={(id) => void onSshMenuSelect(id)}
+      class="!inline-flex"
+    >
+      {#snippet trigger({ open, toggle })}
+        <button
+          type="button"
+          class="cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 py-1 text-xs text-studio-text-dim hover:border-studio-gold/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Open SSH host"
+          disabled={!app.activeProject}
+          onclick={(e) => {
+            e.stopPropagation()
+            if (!open) void refreshSshHosts()
+            toggle()
+          }}
         >
-          {#if sshHosts.length === 0}
-            <p class="mx-1 my-0.5 max-w-[200px] text-[10px] text-studio-text-dim">No hosts in ~/.enpiistudio/ssh.json</p>
-          {:else}
-            {#each sshHosts as h (h.name)}
-              <button
-                type="button"
-                class="flex cursor-pointer justify-between gap-2 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-xs text-studio-text hover:bg-white/6"
-                role="menuitem"
-                onclick={() => void launchSshHost(h)}
-              >
-                {h.name}
-                <code class="text-[10px] text-studio-text-dim">{h.user ? `${h.user}@` : ''}{h.host}</code>
-              </button>
-            {/each}
-          {/if}
-          <p class="mx-1 my-0.5 max-w-[200px] text-[10px] text-studio-text-dim">
-            Interactive ssh via PTY. Keys/agent must work non-interactively or you type password in the tab.
-          </p>
-        </div>
-      {/if}
-    </div>
+          SSH ▾
+        </button>
+      {/snippet}
+    </Dropdown>
   </div>
   <section
     class="relative min-h-0 flex-1 overflow-hidden {paneIds[1]
@@ -477,7 +514,7 @@
     {/if}
     <div
       class="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] overflow-hidden {focusedPane === 0
-        ? 'shadow-[inset_0_1px_0_var(--color-studio-purple-active)]'
+        ? 'ring-1 ring-inset ring-studio-purple/40'
         : ''}"
       onfocusin={() => void focusPane(0)}
     >
@@ -491,7 +528,7 @@
           {#if tab}
             <div
               class="flex items-center border-r border-white/5 {tab.id === activeId
-                ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]'
+                ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
                 : ''}"
             >
               {#if editingId === tab.id}
@@ -525,7 +562,7 @@
               {/if}
               <button
                 type="button"
-                class="mx-1 rounded px-1 py-1 font-mono text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                class="mx-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
                 aria-label={`Close ${tab.title}`}
                 onclick={() => void closeTerminal(tab.id)}>×</button
               >
@@ -545,7 +582,7 @@
     <div
       class="min-h-0 min-w-0 overflow-hidden border-l border-white/8 {paneIds[1]
         ? 'grid grid-rows-[36px_minmax(0,1fr)]'
-        : 'hidden'} {focusedPane === 1 ? 'shadow-[inset_0_1px_0_var(--color-studio-purple-active)]' : ''}"
+        : 'hidden'} {focusedPane === 1 ? 'ring-1 ring-inset ring-studio-purple/40' : ''}"
       onfocusin={() => void focusPane(1)}
     >
       <div
@@ -558,7 +595,7 @@
           {#if tab}
             <div
               class="flex items-center border-r border-white/5 {tab.id === activeId
-                ? 'bg-studio-purple/25 shadow-[inset_0_-2px_0_var(--color-studio-purple-active)]'
+                ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
                 : ''}"
             >
               {#if editingId === tab.id}
@@ -592,7 +629,7 @@
               {/if}
               <button
                 type="button"
-                class="mx-1 rounded px-1 py-1 font-mono text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                class="mx-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
                 aria-label={`Close ${tab.title}`}
                 onclick={() => void closeTerminal(tab.id)}>×</button
               >

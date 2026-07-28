@@ -32,7 +32,7 @@
     <span class="text-xs font-medium text-studio-text-dim">{label}</span>
   {/if}
   <textarea
-    class="min-h-[60px] w-full resize-y rounded-sm border bg-studio-dark px-3 py-2 text-[13px] text-studio-text outline-none placeholder:text-studio-text-dim/55 hover:border-studio-purple/35 focus:border-studio-purple/70 focus-visible:border-studio-purple/70 disabled:cursor-not-allowed disabled:opacity-50 {error
+    class="min-h-[56px] w-full resize-y rounded-md border bg-studio-dark px-2.5 py-1.5 text-[12px] text-studio-text outline-none placeholder:text-studio-text-dim/55 hover:border-white/12 focus:border-studio-purple/60 disabled:cursor-not-allowed disabled:opacity-50 {error
       ? 'border-danger/45'
       : 'border-border-subtle'}"
     id={inputId}

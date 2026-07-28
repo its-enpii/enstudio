@@ -10,6 +10,7 @@ import {
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import * as pty from 'node-pty'
@@ -34,6 +35,45 @@ type DownloadSummary = {
 }
 const downloadItems = new Map<string, DownloadItem>()
 const downloads = new Map<string, DownloadSummary>()
+
+/**
+ * node-pty on Windows needs a real .exe path — bare `ssh` / `claude` → "File not found:".
+ * Resolve via known dirs + where.exe; leave absolute/relative paths alone.
+ */
+function resolveSpawnCommand(command: string): string {
+  const raw = command.trim()
+  if (!raw) return raw
+  if (process.platform !== 'win32') return raw
+  if (path.isAbsolute(raw) || raw.includes('/') || raw.includes('\\') || raw.includes(':')) {
+    return raw
+  }
+  const bare = raw.replace(/\.(exe|cmd|bat)$/i, '')
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows'
+  const known = [
+    path.join(systemRoot, 'System32', 'OpenSSH', `${bare}.exe`),
+    path.join(systemRoot, 'System32', `${bare}.exe`),
+    path.join(systemRoot, 'SysWOW64', `${bare}.exe`),
+  ]
+  for (const candidate of known) {
+    if (fs.existsSync(candidate)) return candidate
+  }
+  try {
+    const out = execFileSync('where.exe', [raw], {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line && fs.existsSync(line))
+    if (out) return out
+  } catch {
+    /* not on PATH */
+  }
+  // Last resort: append .exe so ConPTY search is less ambiguous
+  return raw.toLowerCase().endsWith('.exe') ? raw : `${raw}.exe`
+}
 
 function cleanEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -106,13 +146,21 @@ function readProviderLite(cwd: string): { baseUrl?: string; apiKey?: string; mod
   }
 }
 
+type VendorProviderOverride = { baseUrl?: string; apiKey?: string; model?: string }
+
 /** Env + argv flags so vendor CLIs follow enpii Settings (base URL / model / key). */
 function vendorProviderInject(
   command: string,
   cwd: string,
   args: string[],
+  override?: VendorProviderOverride,
 ): { env: Record<string, string>; args: string[] } {
-  const cfg = readProviderLite(cwd)
+  const file = readProviderLite(cwd)
+  const cfg = {
+    baseUrl: override?.baseUrl?.trim() || file.baseUrl,
+    apiKey: override?.apiKey?.trim() || file.apiKey,
+    model: override?.model?.trim() || file.model,
+  }
   const env: Record<string, string> = {}
   if (cfg.baseUrl) {
     env.OPENAI_BASE_URL = cfg.baseUrl
@@ -430,6 +478,8 @@ app.whenReady().then(() => {
         args?: string[]
         /** Inject Settings baseUrl/model/apiKey into env + --model for vendor CLIs. */
         injectProvider?: boolean
+        /** Per-launch override (vendor config modal). Falls back to Settings file/env. */
+        provider?: VendorProviderOverride
       },
     ) => {
       const cwd = path.resolve(params?.cwd ?? app.getPath('home'))
@@ -440,13 +490,17 @@ app.whenReady().then(() => {
         process.platform === 'win32'
           ? process.env.COMSPEC ?? 'powershell.exe'
           : process.env.SHELL ?? '/bin/bash'
-      const command = params?.command?.trim() || defaultShell
+      const requested = params?.command?.trim() || defaultShell
+      const command = resolveSpawnCommand(requested)
       let args = Array.isArray(params?.args) ? params!.args!.map(String) : []
       let extraEnv: Record<string, string> = {}
       if (params?.injectProvider && params?.command?.trim()) {
-        const injected = vendorProviderInject(command, cwd, args)
+        const injected = vendorProviderInject(command, cwd, args, params.provider)
         extraEnv = injected.env
         args = injected.args
+      }
+      if (params?.command?.trim() && !fs.existsSync(command) && !command.includes(path.sep)) {
+        throw new Error(`Command not found: ${requested}`)
       }
       const id = randomUUID()
       const terminal = pty.spawn(command, args, {

@@ -9,25 +9,42 @@
   import { xtermTheme } from '../theme'
   import SmartSelect from './ui/SmartSelect.svelte'
   import ConfirmDialog from './ui/ConfirmDialog.svelte'
+  import { Button, Dropdown, Modal, TextInput, type DropdownItem } from './ui'
 
   type AgentPane = 'enpii' | string
+  type VendorKind = 'claude' | 'codex' | 'aider' | 'gemini'
+  type VendorProvider = { baseUrl?: string; apiKey?: string; model?: string }
+  type VendorTab = { id: string; kind: VendorKind; label: string; provider?: VendorProvider }
   const VENDOR_CLIS = [
-    { id: 'claude', label: 'Claude', command: 'claude', args: [] as string[] },
-    { id: 'codex', label: 'Codex', command: 'codex', args: [] as string[] },
-    { id: 'aider', label: 'Aider', command: 'aider', args: [] as string[] },
-    { id: 'gemini', label: 'Gemini', command: 'gemini', args: [] as string[] },
-  ] as const
+    { id: 'claude' as const, label: 'Claude', command: 'claude', args: [] as string[] },
+    { id: 'codex' as const, label: 'Codex', command: 'codex', args: [] as string[] },
+    { id: 'aider' as const, label: 'Aider', command: 'aider', args: [] as string[] },
+    { id: 'gemini' as const, label: 'Gemini', command: 'gemini', args: [] as string[] },
+  ]
 
   let agentPane = $state<AgentPane>('enpii')
   let vendorHost = $state<HTMLDivElement>()
   let vendorError = $state('')
   let vendorBusy = $state(false)
-  /** Open vendor tabs (order preserved). Default none — enpii only. */
-  let vendorTabs = $state<string[]>([])
-  let vendorMenuOpen = $state(false)
-  let vendorMenuEl = $state<HTMLDivElement>()
-  let vendorMenuStyle = $state('')
-  const vendorTerms = new Map<string, { ptyId: string; term: Terminal; fit: FitAddon; size: { cols: number; rows: number } }>()
+  /** Open vendor instances (multi of same kind OK). Default none — enpii only. */
+  let vendorTabs = $state<VendorTab[]>([])
+  let vendorSeq = 0
+  let vendorConfigOpen = $state(false)
+  let vendorConfigKind = $state<VendorKind | null>(null)
+  let vendorConfig = $state({ baseUrl: '', apiKey: '', model: '' })
+  const vendorTerms = new Map<string, { ptyId: string; term: Terminal; fit: FitAddon; size: { cols: number; rows: number }; kind: VendorKind }>()
+  const vendorMenuItems = $derived<DropdownItem[]>(
+    app.activeProject
+      ? VENDOR_CLIS.map((cli) => {
+          const n = kindOpenCount(cli.id)
+          return {
+            id: cli.id,
+            label: cli.label,
+            description: n ? `${cli.command} · ${n} open · +` : cli.command,
+          }
+        })
+      : [{ id: '_none', label: 'Open a project first', disabled: true }],
+  )
   const vendorPending = new Map<string, string>()
   let vendorResizeTimer: ReturnType<typeof setTimeout> | undefined
   let vendorResizeObs: ResizeObserver | undefined
@@ -35,7 +52,14 @@
   let vendorProjectId: string | null = null
   const termApi = typeof window !== 'undefined' ? window.enpiistudio?.terminal : undefined
 
-  const vendorAvailable = $derived(VENDOR_CLIS.filter((c) => !vendorTabs.includes(c.id)))
+  function kindOpenCount(kind: VendorKind): number {
+    return vendorTabs.filter((t) => t.kind === kind).length
+  }
+
+  function nextVendorLabel(kind: VendorKind, base: string): string {
+    const n = kindOpenCount(kind) + 1
+    return n === 1 ? base : `${base} ${n}`
+  }
 
   function measureVendorHost(): { cols: number; rows: number } {
     const cellW = 7.2
@@ -82,14 +106,14 @@
     entry.term.focus()
   }
 
-  async function ensureVendor(cliId: string): Promise<void> {
+  async function ensureVendor(tabId: string, kind: VendorKind, provider?: VendorProvider): Promise<void> {
     if (!app.activeProject || !termApi) return
-    if (vendorTerms.has(cliId)) {
+    if (vendorTerms.has(tabId)) {
       await tick()
-      await mountVendorTerm(cliId)
+      await mountVendorTerm(tabId)
       return
     }
-    const cli = VENDOR_CLIS.find((c) => c.id === cliId)
+    const cli = VENDOR_CLIS.find((c) => c.id === kind)
     if (!cli) return
     vendorBusy = true
     vendorError = ''
@@ -100,6 +124,7 @@
         command: cli.command,
         args: cli.args,
         injectProvider: true,
+        provider,
       })
       if (vendorDestroyed) {
         await termApi.kill(created.id)
@@ -125,13 +150,14 @@
         term.write(buffered)
         vendorPending.delete(created.id)
       }
-      vendorTerms.set(cliId, {
+      vendorTerms.set(tabId, {
         ptyId: created.id,
         term,
         fit,
         size: { cols: seed.cols, rows: seed.rows },
+        kind,
       })
-      await mountVendorTerm(cliId)
+      await mountVendorTerm(tabId)
     } catch (err) {
       vendorError = err instanceof Error ? err.message : String(err)
     } finally {
@@ -141,66 +167,83 @@
 
   async function selectAgentPane(pane: AgentPane): Promise<void> {
     agentPane = pane
-    vendorMenuOpen = false
     if (pane === 'enpii') {
       vendorHost?.replaceChildren()
       void tick().then(focusComposer)
       return
     }
-    await ensureVendor(pane)
+    const tab = vendorTabs.find((t) => t.id === pane)
+    if (!tab) return
+    await ensureVendor(tab.id, tab.kind, tab.provider)
   }
 
-  async function addVendorTab(cliId: string): Promise<void> {
-    vendorMenuOpen = false
-    if (!vendorTabs.includes(cliId)) vendorTabs = [...vendorTabs, cliId]
-    await selectAgentPane(cliId)
+  const vendorModelOptions = $derived.by(() => {
+    const list = app.provider?.models?.length
+      ? app.provider.models
+      : app.provider?.model
+        ? [app.provider.model]
+        : ['enpii']
+    const out: string[] = []
+    for (const m of list) if (m && !out.includes(m)) out.push(m)
+    return out.map((m) => ({ value: m, label: m }))
+  })
+
+  function openVendorConfig(kind: VendorKind): void {
+    if (!app.activeProject) return
+    vendorConfigKind = kind
+    const defaultModel = app.provider?.model ?? vendorModelOptions[0]?.value ?? ''
+    vendorConfig = {
+      baseUrl: app.provider?.baseUrl ?? '',
+      apiKey: '',
+      model: defaultModel,
+    }
+    vendorConfigOpen = true
   }
 
-  async function closeVendor(cliId: string): Promise<void> {
-    const entry = vendorTerms.get(cliId)
+  function closeVendorConfig(): void {
+    vendorConfigOpen = false
+    vendorConfigKind = null
+  }
+
+  async function confirmVendorConfig(): Promise<void> {
+    const kind = vendorConfigKind
+    if (!kind) return
+    const cli = VENDOR_CLIS.find((c) => c.id === kind)
+    if (!cli) return
+    const provider: VendorProvider = {
+      baseUrl: vendorConfig.baseUrl.trim() || undefined,
+      apiKey: vendorConfig.apiKey.trim() || undefined,
+      model: vendorConfig.model.trim() || undefined,
+    }
+    const id = `${kind}-${++vendorSeq}`
+    const tab: VendorTab = {
+      id,
+      kind,
+      label: nextVendorLabel(kind, cli.label),
+      provider,
+    }
+    vendorTabs = [...vendorTabs, tab]
+    closeVendorConfig()
+    agentPane = id
+    await ensureVendor(id, kind, provider)
+  }
+
+  async function closeVendor(tabId: string): Promise<void> {
+    const entry = vendorTerms.get(tabId)
     if (entry) {
       await termApi?.kill(entry.ptyId)
       entry.term.dispose()
-      vendorTerms.delete(cliId)
+      vendorTerms.delete(tabId)
     }
-    vendorTabs = vendorTabs.filter((id) => id !== cliId)
-    if (agentPane === cliId) {
+    vendorTabs = vendorTabs.filter((t) => t.id !== tabId)
+    if (agentPane === tabId) {
       agentPane = 'enpii'
       vendorHost?.replaceChildren()
       void tick().then(focusComposer)
     }
   }
 
-  function placeVendorMenu(): void {
-    const el = vendorMenuEl
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    vendorMenuStyle = `top:${Math.round(r.bottom + 4)}px;right:${Math.round(window.innerWidth - r.right)}px`
-  }
-
-  function toggleVendorMenu(e?: Event): void {
-    e?.stopPropagation()
-    vendorMenuOpen = !vendorMenuOpen
-    if (vendorMenuOpen) {
-      void tick().then(placeVendorMenu)
-    }
-  }
-
-  function onVendorMenuOutside(e: PointerEvent): void {
-    if (!vendorMenuOpen) return
-    const t = e.target
-    if (!(t instanceof Node)) return
-    if (vendorMenuEl?.contains(t)) return
-    vendorMenuOpen = false
-  }
-
-  function onVendorMenuKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && vendorMenuOpen) {
-      e.stopPropagation()
-      vendorMenuOpen = false
-    }
-  }
-
+  
   onMount(() => {
     if (!termApi) return
     const offData = termApi.onData(({ id, data }) => {
@@ -213,11 +256,10 @@
       vendorPending.set(id, `${vendorPending.get(id) ?? ''}${data}`)
     })
     const offExit = termApi.onExit(({ id, exitCode }) => {
-      for (const [cliId, entry] of vendorTerms) {
+      for (const entry of vendorTerms.values()) {
         if (entry.ptyId !== id) continue
         entry.term.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)
-        // Keep tab; user re-open via close+click or relaunch.
-        void cliId
+        // Keep tab; user re-open via + menu or close+add.
         return
       }
     })
@@ -248,7 +290,6 @@
     }
     vendorTerms.clear()
     vendorTabs = []
-    vendorMenuOpen = false
     agentPane = 'enpii'
     vendorError = ''
     vendorHost?.replaceChildren()
@@ -441,9 +482,9 @@
   }
 
   function toolDot(status: string): string {
-    if (status === 'ok') return 'bg-studio-success shadow-[0_0_8px_var(--color-studio-success)]'
+    if (status === 'ok') return 'bg-studio-success'
     if (status === 'error') return 'bg-studio-error'
-    return 'bg-studio-gold shadow-[0_0_8px_var(--color-studio-gold)]'
+    return 'bg-studio-gold'
   }
 
   function isUnifiedDiff(text: string): boolean {
@@ -1305,80 +1346,63 @@
       aria-selected={agentPane === 'enpii'}
       onclick={() => void selectAgentPane('enpii')}
     >enpii</button>
-    {#each vendorTabs as tabId (tabId)}
-      {@const cli = VENDOR_CLIS.find((c) => c.id === tabId)}
+    {#each vendorTabs as tab (tab.id)}
+      {@const cli = VENDOR_CLIS.find((c) => c.id === tab.kind)}
       {#if cli}
         <div
-          class="flex items-stretch rounded-t-lg border border-b-0 {agentPane === cli.id
+          class="flex items-stretch rounded-t-lg border border-b-0 {agentPane === tab.id
             ? 'border-border-subtle bg-black/35'
             : 'border-transparent'}"
         >
           <button
             type="button"
             class="cursor-pointer whitespace-nowrap border-0 bg-transparent px-3 py-1.5 text-xs font-medium {agentPane ===
-            cli.id
+            tab.id
               ? 'text-white'
               : 'text-studio-text-dim hover:text-white'}"
             role="tab"
-            aria-selected={agentPane === cli.id}
+            aria-selected={agentPane === tab.id}
             title={`${cli.command} · model ${app.provider?.model ?? 'enpii settings'}`}
-            onclick={() => void selectAgentPane(cli.id)}
-          >{cli.label}</button>
+            onclick={() => void selectAgentPane(tab.id)}
+          >{tab.label}</button>
           <button
             type="button"
-            class="cursor-pointer border-0 bg-transparent py-0 pr-2 text-sm leading-none text-studio-text-dim opacity-70 hover:text-studio-error hover:opacity-100"
-            aria-label={`Close ${cli.label}`}
-            title={`Close ${cli.label}`}
+            class="mr-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-error"
+            aria-label={`Close ${tab.label}`}
+            title={`Close ${tab.label}`}
             onclick={(e) => {
               e.stopPropagation()
-              void closeVendor(cli.id)
+              void closeVendor(tab.id)
             }}
           >×</button>
         </div>
       {/if}
     {/each}
-    <div class="relative ml-auto flex-none self-center" bind:this={vendorMenuEl}>
-      <button
-        type="button"
-        class="h-[26px] cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 text-sm font-semibold leading-none text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
-        aria-label="Add vendor agent"
-        aria-haspopup="menu"
-        aria-expanded={vendorMenuOpen}
-        title="Add vendor agent"
-        onclick={(e) => toggleVendorMenu(e)}
-        onpointerdown={(e) => e.stopPropagation()}
-      >+</button>
-      {#if vendorMenuOpen}
-        <div
-          class="fixed z-[200] grid min-w-[200px] gap-0.5 rounded-lg border border-white/12 bg-studio-elevated p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
-          role="menu"
-          style={vendorMenuStyle}
-        >
-          {#if !app.activeProject}
-            <p class="mx-1.5 my-1 text-[10px] leading-snug text-studio-text-dim">Open a project first.</p>
-          {:else if vendorAvailable.length === 0}
-            <p class="mx-1.5 my-1 text-[10px] leading-snug text-studio-text-dim">All vendor agents already open.</p>
-          {:else}
-            {#each vendorAvailable as cli (cli.id)}
-              <button
-                type="button"
-                class="flex cursor-pointer justify-between gap-2 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-xs text-studio-text hover:bg-white/6 hover:text-white"
-                role="menuitem"
-                onclick={() => void addVendorTab(cli.id)}
-              >
-                {cli.label}
-                <code class="font-mono text-[10px] text-studio-text-dim">{cli.command}</code>
-              </button>
-            {/each}
-          {/if}
-          <p class="mx-1.5 my-1 text-[10px] leading-snug text-studio-text-dim">
-            Model/base URL dari Settings
-            {#if app.provider}
-              · <code class="font-mono text-[10px]">{app.provider.model}</code>
-            {/if}
-          </p>
-        </div>
-      {/if}
+    <div class="relative ml-auto flex-none self-center">
+      <Dropdown
+        items={vendorMenuItems}
+        label="Add vendor"
+        align="end"
+        onSelect={(id) => {
+          if (id === '_none') return
+          openVendorConfig(id as VendorKind)
+        }}
+      >
+        {#snippet trigger({ open, toggle })}
+          <button
+            type="button"
+            class="h-[26px] cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 text-sm font-semibold leading-none text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
+            aria-label="Add vendor agent"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title="Add vendor agent"
+            onclick={(e) => {
+              e.stopPropagation()
+              toggle()
+            }}
+          >+</button>
+        {/snippet}
+      </Dropdown>
     </div>
   </div>
   <div
@@ -1428,7 +1452,7 @@
       </div>
     {/if}
     {#if app.ask && !app.messages.some((m) => m.tool?.callId === app.ask?.toolCallId || m.tool?.callId === app.ask?.requestId)}
-      <div class="mb-3 overflow-hidden rounded-lg border border-studio-lavender/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
+      <div class="mb-3 overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card">
         <div class="flex items-center justify-between gap-3 border-b border-studio-lavender/20 bg-studio-lavender/10 px-4 py-2">
           <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-lavender">
             <span>Question</span>
@@ -1436,7 +1460,7 @@
               <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
             {/if}
           </div>
-          <span class="text-[9px] font-bold uppercase tracking-widest text-studio-lavender/60">ask_user</span>
+          <span class="text-[10px] font-medium text-studio-text-dim">ask_user</span>
         </div>
         <div class="p-5">
           <p class="mb-4 text-xs leading-relaxed text-studio-text">{app.ask.question}</p>
@@ -1494,7 +1518,7 @@
         <div class="grid gap-0.5">
           {#each app.run.tasks as task (task.id)}
             <div class="flex min-h-[25px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] {task.status === 'running' ? 'bg-studio-violet/10 text-studio-text' : task.status === 'completed' ? 'text-white/34' : 'text-white/50'}">
-              <span class="size-1.5 shrink-0 rounded-lg {task.status === 'running' ? 'bg-studio-violet shadow-[0_0_0_3px_var(--color-studio-violet)/20]' : task.status === 'completed' ? 'bg-studio-success-soft' : 'bg-white/20'}"></span>
+              <span class="size-1.5 shrink-0 rounded-full {task.status === 'running' ? 'bg-studio-gold studio-signal' : task.status === 'completed' ? 'bg-studio-success' : 'bg-white/20'}"></span>
               <div class="flex min-w-0 flex-col">
                 <span class="truncate">{task.title}</span>
                 {#if task.detail}<small class="truncate text-[8px] text-white/32 normal-case opacity-55">{task.detail}</small>{/if}
@@ -1561,7 +1585,7 @@
         {#if g.kind === 'user'}
           <div class="flex justify-end">
             <div
-              class="flex max-w-[70%] flex-col gap-2.5 break-words rounded-lg rounded-tr-none border border-border-subtle bg-studio-card/80 p-4 text-sm leading-relaxed"
+              class="flex max-w-[70%] flex-col gap-2 break-words rounded-lg border border-border-subtle bg-studio-card px-3 py-2.5 text-[13px] leading-relaxed"
             >
               {#if g.m.text}<div class="whitespace-pre-wrap">{g.m.text}</div>{/if}
             </div>
@@ -1589,29 +1613,29 @@
                   {@const pending = pendingForTool(m.tool.callId)}
                   {@const askPending = pendingAskForTool(m.tool.callId)}
                   {#if askPending}
-                    <div class="overflow-hidden rounded-lg border border-studio-lavender/35 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
-                      <div class="flex items-center justify-between gap-3 border-b border-studio-lavender/20 bg-studio-lavender/10 px-4 py-2">
-                        <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-lavender">
+                    <div class="overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card">
+                      <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
+                        <div class="flex items-center gap-2 text-[11px] font-semibold text-studio-lavender">
                           <span>Question</span>
                           {#if app.pendingAsks.length > 1}
-                            <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
+                            <span class="text-[10px] text-studio-text-dim">{app.pendingAsks.length} pending</span>
                           {/if}
                         </div>
-                        <span class="text-[9px] font-bold uppercase tracking-widest text-studio-lavender/60">ask_user</span>
+                        <span class="text-[10px] font-medium text-studio-text-dim">ask_user</span>
                       </div>
-                      <div class="p-5">
-                        <p class="mb-4 text-xs leading-relaxed text-studio-text">{askPending.question}</p>
+                      <div class="p-3">
+                        <p class="mb-3 text-[13px] leading-relaxed text-studio-text">{askPending.question}</p>
                         {#if askPending.options?.length}
-                          <div class="mb-3 flex flex-wrap gap-2">
+                          <div class="mb-2.5 flex flex-wrap gap-1.5">
                             {#each askPending.options as opt (opt)}
-                              <button type="button" class="min-w-[120px] flex-1 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
+                              <button type="button" class="min-w-[100px] flex-1 rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
                             {/each}
                           </div>
                         {/if}
-                        <div class="grid grid-cols-[1fr_auto] gap-2">
+                        <div class="grid grid-cols-[1fr_auto] gap-1.5">
                           <input
                             type="text"
-                            class="min-h-[42px] w-full rounded-lg border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-studio-lavender/55"
+                            class="min-h-9 w-full rounded-md border border-border-subtle bg-studio-dark px-2.5 py-2 text-[12px] text-studio-text outline-none focus:border-studio-purple/60"
                             placeholder="Type an answer…"
                             value={askDraft(askPending.requestId)}
                             oninput={(e) => setAskDraft(askPending.requestId, (e.currentTarget as HTMLInputElement).value)}
@@ -1624,7 +1648,7 @@
                           />
                           <button
                             type="button"
-                            class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
+                            class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105 disabled:opacity-40"
                             disabled={!askDraft(askPending.requestId).trim()}
                             onclick={() => submitAsk(askPending.requestId)}
                           >Submit</button>
@@ -1632,9 +1656,9 @@
                       </div>
                     </div>
                   {:else if pending}
-                    <div class="overflow-hidden rounded-lg border border-studio-gold/30 bg-studio-dark shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
-                      <div class="flex items-center justify-between gap-3 border-b border-studio-gold/20 bg-studio-gold/10 px-4 py-2">
-                        <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-gold">
+                    <div class="overflow-hidden rounded-lg border border-studio-gold/35 bg-studio-card">
+                      <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
+                        <div class="flex items-center gap-2 text-[11px] font-semibold text-studio-gold">
                           <svg class="size-4 shrink-0 text-studio-gold" width="16" height="16" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
                             <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                           </svg>
@@ -1643,47 +1667,47 @@
                             <span class="text-[9px] text-studio-gold/75">{app.pendingApprovals.length} pending</span>
                           {/if}
                         </div>
-                        <span class="text-[9px] font-bold uppercase tracking-widest text-studio-gold/60">{approvalKind(pending.name)}</span>
+                        <span class="text-[10px] font-medium text-studio-text-dim">{approvalKind(pending.name)}</span>
                       </div>
-                      <div class="p-5">
-                        <p class="mb-4 text-xs leading-relaxed text-studio-text">
-                          <span class="font-bold text-studio-purple">enpii</span> wants to {approvalVerb(pending.name)}
-                          <code class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[12px] text-studio-lavender-bright">{approvalPath(pending)}</code>
+                      <div class="p-3">
+                        <p class="mb-3 text-[13px] leading-relaxed text-studio-text">
+                          <span class="font-semibold text-studio-lavender">enpii</span> wants to {approvalVerb(pending.name)}
+                          <code class="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-studio-text">{approvalPath(pending)}</code>
                         </p>
                         {#if pending.preview}
                           {#if isUnifiedDiff(pending.preview)}
-                            <div class="mb-5 max-h-55 overflow-auto rounded-lg border border-white/6 bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug">
+                            <div class="mb-3 max-h-52 overflow-auto rounded-md border border-border-subtle bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug">
                               {#each pending.preview.split('\n') as line, li (`d-${li}`)}
-                                <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-3 {diffLineClass(line)}">{line || ' '}</div>
+                                <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-2.5 {diffLineClass(line)}">{line || ' '}</div>
                               {/each}
                             </div>
                           {:else}
-                            <pre class="mb-5 max-h-35 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/35 p-3 font-mono text-[11px] text-studio-text-dim">{pending.preview}</pre>
+                            <pre class="mb-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-studio-dark p-2.5 font-mono text-[11px] text-studio-text-dim">{pending.preview}</pre>
                           {/if}
                         {/if}
-                        <div class="grid grid-cols-2 gap-4">
-                          <button type="button" class="rounded-lg bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondApproval('deny', pending.requestId)}>Deny</button>
-                          <button type="button" class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondApproval('allow', pending.requestId)}>{approvalButton(pending.name)}</button>
-                          <button type="button" class="col-span-2 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Auto-allow this action kind for the rest of the session" onclick={() => void respondApproval('allow', pending.requestId, 'session')}>Allow for session</button>
+                        <div class="grid grid-cols-2 gap-2">
+                          <button type="button" class="rounded-md border border-border-subtle px-3 py-2 text-[12px] font-medium text-studio-text hover:bg-white/[0.04]" onclick={() => void respondApproval('deny', pending.requestId)}>Deny</button>
+                          <button type="button" class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => void respondApproval('allow', pending.requestId)}>{approvalButton(pending.name)}</button>
+                          <button type="button" class="col-span-2 rounded-md border border-studio-gold/30 bg-studio-gold/10 px-3 py-2 text-[12px] font-semibold text-studio-gold hover:bg-studio-gold/15" title="Auto-allow this action kind for the rest of the session" onclick={() => void respondApproval('allow', pending.requestId, 'session')}>Allow for session</button>
                         </div>
                         {#if app.pendingApprovals.length > 1 && app.pendingApprovals[0]?.requestId === pending.requestId}
-                          <div class="mt-3 grid grid-cols-2 gap-2 border-t border-studio-gold/15 pt-3">
-                            <button type="button" class="rounded-lg bg-studio-grey px-4 py-3 text-sm font-medium text-studio-text hover:brightness-110" onclick={() => void respondAllApprovals('deny')}>Deny all ({app.pendingApprovals.length})</button>
-                            <button type="button" class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => void respondAllApprovals('allow')}>Allow all ({app.pendingApprovals.length})</button>
-                            <button type="button" class="col-span-2 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" title="Allow these kinds for the rest of the session" onclick={() => void respondAllApprovals('allow', 'session')}>Allow all for session</button>
+                          <div class="mt-2.5 grid grid-cols-2 gap-2 border-t border-border-subtle pt-2.5">
+                            <button type="button" class="rounded-md border border-border-subtle px-3 py-2 text-[12px] font-medium text-studio-text hover:bg-white/[0.04]" onclick={() => void respondAllApprovals('deny')}>Deny all ({app.pendingApprovals.length})</button>
+                            <button type="button" class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => void respondAllApprovals('allow')}>Allow all ({app.pendingApprovals.length})</button>
+                            <button type="button" class="col-span-2 rounded-md border border-studio-gold/30 bg-studio-gold/10 px-3 py-2 text-[12px] font-semibold text-studio-gold hover:bg-studio-gold/15" title="Allow these kinds for the rest of the session" onclick={() => void respondAllApprovals('allow', 'session')}>Allow all for session</button>
                           </div>
                         {/if}
                       </div>
                     </div>
                   {:else if isTerminalTool(m.tool.name)}
-                    <details class="rounded-r-lg border-l-2 bg-studio-shell-green font-mono text-xs {toolBorder(m.tool.status)}">
-                      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none [&::-webkit-details-marker]:hidden">
-                        <div class="flex min-w-0 items-center gap-3">
-                          <span class="size-2 shrink-0 rounded-lg {toolDot(m.tool.status)}"></span>
-                          <span class="shrink-0 font-bold text-studio-success-bright">tool:{m.tool.name}</span>
+                    <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}">
+                      <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 select-none [&::-webkit-details-marker]:hidden">
+                        <div class="flex min-w-0 items-center gap-2">
+                          <span class="size-1.5 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
+                          <span class="shrink-0 font-semibold text-studio-success-bright">tool:{m.tool.name}</span>
                           <span class="truncate font-mono text-studio-text-dim">{shellCommand(m)}</span>
                         </div>
-                        <span class="shrink-0 text-[10px] uppercase tracking-widest text-studio-text-dim">{statusLabel(m, false)}</span>
+                        <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
                       <div class="flex items-center gap-2 px-3 pb-2 font-mono text-[11px]">
                         <span class="shrink-0 text-studio-success-bright">$</span>
@@ -1710,21 +1734,21 @@
                       {/if}
                     </details>
                   {:else}
-                    <details class="rounded-r-lg border-l-2 bg-studio-dark/40 font-mono text-xs {toolBorder(m.tool.status)}">
-                      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none [&::-webkit-details-marker]:hidden">
-                        <div class="flex min-w-0 items-center gap-3">
-                          <span class="size-2 shrink-0 rounded-lg {toolDot(m.tool.status)}"></span>
-                          <span class="shrink-0 font-bold {toolAccent(m.tool.status)}">tool:{m.tool.name}</span>
+                    <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}">
+                      <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 select-none [&::-webkit-details-marker]:hidden">
+                        <div class="flex min-w-0 items-center gap-2">
+                          <span class="size-1.5 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
+                          <span class="shrink-0 font-semibold {toolAccent(m.tool.status)}">tool:{m.tool.name}</span>
                           <span class="truncate text-studio-text-dim">{toolLabel(m)}</span>
                         </div>
-                        <span class="shrink-0 text-[10px] uppercase tracking-widest text-studio-text-dim">{statusLabel(m, false)}</span>
+                        <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
                       {#if m.tool.preview && m.tool.status !== 'running'}
-                        <pre class="m-0 max-h-40 overflow-auto px-4 pb-4 text-[11px] whitespace-pre-wrap break-words text-studio-text/75">{m.tool.preview}</pre>
+                        <pre class="m-0 max-h-40 overflow-auto px-3 pb-2.5 text-[11px] whitespace-pre-wrap break-words text-studio-text/75">{m.tool.preview}</pre>
                       {:else if m.tool.status === 'running'}
-                        <div class="px-4 pb-4 text-[11px] text-studio-text-dim">Running…</div>
+                        <div class="px-3 pb-2.5 text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
-                        <div class="px-4 pb-4 text-[11px] text-studio-text-dim">No output</div>
+                        <div class="px-3 pb-2.5 text-[11px] text-studio-text-dim">No output</div>
                       {/if}
                     </details>
                   {/if}
@@ -1738,9 +1762,9 @@
   {/if}
 </div>
 
-<footer class="row-start-3 shrink-0 px-6 pb-6 pt-2 {agentPane !== 'enpii' ? 'hidden' : ''}">
+<footer class="row-start-3 shrink-0 px-4 pb-4 pt-1 {agentPane !== 'enpii' ? 'hidden' : ''}">
   <div
-    class="composer-inner relative flex flex-col gap-4 rounded-lg border border-studio-purple/25 bg-studio-dark/60 p-4 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--color-studio-lavender)_8%,transparent)] transition-[border-color,box-shadow] duration-150 focus-within:border-studio-purple/55 focus-within:shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-studio-purple)_35%,transparent)]"
+    class="composer-inner relative flex flex-col gap-3 rounded-lg border border-border-subtle bg-studio-dark p-3 transition-colors duration-100 focus-within:border-studio-purple/50"
     role="group"
     aria-label="Message composer"
   >
@@ -1768,7 +1792,7 @@
           options={[...COMPOSER_MODES]}
           ariaLabel="Composer mode"
           title="Shift+Tab: cycle composer mode"
-          class="w-[92px] min-w-0 [&_button]:min-h-7 [&_button]:rounded-lg [&_button]:border-studio-purple/30 [&_button]:bg-studio-purple/15 [&_button]:px-2 [&_button]:py-1 [&_button]:text-[9px] [&_button]:text-studio-lavender-muted"
+          class="min-w-0 w-auto [&>button]:min-h-7 [&>button]:w-auto [&>button]:rounded-lg [&>button]:border-studio-purple/30 [&>button]:bg-studio-purple/15 [&>button]:px-2.5 [&>button]:py-1 [&>button]:text-[11px] [&>button]:text-studio-lavender-muted"
           disabled={app.busy}
           onChange={(value) => void changeComposerMode(value)}
         />
@@ -1799,14 +1823,14 @@
       </div>
       <button
         type="button"
-        class="flex items-center gap-2 rounded-lg bg-studio-gold px-4 py-2.5 pl-5 text-sm font-bold text-studio-dark shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-studio-gold)_40%,transparent)] transition-[filter,box-shadow] duration-150 hover:brightness-105 hover:shadow-[0_0_20px_color-mix(in_srgb,var(--color-studio-gold)_28%,transparent)] disabled:opacity-45 disabled:hover:shadow-none {app.busy
+        class="flex items-center gap-1.5 rounded-md bg-studio-gold px-3 py-1.5 text-[12px] font-semibold text-studio-dark hover:brightness-105 disabled:opacity-40 {app.busy
           ? 'studio-signal'
           : ''}"
         onclick={onSend}
         disabled={!app.activeProject || app.busy}
       >
         {app.busy ? 'Running…' : 'Send'}
-        <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
           <path
             d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z"
           ></path>
@@ -1815,7 +1839,7 @@
     </div>
     {#if activeMention && (mentionResults.length > 0 || mentionLoading)}
       <div
-        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-lg border border-white/12 bg-studio-elevated p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        class="absolute bottom-[calc(100%+8px)] left-3 z-10 max-h-56 w-[min(420px,calc(100%-24px))] overflow-y-auto rounded-lg border border-border-subtle bg-studio-popover p-1"
         role="listbox"
         aria-label="File references"
       >
@@ -1843,7 +1867,7 @@
       </div>
     {:else if slashSuggestions.length > 0}
       <div
-        class="absolute bottom-[calc(100%+8px)] left-4 z-10 max-h-56 w-[min(420px,calc(100%-32px))] overflow-y-auto rounded-lg border border-white/12 bg-studio-elevated p-1 shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+        class="absolute bottom-[calc(100%+8px)] left-3 z-10 max-h-56 w-[min(420px,calc(100%-24px))] overflow-y-auto rounded-lg border border-border-subtle bg-studio-popover p-1"
         role="listbox"
         aria-label="Slash commands"
       >
@@ -1871,7 +1895,7 @@
       {@const preview = app.attachments.find((file) => file.id === attachmentPreviewId)}
       {#if preview}
         <section
-          class="absolute bottom-[74px] left-4 z-16 w-[min(500px,calc(100%-32px))] overflow-hidden rounded-lg border border-white/11 bg-studio-elevated shadow-[0_18px_50px_rgba(0,0,0,0.56)]"
+          class="absolute bottom-[74px] left-3 z-16 w-[min(500px,calc(100%-24px))] overflow-hidden rounded-lg border border-border-subtle bg-studio-popover"
         >
           <header class="flex items-center gap-2 border-b border-white/7 px-2.5 py-2">
             <strong class="min-w-0 truncate text-[10px] text-studio-text">{preview.name}</strong>
@@ -1922,10 +1946,36 @@
   onConfirm={() => void confirmCheckpointAction()}
 />
 
-<svelte:window
-  onkeydown={(e) => {
-    onVendorMenuKey(e)
-    onWindowKeydown(e)
-  }}
-  onpointerdown={onVendorMenuOutside}
-/>
+<Modal
+  open={vendorConfigOpen}
+  title={vendorConfigKind
+    ? `Launch ${VENDOR_CLIS.find((c) => c.id === vendorConfigKind)?.label ?? vendorConfigKind}`
+    : 'Launch vendor'}
+  size="md"
+  onClose={closeVendorConfig}
+>
+  <div class="flex flex-col gap-3">
+    <TextInput label="Base URL" bind:value={vendorConfig.baseUrl} placeholder="https://…" autocomplete="off" />
+    <TextInput
+      label="API key"
+      type="password"
+      bind:value={vendorConfig.apiKey}
+      placeholder={app.provider?.hasKey ? 'Leave blank to use Settings key' : 'sk-…'}
+      autocomplete="off"
+    />
+    <SmartSelect
+      label="Model"
+      bind:value={vendorConfig.model}
+      options={vendorModelOptions}
+      disabled={!vendorModelOptions.length}
+    />
+  </div>
+  {#snippet footer()}
+    <div class="flex justify-end gap-2">
+      <Button variant="ghost" size="sm" onclick={closeVendorConfig}>Cancel</Button>
+      <Button variant="primary" size="sm" loading={vendorBusy} onclick={() => void confirmVendorConfig()}>Launch</Button>
+    </div>
+  {/snippet}
+</Modal>
+
+<svelte:window onkeydown={onWindowKeydown} />

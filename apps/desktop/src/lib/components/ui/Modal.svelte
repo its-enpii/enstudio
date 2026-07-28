@@ -56,7 +56,7 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]"
+    class="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4"
     role="presentation"
     onclick={(e) => {
       if (closeOnBackdrop && e.target === e.currentTarget) close()

@@ -67,17 +67,25 @@
     const vh = window.innerHeight
     const gap = 4
     const searchH = showSearch ? 40 : 0
-    const maxH = Math.min(320, filtered.length * 52 + 12 + searchH)
-    let top = r.bottom + gap
+    const estH = Math.min(320, filtered.length * 44 + 8 + searchH)
+    const spaceBelow = vh - r.bottom - 8
+    const spaceAbove = r.top - 8
+    // Flip up when not enough room below (composer sits at bottom)
+    const openAbove = spaceBelow < Math.min(estH, 160) && spaceAbove > spaceBelow
     let left = r.left
-    let width = Math.max(r.width, 180)
-    if (top + maxH > vh - 8 && r.top - gap - maxH > 8) {
-      top = r.top - gap - maxH
-    }
+    let width = Math.max(r.width, 200)
     if (left + width > vw - 8) left = Math.max(8, vw - width - 8)
     if (left < 8) left = 8
-    if (top < 8) top = 8
-    menuStyle = `top:${Math.round(top)}px;left:${Math.round(left)}px;width:${Math.round(width)}px;max-height:${Math.round(maxH)}px`
+    if (openAbove) {
+      // Anchor bottom edge to trigger top — no phantom gap from max-height
+      const bottom = vh - r.top + gap
+      const maxH = Math.min(320, spaceAbove - gap)
+      menuStyle = `bottom:${Math.round(bottom)}px;left:${Math.round(left)}px;width:${Math.round(width)}px;max-height:${Math.round(maxH)}px;top:auto`
+    } else {
+      const top = Math.max(8, r.bottom + gap)
+      const maxH = Math.min(320, spaceBelow - gap)
+      menuStyle = `top:${Math.round(top)}px;left:${Math.round(left)}px;width:${Math.round(width)}px;max-height:${Math.round(maxH)}px;bottom:auto`
+    }
   }
 
   function close(): void {
@@ -210,7 +218,7 @@
 
   {#if open}
     <div
-      class="fixed z-[200] flex flex-col overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card shadow-[0_16px_40px_rgba(0,0,0,0.55)] outline-none"
+      class="fixed z-[200] flex flex-col overflow-hidden rounded-lg border border-border-subtle bg-studio-popover outline-none"
       role="listbox"
       tabindex="-1"
       bind:this={listEl}
@@ -236,21 +244,24 @@
           <div class="px-2.5 py-3 text-center text-[12px] text-studio-text-dim">No matches</div>
         {:else}
           {#each filtered as opt, i (opt.value)}
+            {@const selected = opt.value === value}
+            {@const active = i === activeIdx}
             <button
               type="button"
-              class="flex w-full flex-col gap-0.5 rounded-sm px-2.5 py-2 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 {opt.value ===
-              value
-                ? 'text-white'
-                : 'text-studio-text'} {i === activeIdx ? 'bg-studio-purple/25' : 'hover:bg-studio-purple/25'}"
+              class="flex w-full flex-col gap-0 rounded-md px-2.5 py-1.5 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 {selected
+                ? 'bg-studio-purple/35 text-white'
+                : active
+                  ? 'bg-white/8 text-studio-text'
+                  : 'text-studio-text hover:bg-white/6'}"
               role="option"
-              aria-selected={opt.value === value}
+              aria-selected={selected}
               disabled={opt.disabled}
               onmouseenter={() => (activeIdx = i)}
               onclick={() => pick(opt)}
             >
-              <span class="font-medium">{opt.label}</span>
+              <span class="font-medium leading-snug">{opt.label}</span>
               {#if opt.description}
-                <span class="text-[11px] text-studio-text-dim">{opt.description}</span>
+                <span class="text-[11px] leading-snug {selected ? 'text-white/65' : 'text-studio-text-dim'}">{opt.description}</span>
               {/if}
             </button>
           {/each}

@@ -154,7 +154,7 @@
     }}
   >
     <div
-      class="w-full max-w-lg overflow-hidden rounded-lg border border-border-subtle bg-studio-card shadow-2xl"
+      class="studio-glass w-full max-w-lg overflow-hidden rounded-2xl bg-studio-panel/95"
       role="dialog"
       aria-modal="true"
       aria-label="Command Palette"
