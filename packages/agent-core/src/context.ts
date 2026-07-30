@@ -2,13 +2,32 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { projectHash } from './persist.js'
 
 export interface SkillCatalogEntry {
   name: string
   description: string
-  source: 'project' | 'global'
+  source: 'project' | 'global' | 'bundled'
   path: string
+}
+
+/** Packaged default coding skills (review, test, commit, verify, create-skill, route, …). Overridden by global/project same name. */
+export function bundledSkillsDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  // Prefer package root skills/ (dev + shipped extraResources). Fallback dist/skills after copy.
+  const candidates = [
+    path.resolve(here, '..', 'skills'),
+    path.resolve(here, 'skills'),
+  ]
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return dir
+    } catch {
+      /* try next */
+    }
+  }
+  return candidates[0]!
 }
 
 export interface LoadedSkill {
@@ -461,7 +480,7 @@ export function ensureEnpiiDir(root: string): { created: boolean; path: string }
     // No secrets — project overlay only (model/dialect/denyGlobs optional).
     fs.writeFileSync(
       configToml,
-      '# Project enpii config (optional overrides; no API keys)\n# model = "enpii"\n# dialect = "openai"\n# permissionMode = "ask"\n# denyGlobs = [".env", "**/*secret*"]\n',
+      '# Project enpii config (optional overrides; no API keys)\n# model = "enpii"\n# dialect = "openai"\n# permissionMode = "ask"\n# denyGlobs = [".env", "**/*secret*"]\n#\n# Claude-style allow rules (skip approval when match):\n# [permissions]\n# allow = [\n#   "run_shell(npm *)",\n#   "run_shell(git *)",\n#   "web_fetch(domain:github.com)",\n#   "web_search",\n# ]\n',
       'utf8',
     )
     created = true
@@ -495,7 +514,9 @@ export function discoverProjectContext(root: string, prompt = '', options?: {
   const projectSnapshot = buildProjectSnapshot(root)
   const memoryExcerpts = options?.loadMemory === false ? undefined : loadMemoryExcerpts(root, homeDir)
   const merged = new Map<string, ParsedSkill>()
+  // Order: bundled → global → project (later wins on same name).
   for (const [skillsRoot, source] of [
+    [bundledSkillsDir(), 'bundled'],
     [path.join(homeDir, '.enpiistudio', 'skills'), 'global'],
     [path.join(root, '.enpii', 'skills'), 'project'],
   ] as const) {
@@ -532,12 +553,53 @@ export function discoverProjectContext(root: string, prompt = '', options?: {
   return context
 }
 
+/** What run_shell actually spawns (Node shell:true → ComSpec on win32). */
+export function shellRuntimeLines(): string[] {
+  const platform = process.platform
+  if (platform === 'win32') {
+    const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
+    const shellName = /powershell/i.test(comspec)
+      ? 'PowerShell'
+      : /cmd\.exe/i.test(comspec)
+        ? 'cmd.exe'
+        : path.basename(comspec)
+    return [
+      `shell: ${shellName} (ComSpec=${comspec})`,
+      'run_shell rules (Windows):',
+      '- Default is cmd.exe syntax — NOT PowerShell unless ComSpec is powershell.',
+      '- Do NOT use Select-Object, Select-String, Get-ChildItem, ForEach-Object, $_ , or | pipelines that assume PowerShell.',
+      '- Prefer: dir, type, findstr, where, npm/npx/git with plain args.',
+      '- Need PowerShell? Wrap explicitly: powershell -NoProfile -Command "..."',
+      '- Paths: use project-relative or quoted Windows paths; avoid Unix-only tools (grep/sed/awk) unless installed.',
+    ]
+  }
+  if (platform === 'darwin') {
+    return [
+      'shell: /bin/sh via shell:true (typically bash/zsh-compatible sh)',
+      'run_shell rules (macOS): non-interactive; prefer POSIX; no Select-Object/PowerShell cmdlets.',
+    ]
+  }
+  return [
+    'shell: /bin/sh via shell:true',
+    'run_shell rules (Linux): non-interactive POSIX sh; no PowerShell cmdlets.',
+  ]
+}
+
 export function projectContextPrompt(context: ProjectContext, runtime: {
   workspaceRoot: string
   permissionMode: string
 }): string {
   const sections = [
-    `Runtime:\n- workspaceRoot: ${path.resolve(runtime.workspaceRoot)}\n- permissionMode: ${runtime.permissionMode}\n- platform: ${process.platform}\n- date: ${new Date().toISOString()}`,
+    [
+      'Runtime:',
+      `- workspaceRoot: ${path.resolve(runtime.workspaceRoot)}`,
+      `- permissionMode: ${runtime.permissionMode}`,
+      `- platform: ${process.platform}`,
+      `- arch: ${process.arch}`,
+      `- node: ${process.version}`,
+      `- date: ${new Date().toISOString()}`,
+      ...shellRuntimeLines().map((line) => (line.startsWith('run_shell') || line.startsWith('-') ? line : `- ${line}`)),
+    ].join('\n'),
   ]
   if (context.projectInstructions) sections.push(`Project instructions (.enpii/AGENT.md):\n${context.projectInstructions}`)
   // Snapshot always present for chat-default; skip if AGENT.md already embeds the same auto brief.

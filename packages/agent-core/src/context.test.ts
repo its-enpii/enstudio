@@ -53,10 +53,11 @@ test('discovers AGENT.md and project skill overrides global skill', () => {
 
     const context = discoverProjectContext(root, '/skill review', { homeDir: home })
     assert.equal(context.projectInstructions, 'Use Indonesian.\nKeep diffs small.')
-    assert.deepEqual(context.skills.map((skill) => [skill.name, skill.source]), [
-      ['review', 'project'],
-      ['test', 'project'],
-    ])
+    const byName = Object.fromEntries(context.skills.map((s) => [s.name, s.source]))
+    assert.equal(byName.review, 'project')
+    assert.equal(byName.test, 'project')
+    // Bundled defaults still listed unless fully overridden
+    assert.ok(byName.commit === 'bundled' || byName.debug === 'bundled')
     assert.deepEqual(context.loadedSkills, [{ name: 'review', body: 'PROJECT REVIEW BODY' }])
     assert.ok(context.fingerprint)
 
@@ -71,7 +72,7 @@ test('discovers AGENT.md and project skill overrides global skill', () => {
     assert.ok(fs.existsSync(state))
     const saved = JSON.parse(fs.readFileSync(state, 'utf8')) as { fingerprint?: string; skills?: unknown[] }
     assert.equal(saved.fingerprint, context.fingerprint)
-    assert.equal(saved.skills?.length, 2)
+    assert.ok((saved.skills?.length ?? 0) >= 2)
   } finally {
     cleanup()
   }
@@ -87,8 +88,11 @@ test('does not follow skill or AGENT.md symlinks', () => {
 
     const context = discoverProjectContext(root, '/skill outside', { homeDir: home, persist: false })
     assert.equal(context.projectInstructions, undefined)
-    assert.equal(context.skills.length, 0)
+    // Bundled defaults still load; symlinked project skill must not.
+    assert.ok(context.skills.every((s) => s.source === 'bundled'))
+    assert.ok(!context.skills.some((s) => s.name === 'outside'))
     assert.equal(context.loadedSkills.length, 0)
+    assert.doesNotMatch(projectContextPrompt(context, { workspaceRoot: root, permissionMode: 'ask' }), /OUTSIDE SECRET/)
   } finally {
     cleanup()
   }

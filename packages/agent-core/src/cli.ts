@@ -19,6 +19,15 @@ import {
   undoCompactRuntime,
   type SessionRuntime,
 } from './loop.js'
+import { approvePlan, latestPlan, listPlans, readPlan, rejectPlan } from './plans.js'
+import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from './tasks.js'
+import { mailboxPeek, mailboxReceive, mailboxSend } from './mailbox.js'
+import {
+  applySubAgentWorktree,
+  discardSubAgentWorktree,
+  getSubAgent,
+  listSubAgents,
+} from './subagent.js'
 import type { HealthResult } from './types.js'
 import type { ChatMessage } from './provider/openai.js'
 import { runTool } from './tools/run.js'
@@ -37,16 +46,18 @@ import {
   mcpGetPrompt,
   mcpListPrompts,
   mcpListResources,
-  mcpListServers,
   mcpListTools,
   mcpReadResource,
 } from './mcp.js'
 import {
+  canFireCron,
   cronCreate,
   cronDelete,
   cronList,
   cronMarkRan,
   cronToggle,
+  CRON_MAX_RUNTIME_MS,
+  recordCronFire,
   startCronScheduler,
   stopCronScheduler,
   type DueCronJob,
@@ -191,15 +202,20 @@ async function main(): Promise<void> {
     const existing = runtimes.get(sessionId)
     if (existing) {
       existing.meta = meta
+      existing.allowRules = provider.allowRules
       // Prefer longer transcript (disk may be newer after restart)
       if (messages.length >= existing.messages.length) {
         existing.messages = messages
       }
       return existing
     }
-    const runtime: SessionRuntime = { meta, messages }
+    const runtime: SessionRuntime = { meta, messages, allowRules: provider.allowRules }
     runtimes.set(sessionId, runtime)
     return runtime
+  }
+
+  function syncAllowRulesToRuntimes(): void {
+    for (const rt of runtimes.values()) rt.allowRules = provider.allowRules
   }
 
   rpc.on('health', (): HealthResult => ({
@@ -228,8 +244,9 @@ async function main(): Promise<void> {
     })
     // Reload with project overlay when provided
     if (projectRoot) provider = loadProviderConfig(path.resolve(projectRoot))
+    syncAllowRulesToRuntimes()
     console.error(
-      `[enpii] config updated model=${provider.model} base=${provider.baseUrl} key=${provider.apiKey ? 'yes' : 'no'} mode=${provider.permissionMode}`,
+      `[enpii] config updated model=${provider.model} base=${provider.baseUrl} key=${provider.apiKey ? 'yes' : 'no'} mode=${provider.permissionMode} allow=${provider.allowRules?.length ?? 0}`,
     )
     return publicConfig(provider)
   })
@@ -249,11 +266,12 @@ async function main(): Promise<void> {
             headerKeys: cfg.headers ? Object.keys(cfg.headers) : [],
           }
         }
+        const stdio = cfg as { command: string; args?: string[] }
         return {
           name,
           transport: 'stdio' as const,
-          command: cfg.command,
-          args: cfg.args ?? [],
+          command: stdio.command,
+          args: stdio.args ?? [],
         }
       }),
     }
@@ -752,7 +770,7 @@ async function main(): Promise<void> {
     if (!p.path) throw new Error('path is required')
     const base = path.resolve(p.projectRoot)
     const target = path.resolve(p.path)
-    let list
+    let list: ReturnType<typeof gitWorktreeList> = []
     try {
       list = gitWorktreeRemove(base, target, Boolean(p.force))
     } catch (err) {
@@ -1300,6 +1318,7 @@ async function main(): Promise<void> {
             prompt_tokens: sessionUsage.prompt,
             completion_tokens: sessionUsage.completion,
             total_tokens: sessionUsage.total,
+            cached_tokens: sessionUsage.cached ?? 0,
           },
         })
       }
@@ -1487,6 +1506,8 @@ async function main(): Promise<void> {
       requestId?: string
       decision?: 'allow' | 'deny'
       scope?: 'once' | 'session'
+      editedArgs?: string
+      reason?: string
     }
     if (!p.sessionId) throw new Error('sessionId is required')
     if (!p.requestId) throw new Error('requestId is required')
@@ -1496,9 +1517,12 @@ async function main(): Promise<void> {
     const scope = p.scope === 'session' ? 'session' : 'once'
     const runtime = runtimes.get(p.sessionId)
     if (!runtime) throw new Error(`session not running: ${p.sessionId}`)
-    const ok = resolveApproval(runtime, p.requestId, p.decision, scope)
-    if (!ok) throw new Error(`no pending approval: ${p.requestId}`)
-    return { ok: true, decision: p.decision, scope }
+    const ok = resolveApproval(runtime, p.requestId, p.decision, scope, {
+      editedArgs: typeof p.editedArgs === 'string' ? p.editedArgs : undefined,
+      reason: typeof p.reason === 'string' ? p.reason : undefined,
+    })
+    // Idempotent: already settled (double-click / sibling cleared by session grant) is OK.
+    return { ok: true, decision: p.decision, scope, settled: ok }
   })
 
   rpc.on('session.approve_all', (_method, params) => {
@@ -1551,16 +1575,139 @@ async function main(): Promise<void> {
     return { ok: true }
   })
 
+  /** Composer Plan / explicit: set runtime.planMode without a model tool call. */
+  rpc.on('session.set_plan_mode', (_method, params) => {
+    const p = (params ?? {}) as { sessionId?: string; active?: boolean }
+    if (!p.sessionId) throw new Error('sessionId is required')
+    if (typeof p.active !== 'boolean') throw new Error('active boolean required')
+    const runtime = getRuntime(p.sessionId)
+    if (!runtime) throw new Error(`session not found: ${p.sessionId}`)
+    runtime.planMode = p.active
+    rpc.notify('event', {
+      type: 'plan_mode',
+      sessionId: p.sessionId,
+      active: p.active,
+      source: 'ui',
+    })
+    return { ok: true, planMode: p.active }
+  })
+
+  rpc.on('session.plan_list', (_method, params) => {
+    const p = (params ?? {}) as { sessionId?: string; projectRoot?: string; limit?: number }
+    const root =
+      p.projectRoot?.trim() ||
+      (p.sessionId ? sessions.get(p.sessionId)?.projectRoot : undefined)
+    if (!root) throw new Error('sessionId or projectRoot required')
+    return { plans: listPlans(root, p.limit ?? 20) }
+  })
+
+  rpc.on('session.plan_latest', (_method, params) => {
+    const p = (params ?? {}) as {
+      sessionId?: string
+      projectRoot?: string
+      status?: 'draft' | 'approved' | 'rejected'
+    }
+    const root =
+      p.projectRoot?.trim() ||
+      (p.sessionId ? sessions.get(p.sessionId)?.projectRoot : undefined)
+    if (!root) throw new Error('sessionId or projectRoot required')
+    return { plan: latestPlan(root, p.status) }
+  })
+
+  rpc.on('session.plan_approve', (_method, params) => {
+    const p = (params ?? {}) as { sessionId?: string; projectRoot?: string; planId?: string }
+    const meta = p.sessionId ? sessions.get(p.sessionId) : null
+    const root = p.projectRoot?.trim() || meta?.projectRoot
+    if (!root) throw new Error('sessionId or projectRoot required')
+    const result = approvePlan(root, p.planId)
+    if (!result.ok) return result
+    // Approving exits plan mode so execution can proceed.
+    if (p.sessionId) {
+      const runtime = getRuntime(p.sessionId)
+      if (runtime) runtime.planMode = false
+      rpc.notify('event', {
+        type: 'plan_mode',
+        sessionId: p.sessionId,
+        active: false,
+        planId: result.plan.id,
+        planPath: result.plan.relPath,
+        planStatus: 'approved',
+        source: 'ui',
+      })
+    }
+    rpc.notify('event', {
+      type: 'plan_updated',
+      sessionId: p.sessionId,
+      plan: result.plan,
+    })
+    return result
+  })
+
+  rpc.on('session.plan_reject', (_method, params) => {
+    const p = (params ?? {}) as { sessionId?: string; projectRoot?: string; planId?: string }
+    const meta = p.sessionId ? sessions.get(p.sessionId) : null
+    const root = p.projectRoot?.trim() || meta?.projectRoot
+    if (!root) throw new Error('sessionId or projectRoot required')
+    const result = rejectPlan(root, p.planId)
+    if (!result.ok) return result
+    if (p.sessionId) {
+      const runtime = getRuntime(p.sessionId)
+      // Stay in plan mode after reject — user may want a new draft; still blocked for writes.
+      rpc.notify('event', {
+        type: 'plan_mode',
+        sessionId: p.sessionId,
+        active: Boolean(runtime?.planMode),
+        planId: result.plan.id,
+        planPath: result.plan.relPath,
+        planStatus: 'rejected',
+        source: 'ui',
+      })
+    }
+    rpc.notify('event', {
+      type: 'plan_updated',
+      sessionId: p.sessionId,
+      plan: result.plan,
+    })
+    return result
+  })
+
+  rpc.on('session.plan_get', (_method, params) => {
+    const p = (params ?? {}) as { sessionId?: string; projectRoot?: string; planId?: string }
+    if (!p.planId?.trim()) throw new Error('planId is required')
+    const root =
+      p.projectRoot?.trim() ||
+      (p.sessionId ? sessions.get(p.sessionId)?.projectRoot : undefined)
+    if (!root) throw new Error('sessionId or projectRoot required')
+    return { plan: readPlan(root, p.planId) }
+  })
+
   async function fireCronJob(due: DueCronJob): Promise<void> {
     const root = path.resolve(due.projectRoot)
     const job = due.job
+    const budget = canFireCron()
+    if (!budget.ok) {
+      cronMarkRan(root, job.id, { ok: false, error: budget.reason })
+      rpc.notify('event', {
+        type: 'cron_done',
+        projectRoot: root,
+        jobId: job.id,
+        name: job.name,
+        ok: false,
+        error: budget.reason,
+        budget: true,
+      })
+      return
+    }
+    recordCronFire()
     try {
       provider = loadProviderConfig(root)
       assertProviderReady(provider)
       const meta = sessions.create({
         projectRoot: root,
         title: `cron:${job.name}`,
-        permissionMode: provider.permissionMode,
+        // Cron never full-auto shell overnight: cap at autopilot_workspace.
+        permissionMode:
+          provider.permissionMode === 'full' ? 'autopilot_workspace' : provider.permissionMode,
         model: provider.model,
         dialect: provider.dialect,
       })
@@ -1578,14 +1725,18 @@ async function main(): Promise<void> {
         runtime,
         text: job.prompt,
         config: provider,
-        goal: job.prompt,
+        goal: {
+          goal: job.prompt,
+          maxRuntimeMs: CRON_MAX_RUNTIME_MS,
+          maxRepairAttempts: 0,
+        },
         emit: (event) => rpc.notify('event', event),
         setStatus: (status) => sessions.setStatus(meta.id, status),
       })
       sessions.setMessages(meta.id, runtime.messages)
       sessions.addUsage(meta.id, result.usage)
       sessions.setStatus(meta.id, 'idle')
-      cronMarkRan(root, job.id, { ok: true, sessionId: meta.id })
+      const marked = cronMarkRan(root, job.id, { ok: true, sessionId: meta.id })
       rpc.notify('event', {
         type: 'cron_done',
         sessionId: meta.id,
@@ -1593,10 +1744,11 @@ async function main(): Promise<void> {
         jobId: job.id,
         name: job.name,
         ok: true,
+        disabled: marked.disabled === true,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      cronMarkRan(root, job.id, { ok: false, error: message })
+      const marked = cronMarkRan(root, job.id, { ok: false, error: message })
       rpc.notify('event', {
         type: 'cron_done',
         projectRoot: root,
@@ -1604,9 +1756,131 @@ async function main(): Promise<void> {
         name: job.name,
         ok: false,
         error: message.slice(0, 300),
+        disabled: marked.disabled === true,
       })
     }
   }
+
+  rpc.on('board.list', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; status?: string }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    return taskList(path.resolve(p.projectRoot), { status: p.status })
+  })
+
+  rpc.on('board.get', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; taskId?: string }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = taskGet(path.resolve(p.projectRoot), String(p.taskId ?? ''))
+    if (!r.ok) throw new Error(r.content)
+    return { task: r.task }
+  })
+
+  rpc.on('board.create', (_method, params) => {
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      title?: string
+      detail?: string
+      status?: string
+      blockedBy?: string[]
+    }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = taskCreate(path.resolve(p.projectRoot), p)
+    if (!r.ok) throw new Error(r.content)
+    return { task: r.task }
+  })
+
+  rpc.on('board.update', (_method, params) => {
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      taskId?: string
+      title?: string
+      detail?: string
+      status?: string
+      note?: string
+      progress?: number
+      addBlockedBy?: string[]
+      removeBlockedBy?: string[]
+      clearBlockedBy?: boolean
+    }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = taskUpdate(path.resolve(p.projectRoot), p)
+    if (!r.ok) throw new Error(r.content)
+    return { task: r.task }
+  })
+
+  rpc.on('board.stop', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; taskId?: string }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = taskStop(path.resolve(p.projectRoot), String(p.taskId ?? ''))
+    if (!r.ok) throw new Error(r.content)
+    return { task: r.task }
+  })
+
+  rpc.on('mailbox.peek', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; agentId?: string; limit?: number }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = mailboxPeek(path.resolve(p.projectRoot), String(p.agentId ?? 'main'), p.limit ?? 20)
+    if (!r.ok) throw new Error(r.content)
+    return { messages: r.messages }
+  })
+
+  rpc.on('mailbox.receive', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; agentId?: string; limit?: number }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = mailboxReceive(path.resolve(p.projectRoot), String(p.agentId ?? 'main'), p.limit ?? 20)
+    if (!r.ok) throw new Error(r.content)
+    return { messages: r.messages }
+  })
+
+  rpc.on('mailbox.send', (_method, params) => {
+    const p = (params ?? {}) as {
+      projectRoot?: string
+      from?: string
+      to?: string
+      content?: string
+      type?: string
+    }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    const r = mailboxSend(path.resolve(p.projectRoot), p)
+    if (!r.ok) throw new Error(r.content)
+    return { message: r.message }
+  })
+
+  rpc.on('subagent.list', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string }
+    if (!p.projectRoot?.trim()) throw new Error('projectRoot is required')
+    return { agents: listSubAgents(path.resolve(p.projectRoot)) }
+  })
+
+  rpc.on('subagent.get', (_method, params) => {
+    const p = (params ?? {}) as { id?: string }
+    if (!p.id?.trim()) throw new Error('id is required')
+    const a = getSubAgent(p.id.trim())
+    if (!a) return { agent: null }
+    const { runtime: _r, ...rest } = a
+    return { agent: rest }
+  })
+
+  rpc.on('subagent.apply', (_method, params) => {
+    const p = (params ?? {}) as { id?: string; remove?: boolean; keepBranch?: boolean }
+    if (!p.id?.trim()) throw new Error('id is required')
+    const r = applySubAgentWorktree(p.id.trim(), {
+      remove: p.remove !== false,
+      keepBranch: p.keepBranch === true,
+    })
+    if (!r.ok) throw new Error(r.content)
+    return { ok: true, content: r.content, conflicts: r.conflicts }
+  })
+
+  rpc.on('subagent.discard', (_method, params) => {
+    const p = (params ?? {}) as { id?: string; deleteBranch?: boolean }
+    if (!p.id?.trim()) throw new Error('id is required')
+    const r = discardSubAgentWorktree(p.id.trim(), {
+      deleteBranch: p.deleteBranch !== false,
+    })
+    if (!r.ok) throw new Error(r.content)
+    return { ok: true, content: r.content }
+  })
 
   rpc.on('cron.list', (_method, params) => {
     const p = (params ?? {}) as { projectRoot?: string; enabled?: boolean }

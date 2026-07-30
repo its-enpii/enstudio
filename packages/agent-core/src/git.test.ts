@@ -38,7 +38,11 @@ test('git workflow status diff stage unstage discard commit', () => {
     gitUnstage(root, 'note.txt')
     assert.equal(gitStatus(root).files[0]?.unstaged, true)
     gitDiscard(root, 'note.txt', false)
-    assert.equal(fs.readFileSync(path.join(root, 'note.txt'), 'utf8'), 'one\n')
+    // Git on Windows may restore CRLF; compare normalized.
+    assert.equal(
+      fs.readFileSync(path.join(root, 'note.txt'), 'utf8').replace(/\r\n/g, '\n'),
+      'one\n',
+    )
 
     fs.writeFileSync(path.join(root, 'new.txt'), 'new\n', 'utf8')
     gitStage(root, 'new.txt')

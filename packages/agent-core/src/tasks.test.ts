@@ -64,15 +64,43 @@ describe('durable task board', () => {
 
     const done = taskUpdate(root, { taskId: a.task.id, status: 'completed', progress: 100 })
     assert.equal(done.ok, true)
+    if (!done.ok) return
+    // Auto-unblock: completing A clears B.blockedBy without manual removeBlockedBy
+    assert.deepEqual(done.unblocked, [b.task.id])
+    assert.match(done.content, /Auto-unblocked/)
+    const bAfter = taskGet(root, b.task.id)
+    assert.equal(bAfter.ok, true)
+    if (!bAfter.ok) return
+    assert.equal(bAfter.task.blockedBy.length, 0)
+    assert.equal(bAfter.task.status, 'pending')
 
+    // Manual remove/clear still work
+    const reblock = taskUpdate(root, { taskId: b.task.id, addBlockedBy: [a.task.id] })
+    assert.equal(reblock.ok, true)
+    if (!reblock.ok) return
+    assert.equal(reblock.task.blockedBy.length, 1)
+    const cleared = taskUpdate(root, { taskId: b.task.id, clearBlockedBy: true })
+    assert.equal(cleared.ok, true)
+    if (!cleared.ok) return
+    assert.equal(cleared.task.blockedBy.length, 0)
+
+    // Cancel also auto-unblocks dependents
+    const c = taskCreate(root, { title: 'Depends on B', blockedBy: [b.task.id] })
+    assert.equal(c.ok, true)
+    if (!c.ok) return
     const stop = taskStop(root, b.task.id)
     assert.equal(stop.ok, true)
     if (!stop.ok) return
     assert.equal(stop.task.status, 'cancelled')
+    assert.ok(stop.unblocked?.includes(c.task.id))
+    const cAfter = taskGet(root, c.task.id)
+    assert.equal(cAfter.ok, true)
+    if (!cAfter.ok) return
+    assert.equal(cAfter.task.blockedBy.length, 0)
 
     // reload from disk
     const again = taskList(root)
-    assert.equal(again.tasks.length, 2)
+    assert.equal(again.tasks.length, 3)
     assert.equal(again.tasks.find((t) => t.id === a.task.id)?.status, 'completed')
     assert.equal(again.tasks.find((t) => t.id === b.task.id)?.status, 'cancelled')
   })

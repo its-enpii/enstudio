@@ -22,6 +22,20 @@ export {
   memoryWrite,
   projectContextPrompt,
 } from './context.js'
+export { normalizeAskOptions } from './ask-options.js'
+export type { AskOption } from './ask-options.js'
+export { addNormalizedUsage, freshPromptTokens, normalizeUsage } from './usage.js'
+export type { NormalizedUsage } from './usage.js'
+export {
+  globMatch,
+  isAllowedByRules,
+  mergeAllowRules,
+  parseAllowRule,
+  parseAllowRules,
+  toolSubject,
+} from './permission-rules.js'
+export type { AllowRule } from './permission-rules.js'
+export { repairChatMessages, toolSafeCutIndex } from './chat-repair.js'
 export {
   compactRuntime,
   compactionTranscript,
@@ -31,9 +45,20 @@ export {
   runDirectEdit,
   runPromptTurn,
   shouldAutoCompact,
+  splitForCompaction,
   stopTurn,
   undoCompactRuntime,
+  validateEditedArgs,
 } from './loop.js'
+export type { ApprovalResult, PendingApproval, SessionRuntime } from './loop.js'
+export {
+  applyGuardrails,
+  defaultGuardrailsConfig,
+  resolveGuardrailsConfig,
+} from './guardrails.js'
+export type { GuardrailsConfig, GuardRule, GuardStrategy, PiiType } from './guardrails.js'
+export { storePut, storeGet, storeDelete, storeSearch } from './memory-store.js'
+export { ROLE_PREAMBLE } from './subagent.js'
 export { createRunState, finishRunState, normalizeGoal, saveRunState, updateRunState } from './run-state.js'
 export { discoverVerificationCommands, goalPrompt, parseVerifierResponse, verifyGoal } from './verifier.js'
 export { runTool } from './tools/run.js'
@@ -49,15 +74,31 @@ export {
 } from './tasks.js'
 export type { BoardTask, TaskStatus } from './tasks.js'
 export {
+  savePlan,
+  approvePlan,
+  rejectPlan,
+  readPlan,
+  latestPlan,
+  listPlans,
+  planContextPrompt,
+} from './plans.js'
+export type { SavedPlan, PlanStep, PlanStatus } from './plans.js'
+export {
+  canFireCron,
   collectDueCronJobs,
   cronCreate,
   cronDelete,
+  cronFiresInLastHour,
   cronList,
   cronMarkRan,
   cronMatches,
   cronToggle,
+  CRON_MAX_RUNTIME_MS,
+  FAIL_STREAK_DISABLE,
   listAllCronProjectRoots,
+  MAX_FIRES_PER_HOUR,
   nextCronFire,
+  recordCronFire,
   startCronScheduler,
   stopCronScheduler,
   validateCronExpression,
@@ -76,6 +117,8 @@ export {
   stopSubAgent,
   listSubAgents,
   clearLiveSubAgents,
+  applySubAgentWorktree,
+  discardSubAgentWorktree,
 } from './subagent.js'
 export type { SubAgentRecord } from './subagent.js'
 export {

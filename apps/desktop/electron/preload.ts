@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, webFrame } from 'electron'
 
 export type EnpiiEventHandler = (payload: unknown) => void
 
@@ -58,6 +58,9 @@ const api = {
     write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data) as Promise<void>,
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows) as Promise<void>,
     kill: (id: string) => ipcRenderer.invoke('terminal:kill', id) as Promise<void>,
+    /** PATH command complete. With prefix → up to 25 matches; empty → sample list. */
+    pathComplete: (prefix?: string) =>
+      ipcRenderer.invoke('terminal:pathComplete', prefix ?? '') as Promise<string[]>,
     onData: (handler: (payload: { id: string; data: string }) => void) => {
       const listener = (_: Electron.IpcRendererEvent, payload: { id: string; data: string }) => handler(payload)
       ipcRenderer.on('terminal:data', listener)
@@ -73,6 +76,13 @@ const api = {
     getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
     showNotification: (opts: { title: string; body?: string; urgency?: 'normal' | 'critical' | 'low' }) =>
       ipcRenderer.invoke('app:showNotification', opts) as Promise<boolean>,
+    /** Electron page zoom (not CSS zoom — CSS zoom breaks text selection). 1 = 100%. */
+    setZoomFactor: (factor: number) => {
+      const f = Number(factor)
+      if (!Number.isFinite(f) || f <= 0) return
+      webFrame.setZoomFactor(Math.min(3, Math.max(0.5, f)))
+    },
+    getZoomFactor: () => webFrame.getZoomFactor(),
   },
   browser: {
     onShortcut: (handler: (shortcut: string) => void) => {

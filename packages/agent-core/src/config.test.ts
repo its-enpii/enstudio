@@ -28,6 +28,7 @@ test('saveProviderConfig writes TOML and publicConfig redacts key', () => {
       baseUrl: 'https://example.com/v1',
       apiKey: '',
       model: 'enpii',
+      models: ['enpii'],
       dialect: 'openai',
       permissionMode: 'ask',
     }
@@ -93,6 +94,7 @@ test('project TOML overlays user config without secret', () => {
         baseUrl: 'https://user/v1',
         apiKey: 'sk-user',
         model: 'user-model',
+        models: ['user-model'],
         dialect: 'openai',
         permissionMode: 'ask',
       },

@@ -1,13 +1,14 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import { tick } from 'svelte'
+  import { t } from '../../i18n/index.svelte'
 
   let {
     open = false,
     title,
     message = '',
-    confirmLabel = 'OK',
-    cancelLabel = 'Cancel',
+    confirmLabel = undefined,
+    cancelLabel = undefined,
     danger = false,
     onConfirm,
     onCancel,
@@ -25,6 +26,8 @@
   } = $props()
 
   let cancelBtn = $state<HTMLButtonElement>()
+  const resolvedCancel = $derived(cancelLabel ?? t('common.cancel'))
+  const resolvedConfirm = $derived(confirmLabel ?? t('common.ok'))
 
   $effect(() => {
     if (open) void tick().then(() => cancelBtn?.focus())
@@ -79,14 +82,14 @@
           bind:this={cancelBtn}
           type="button"
           class="rounded-lg border border-border-subtle px-4 py-2 text-xs text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
-          onclick={cancel}>{cancelLabel}</button
+          onclick={cancel}>{resolvedCancel}</button
         >
         <button
           type="button"
           class="rounded-lg px-4 py-2 text-xs font-medium {danger
             ? 'bg-danger-bg text-danger border border-danger/25'
             : 'bg-studio-purple text-white'}"
-          onclick={confirm}>{confirmLabel}</button
+          onclick={confirm}>{resolvedConfirm}</button
         >
       </div>
     </div>

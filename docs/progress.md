@@ -1,7 +1,26 @@
 # Progress — enpiistudio / enpii
 
-Status: **working daily-driver slice** (agent + code + terminal + git + settings + approval queue + worktree)
-Last updated: 2026-07-27 (v0 daily-driver closed; agent roadmap vs `reference/` locked)
+Status: **working daily-driver slice** — product north star: **solo team-for-one through target C**
+Last updated: 2026-07-29 (Advanced usage MVP: HITL edit-args, guardrails, memory_store, handoff/route)
+
+## Product north star (operator = 1 human)
+
+**Solo daily-driver** = one person served as if they had a full team (plan, delegate, track, verify) — not multi-tenant, not ClawTeam CLI fleet clone.
+
+| Target | Meaning | Exit (smoke) |
+|---|---|---|
+| **A — Tim terasa** | Board + mailbox visible; post–plan-approve workspace autopilot; sub-agent status; role presets | Lead sees tasks/mail; approve plan → fewer write prompts; sub results visible |
+| **B — Tim kuat** | Limited async sub-agents; apply/discard worktree from sub results | Parent not fully blocked; conscious merge path |
+| **C — Tim autonom** *(ceiling)* | Cron UI + reliable fire; failure notify; resume/recovery; budgets so overnight cannot wreck repo | ✅ Schedule UI; fire/done notify; fail streak off; 12/h + 10m runtime |
+| **D** | ClawTeam multi-CLI org / P2P team | **Out of scope** |
+
+Order: **A → B → C**. Do not start B/C glue until A operator surface works.
+
+### Roadmap status
+- **A:** operator surface done — hide-if-empty in-chat Board/Subs/Mail strips; `removeBlockedBy`/`clearBlockedBy` handoff; post-plan autopilot; role presets; richer agent/task/mail tool labels. **No permanent Inspector dump**.
+- **B:** `agent` `async:true` non-blocking spawn; `subagent_start`/`subagent_done` events; tools `agent_apply`/`agent_discard` + RPC `subagent.apply|discard`.
+- **C:** Settings Schedule UI; cron_fire/done notify + OS notif; fail streak auto-off (3); hourly fire cap 12; cron runtime 10m; fire clamps full→autopilot_workspace.
+
 
 ## Done
 
@@ -15,7 +34,7 @@ Last updated: 2026-07-27 (v0 daily-driver closed; agent roadmap vs `reference/` 
 ### Agent core (`@enpiistudio/agent-core`)
 - stdio JSON-RPC sidecar: `health`, `config.get`/`config.set`, `session.*`, `git.*`
 - Provider: OpenAI-compatible Chat Completions + Anthropic Messages (`ENPII_*` env or `~/.enpiistudio/config.toml`, legacy JSON OK)
-- Real multi-round tool loop (max 8 rounds), stream text + tool events
+- Real multi-round tool loop (default maxRounds 24, UI `maxTurns`), stream text + tool events
 - **Read tools:** `list_dir`, `read_file`, `glob`, `grep` (workspace path jail)
 - **Write tools:** `write_file`, `edit_file` (jail, size caps, unique replace)
 - **Shell tool:** `run_shell` (cwd jail, timeout, stdout/stderr caps; blocks force-push / reset --hard / clean -fdx)
@@ -62,7 +81,14 @@ Last updated: 2026-07-27 (v0 daily-driver closed; agent roadmap vs `reference/` 
 - Collapse tool output by default (`details`); one tool card per result (no call+result dupes)
 - Auto-scroll chat (stick-to-bottom; release when user scrolls up)
 - Assistant markdown render (headings, lists, bold, code, fences, `---` HR) — zero extra deps
-- Composer auto-focus + re-focus on blur (except other text fields / busy)
+- Composer: type-to-composer (printable keys → focus); no blur autofocus (selection-safe)
+- **Turn timer** on user bubble (live + final durationMs); **prompt FIFO queue** while busy
+- **Composer Plan** → runtime `planMode` ON (mutations blocked) + `read_only` permission
+- **Durable plans** UI: draft card Approve & run / Reject; disk under `~/.enpiistudio/projects/<hash>/plans/`
+- **Allow for session** grants kind (write/shell/git/mcp); Allow all for session grants all four; badges in composer
+- Tool write/edit cards show **unified diff** (same as approval preview)
+- Soft project verify (`npm run build` etc.) non-blocking; no approval interrupt after "done"
+- Markdown tables (GFM) in assistant chat
 - **Code mode** — jailed explorer tree, CodeMirror editor, multi tabs, exact compare-and-replace save, syntax highlight
 - Editor changes never bypass agent approval when proposed via agent; manual Code saves are trusted user actions (path jail + conflict + atomic write)
 - **Terminal mode** — multi tabs, rename, real Electron PTY + xterm resize/input/cleanup
@@ -81,7 +107,7 @@ Last updated: 2026-07-27 (v0 daily-driver closed; agent roadmap vs `reference/` 
 - **Auto `.enpii/`**: `ensureEnpiiDir` on first prompt (AGENT.md + skills/) (FR-P3)
 - **Layout per project**: sidebar/inspector widths in localStorage project record + drag resizers (FR-P2)
 - **Worktree multi list**: Inspector linked worktrees from `git.worktree_list` → open matching session
-- **Compact long session**: `/compact` + `session.compact` + **auto-compact** mid-run (≥36 msgs / 120k chars / 70% token budget)
+- **Compact long session**: `/compact` + `session.compact` + **auto-compact** mid-run (≥90 msgs / 280k chars; max 1× per turn; tool-chain-safe cut + `repairChatMessages`)
 - **Memory search ranking**: name hit + body hit + recency half-life
 - **Export transcript MD**: `/export`, Inspector Export, command palette → save dialog
 - **OS notif on approval**: Electron `Notification` + focus main window on click
@@ -99,6 +125,11 @@ Last updated: 2026-07-27 (v0 daily-driver closed; agent roadmap vs `reference/` 
 - `denyGlobs?: string[]` optional in user/project config
 
 ### Recently shipped (this loop)
+- **Advanced usage MVP (LangChain gap close, enpii-native)**:
+  - HITL **edit-args** + deny reason (`session.approve` + sticky Action Required)
+  - **Guardrails** PII/secret redact (`guardrails.ts`, Settings toggle, loop I/O hooks)
+  - **`memory_store`** namespace/key JSON under `~/.enpiistudio/memory/store/`
+  - **`handoff`** parent role bias + bundled skill **`route`**
 - **Multi-platform dist**: win nsis+portable, mac dmg, linux AppImage+deb; `dist:*` scripts; unsigned + signing env docs
 - **MCP HTTP**: Streamable HTTP JSON-RPC client (`mcp-http.ts`); `mcp.json` `url`+headers; Settings shows transport
 - **Smart compact**: keep last 8 turns raw; summarize older middle only
@@ -165,7 +196,7 @@ Pinned pattern sources (borrow patterns, not product personality — see `docs/r
 | Web search / fetch | **shipped** (`web_fetch` / `web_search`, SSRF guard) |
 | In-loop `task_*` durable board | **shipped** (project `tasks.json`; not OH background procs) |
 | In-loop `agent` + `send_message` | **shipped** (sync nested turn in worktree; depth 1; UI fan-out still available) |
-| Formal plan mode + ask-user | **shipped** (`enter_plan_mode`/`exit_plan_mode` hard-block + `ask_user` → UI) |
+| Formal plan mode + ask-user | **shipped** (`enter_plan_mode`/`exit_plan_mode` hard-block + `ask_user` → UI; `plan_tasks` + exit save/approve markdown under `~/.enpiistudio/projects/<hash>/plans/`) |
 | Parallel tool execution | **shipped** (contiguous read-only tools in one round) |
 | Schedule / cron / durable loop fire | **shipped** (`cron_*` + sidecar ticker; agent_turn only while process live) |
 | Hooks, plugins, LSP, notebook, chat channels | out / YAGNI |

@@ -3,23 +3,34 @@
   import {
     keybindingFromEvent,
     state as app,
+    FONT_FAMILIES,
+    UI_ZOOM_MAX,
+    UI_ZOOM_MIN,
+    UI_ZOOM_STEP,
     GLOBAL_ACTIONS,
     MODES,
     PERMISSION_MODES,
     PROVIDER_DIALECTS,
+    type FontFamilyId,
     type KeybindingAction,
     type PermissionMode,
     type ProviderDialect,
   } from '../store.svelte'
+  import { t } from '../i18n/index.svelte'
   import {
+    createCronJob,
+    deleteCronJob,
     deleteSshHost,
+    listCronJobs,
     listMcpServers,
     listSsh,
     loadProviderConfig,
     saveProviderConfig,
     startSshTunnel,
     stopSshTunnel,
+    toggleCronJob,
     upsertSshHost,
+    type CronJobRow,
     type McpServerInfo,
     type SshHostInfo,
     type SshTunnelInfo,
@@ -34,9 +45,18 @@
     type SelectOption,
   } from './ui'
 
-  type Section = 'provider' | 'permissions' | 'network' | 'appearance' | 'keybindings'
+  type Section = 'provider' | 'permissions' | 'network' | 'schedule' | 'appearance' | 'keybindings'
+
+  const ENPII_DEFAULTS = {
+    baseUrl: 'https://ai.enpiistudio.com/v1',
+    model: 'enpii',
+    models: ['enpii'] as string[],
+    dialect: 'openai' as const,
+  }
 
   let section = $state<Section>('provider')
+  /** enpii = fixed model+endpoint (hidden); custom = user base URL / key / models */
+  let providerMode = $state<'enpii' | 'custom'>('enpii')
   let baseUrl = $state('')
   let apiKey = $state('')
   let model = $state('')
@@ -45,6 +65,9 @@
   let dialect = $state('openai')
   let permissionMode = $state('ask')
   let denyGlobsText = $state('')
+  let allowRulesText = $state('')
+  /** PII/secret redact on tool results + model output (default on in core). */
+  let guardrailsEnabled = $state(true)
   let hasKey = $state(false)
   let envOverrides = $state({
     baseUrl: false,
@@ -65,19 +88,30 @@
   let sshForm = $state({ name: '', host: '', user: '', port: 22 as number | null, identityFile: '' })
   let sshFormError = $state('')
   let mcpServers = $state<McpServerInfo[]>([])
+  let cronJobs = $state<CronJobRow[]>([])
+  let cronBusy = $state(false)
+  let cronFormOpen = $state(false)
+  let cronForm = $state({ name: '', schedule: '0 9 * * 1-5', prompt: '' })
+  let cronFormError = $state('')
 
-  // local-only UI prefs (not yet wired to backend)
-  let maxTurns = $state<number | null>(40)
-  let streamTokens = $state(true)
-  let theme = $state('dark')
+  // Agent runtime prefs (local for now — not yet in config.toml)
+  let maxTurns = $state<number | null>(app.ui.maxTurns)
+  // Appearance / stream: bind through app.ui (persisted)
+  let streamTokens = $state(app.ui.streamTokens)
+  let goldPulse = $state(app.ui.goldPulse)
+  let theme = $state(app.ui.theme)
+  let locale = $state(app.ui.locale)
+  let fontFamily = $state(app.ui.fontFamily)
+  let uiZoom = $state<number | null>(app.ui.uiZoom)
 
-  const nav: { id: Section; label: string; blurb: string }[] = [
-    { id: 'provider', label: 'Provider', blurb: 'Endpoint & model' },
-    { id: 'permissions', label: 'Permissions', blurb: 'Write / shell policy' },
-    { id: 'network', label: 'Network', blurb: 'SSH + MCP' },
-    { id: 'appearance', label: 'Appearance', blurb: 'Theme & display' },
-    { id: 'keybindings', label: 'Keybindings', blurb: 'Global shortcuts' },
-  ]
+  const nav = $derived.by((): { id: Section; label: string; blurb: string }[] => [
+    { id: 'provider', label: t('settings.nav.provider'), blurb: t('settings.nav.provider.blurb') },
+    { id: 'permissions', label: t('settings.nav.permissions'), blurb: t('settings.nav.permissions.blurb') },
+    { id: 'network', label: t('settings.nav.network'), blurb: t('settings.nav.network.blurb') },
+    { id: 'schedule', label: t('settings.nav.schedule'), blurb: t('settings.nav.schedule.blurb') },
+    { id: 'appearance', label: t('settings.nav.appearance'), blurb: t('settings.nav.appearance.blurb') },
+    { id: 'keybindings', label: t('settings.nav.keybindings'), blurb: t('settings.nav.keybindings.blurb') },
+  ])
 
   async function hydrateSsh(): Promise<void> {
     try {
@@ -156,14 +190,14 @@
   }
 
   async function removeSshHost(name: string): Promise<void> {
-    if (!confirm(`Delete SSH host “${name}”?`)) return
+    if (!confirm(t('settings.network.sshDeleteConfirm', { name }))) return
     sshBusy = name
     error = ''
     try {
       await deleteSshHost(name)
       if (sshEditing === name) cancelSshForm()
       await hydrateSsh()
-      app.notify('success', 'SSH host deleted', name)
+      app.notify('success', t('settings.network.sshDelete'), name)
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     } finally {
@@ -193,26 +227,70 @@
     }
   }
 
-  const keybindingRows: { id: KeybindingAction; label: string }[] = [
-    ...GLOBAL_ACTIONS.map((a) => ({ id: a.id, label: a.label })),
-    ...MODES.map((m) => ({ id: `mode.${m.id}` as KeybindingAction, label: m.openLabel })),
-  ]
+  const keybindingRows = $derived.by((): { id: KeybindingAction; label: string }[] => [
+    ...GLOBAL_ACTIONS.map((a) => ({ id: a.id, label: t(a.labelKey) })),
+    ...MODES.map((m) => ({ id: `mode.${m.id}` as KeybindingAction, label: t(m.openKey) })),
+  ])
 
-  const dialectOpts: SelectOption[] = PROVIDER_DIALECTS.map((d) => ({ ...d }))
-  const permissionOpts: SelectOption[] = PERMISSION_MODES.map((p) => ({ ...p }))
+  const dialectOpts = $derived.by((): SelectOption[] =>
+    PROVIDER_DIALECTS.map((d) => ({
+      value: d.value,
+      label: t(d.labelKey),
+      description: t(d.descriptionKey),
+    })),
+  )
+  const permissionOpts = $derived.by((): SelectOption[] =>
+    PERMISSION_MODES.map((p) => ({
+      value: p.value,
+      label: t(p.labelKey),
+      description: t(p.descriptionKey),
+    })),
+  )
 
-  const themeOpts: SelectOption[] = [
-    { value: 'dark', label: 'Dark', description: 'Near-black canvas' },
-    { value: 'light', label: 'Light', description: 'Off-white canvas (soon)' },
-    { value: 'system', label: 'System', description: 'Follow OS (soon)' },
-  ]
+  const themeOpts = $derived.by((): SelectOption[] => [
+    { value: 'dark', label: t('settings.appearance.theme.dark'), description: t('settings.appearance.theme.dark.desc') },
+    { value: 'light', label: t('settings.appearance.theme.light'), description: t('settings.appearance.theme.light.desc') },
+    { value: 'system', label: t('settings.appearance.theme.system'), description: t('settings.appearance.theme.system.desc') },
+  ])
+
+  const localeOpts = $derived.by((): SelectOption[] => [
+    { value: 'en', label: t('settings.appearance.language.en'), description: t('settings.appearance.language.en.desc') },
+    { value: 'id', label: t('settings.appearance.language.id'), description: t('settings.appearance.language.id.desc') },
+  ])
+
+  const fontFamilyOpts = $derived.by((): SelectOption[] =>
+    FONT_FAMILIES.map((f) => ({ value: f.id, label: f.label })),
+  )
+
+  function isEnpiiDefault(cfg: {
+    baseUrl: string
+    model: string
+    models?: string[]
+    dialect: string
+  }): boolean {
+    const url = cfg.baseUrl.replace(/\/+$/, '').toLowerCase()
+    const def = ENPII_DEFAULTS.baseUrl.replace(/\/+$/, '').toLowerCase()
+    const list = normalizeModelList(cfg.models, cfg.model)
+    // enpii mode: default host + model is enpii (or only-enpii catalog)
+    return (
+      url === def &&
+      (cfg.model === ENPII_DEFAULTS.model || (list.length === 1 && list[0] === 'enpii'))
+    )
+  }
 
   async function hydrate(): Promise<void> {
     error = ''
     note = ''
+    streamTokens = app.ui.streamTokens
+    goldPulse = app.ui.goldPulse
+    theme = app.ui.theme
+    locale = app.ui.locale
+    fontFamily = app.ui.fontFamily
+    uiZoom = app.ui.uiZoom
+    maxTurns = app.ui.maxTurns
     const cfg = app.provider ?? (await loadProviderConfig())
     if (!cfg) {
-      error = 'Could not load config from enpii'
+      error = t('settings.provider.loadFailed')
       return
     }
     baseUrl = cfg.baseUrl
@@ -222,9 +300,63 @@
     dialect = cfg.dialect
     permissionMode = cfg.permissionMode
     denyGlobsText = (cfg.denyGlobs ?? []).join('\n')
+    allowRulesText = (cfg.allowRules ?? []).join('\n')
+    guardrailsEnabled = cfg.guardrails?.enabled !== false
     hasKey = cfg.hasKey
     envOverrides = { ...cfg.envOverrides }
     apiKey = ''
+    providerMode = isEnpiiDefault(cfg) ? 'enpii' : 'custom'
+  }
+
+  // Keep local drafts in sync with store when toggled in Settings
+  $effect(() => {
+    if (streamTokens !== app.ui.streamTokens) app.setStreamTokens(streamTokens)
+  })
+  $effect(() => {
+    if (goldPulse !== app.ui.goldPulse) app.setGoldPulse(goldPulse)
+  })
+  $effect(() => {
+    if (theme !== app.ui.theme) {
+      const next = theme === 'light' || theme === 'system' || theme === 'dark' ? theme : 'dark'
+      app.setTheme(next)
+    }
+  })
+  $effect(() => {
+    if (locale !== app.ui.locale) {
+      app.setLocale(locale === 'id' ? 'id' : 'en')
+    }
+  })
+  $effect(() => {
+    if (fontFamily !== app.ui.fontFamily) {
+      app.setFontFamily(fontFamily as FontFamilyId)
+    }
+  })
+  $effect(() => {
+    if (typeof uiZoom === 'number' && uiZoom !== app.ui.uiZoom) {
+      app.setUiZoom(uiZoom)
+    }
+  })
+  $effect(() => {
+    if (typeof maxTurns === 'number' && maxTurns !== app.ui.maxTurns) {
+      app.setMaxTurns(maxTurns)
+    }
+  })
+
+  function setProviderMode(mode: 'enpii' | 'custom'): void {
+    if (mode === providerMode) return
+    providerMode = mode
+    if (mode === 'enpii') {
+      baseUrl = ENPII_DEFAULTS.baseUrl
+      model = ENPII_DEFAULTS.model
+      models = [...ENPII_DEFAULTS.models]
+      dialect = ENPII_DEFAULTS.dialect
+      modelDraft = ''
+    } else if (!baseUrl.trim() || baseUrl === ENPII_DEFAULTS.baseUrl) {
+      // leave room for user endpoint; keep model list editable
+      baseUrl = ''
+      if (models.length === 1 && models[0] === 'enpii') models = []
+      if (model === 'enpii') model = ''
+    }
   }
 
   function normalizeModelList(list: string[] | undefined, active: string): string[] {
@@ -248,9 +380,8 @@
   }
 
   function removeModel(id: string): void {
-    if (models.length <= 1) return
     models = models.filter((m) => m !== id)
-    if (model === id) model = models[0] ?? 'enpii'
+    if (model === id) model = models[0] ?? ''
   }
 
   onMount(() => {
@@ -264,7 +395,73 @@
       void hydrateSsh()
       void hydrateMcp()
     }
+    if (section === 'schedule') void hydrateCron()
   })
+
+  async function hydrateCron(): Promise<void> {
+    if (!app.activeProject) {
+      cronJobs = []
+      return
+    }
+    try {
+      cronJobs = await listCronJobs()
+    } catch (err) {
+      cronJobs = []
+      error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function saveCronForm(): Promise<void> {
+    cronFormError = ''
+    if (!app.activeProject) {
+      cronFormError = t('settings.schedule.needProject')
+      return
+    }
+    const name = cronForm.name.trim()
+    const schedule = cronForm.schedule.trim()
+    const prompt = cronForm.prompt.trim()
+    if (!name || !schedule || !prompt) {
+      cronFormError = 'name, schedule, prompt required'
+      return
+    }
+    cronBusy = true
+    try {
+      await createCronJob({ name, schedule, prompt, enabled: true })
+      cronForm = { name: '', schedule: '0 9 * * 1-5', prompt: '' }
+      cronFormOpen = false
+      await hydrateCron()
+      note = t('settings.schedule.saved')
+    } catch (err) {
+      cronFormError = err instanceof Error ? err.message : String(err)
+    } finally {
+      cronBusy = false
+    }
+  }
+
+  async function onCronToggle(job: CronJobRow): Promise<void> {
+    cronBusy = true
+    try {
+      await toggleCronJob(job.id, !job.enabled)
+      await hydrateCron()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      cronBusy = false
+    }
+  }
+
+  async function onCronDelete(job: CronJobRow): Promise<void> {
+    cronBusy = true
+    try {
+      await deleteCronJob(job.id)
+      await hydrateCron()
+      note = t('settings.schedule.deleted')
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      cronBusy = false
+    }
+  }
 
   function close(): void {
     if (saving) return
@@ -301,15 +498,23 @@
     error = ''
     note = ''
     try {
-      const knownDialect = PROVIDER_DIALECTS.find((d) => d.value === dialect)?.value
       const knownPermission = PERMISSION_MODES.find((p) => p.value === permissionMode)?.value
       const denyGlobs = denyGlobsText
         .split(/[\n,]+/)
         .map((g) => g.trim())
         .filter(Boolean)
-      const activeModel = model.trim()
-      const modelList = normalizeModelList(models, activeModel)
-      const patch: {
+      const allowRules = allowRulesText
+        .split(/[\n,]+/)
+        .map((g) => g.trim())
+        .filter(Boolean)
+
+      const guardrails = {
+        enabled: guardrailsEnabled,
+        applyToInput: false,
+        applyToOutput: true,
+        applyToToolResults: true,
+      }
+      let patch: {
         baseUrl: string
         model: string
         models: string[]
@@ -317,23 +522,55 @@
         permissionMode: PermissionMode
         apiKey?: string
         denyGlobs: string[]
-      } = {
-        baseUrl: baseUrl.trim(),
-        model: activeModel,
-        models: modelList,
-        dialect: knownDialect ?? 'openai',
-        permissionMode: knownPermission ?? 'ask',
-        denyGlobs,
+        allowRules: string[]
+        guardrails: typeof guardrails
       }
-      if (apiKey.trim()) patch.apiKey = apiKey.trim()
+
+      if (providerMode === 'enpii') {
+        patch = {
+          baseUrl: ENPII_DEFAULTS.baseUrl,
+          model: ENPII_DEFAULTS.model,
+          models: [...ENPII_DEFAULTS.models],
+          dialect: ENPII_DEFAULTS.dialect,
+          permissionMode: knownPermission ?? 'ask',
+          denyGlobs,
+          allowRules,
+          guardrails,
+        }
+        // Keep existing key unless user typed one while on custom then switched
+        if (apiKey.trim()) patch.apiKey = apiKey.trim()
+      } else {
+        const knownDialect = PROVIDER_DIALECTS.find((d) => d.value === dialect)?.value
+        const activeModel = model.trim()
+        if (!baseUrl.trim()) throw new Error('Base URL is required for custom provider')
+        if (!activeModel) throw new Error('Add at least one model and set default')
+        const modelList = normalizeModelList(models, activeModel)
+        patch = {
+          baseUrl: baseUrl.trim(),
+          model: activeModel,
+          models: modelList,
+          dialect: knownDialect ?? 'openai',
+          permissionMode: knownPermission ?? 'ask',
+          denyGlobs,
+          allowRules,
+          guardrails,
+        }
+        if (apiKey.trim()) patch.apiKey = apiKey.trim()
+      }
+
       const cfg = await saveProviderConfig(patch)
       denyGlobsText = (cfg.denyGlobs ?? []).join('\n')
+      allowRulesText = (cfg.allowRules ?? []).join('\n')
+      guardrailsEnabled = cfg.guardrails?.enabled !== false
+      baseUrl = cfg.baseUrl
       models = normalizeModelList(cfg.models, cfg.model)
       model = cfg.model
+      dialect = cfg.dialect
       hasKey = cfg.hasKey
       envOverrides = { ...cfg.envOverrides }
       apiKey = ''
-      note = 'Saved to ~/.enpiistudio/config.toml'
+      providerMode = isEnpiiDefault(cfg) ? 'enpii' : 'custom'
+      note = t('settings.provider.saved')
       const envBits = [
         envOverrides.baseUrl ? 'baseUrl' : '',
         envOverrides.apiKey ? 'apiKey' : '',
@@ -341,7 +578,7 @@
         envOverrides.dialect ? 'dialect' : '',
       ].filter(Boolean)
       if (envBits.length) {
-        note += ` · env still overrides: ${envBits.join(', ')}`
+        note += ` · ${t('settings.provider.envStill', { bits: envBits.join(', ') })}`
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
@@ -349,6 +586,14 @@
       saving = false
     }
   }
+
+  const canSave = $derived(
+    section !== 'provider'
+      ? true
+      : providerMode === 'enpii'
+        ? true
+        : Boolean(baseUrl.trim() && model.trim() && models.length > 0),
+  )
 </script>
 
 
@@ -370,7 +615,7 @@
   >
     <aside class="flex min-h-0 flex-col gap-2 border-r border-border-subtle bg-studio-sidebar p-4">
       <div class="pb-4">
-        <h2 id="settings-title" class="m-0 mb-1 text-base font-semibold text-studio-text">Settings</h2>
+        <h2 id="settings-title" class="m-0 mb-1 text-base font-semibold text-studio-text">{t('settings.title')}</h2>
         <p class="m-0 text-[11px] text-studio-text-dim">enpii · enpiistudio</p>
       </div>
       <nav class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
@@ -398,164 +643,236 @@
           <h3 class="m-0 mb-1 text-[15px] font-semibold text-studio-text">{nav.find((n) => n.id === section)?.label}</h3>
           <p class="m-0 text-xs text-studio-text-dim">{nav.find((n) => n.id === section)?.blurb}</p>
         </div>
-        <Button variant="ghost" size="sm" onclick={close} disabled={saving}>Close</Button>
+        <Button variant="ghost" size="sm" onclick={close} disabled={saving}>{t('settings.close')}</Button>
       </header>
 
       <div class="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
         {#if section === 'provider'}
-          <div class="grid grid-cols-2 items-start gap-x-6 gap-y-5">
-            <TextInput
-              class="col-span-2"
-              label="Base URL"
-              bind:value={baseUrl}
-              placeholder="https://ai.enpiistudio.com/v1"
-              autocomplete="off"
-              disabled={saving}
-              hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : ''}
-            />
-            <TextInput
-              label="API key {hasKey ? '(set)' : '(missing)'}"
-              type="password"
-              bind:value={apiKey}
-              placeholder={hasKey ? 'Leave blank to keep current' : 'sk-…'}
-              autocomplete="off"
-              disabled={saving}
-              hint={envOverrides.apiKey ? 'env ENPII_API_KEY active' : ''}
-            />
-            <SmartSelect
-              label="Default model"
-              bind:value={model}
-              options={models.map((m) => ({ value: m, label: m }))}
-              disabled={saving || !models.length}
-              hint={envOverrides.model ? 'env ENPII_MODEL active' : ''}
-            />
-            <SmartSelect
-              label="Dialect"
-              bind:value={dialect}
-              options={dialectOpts}
-              disabled={saving}
-              hint={envOverrides.dialect ? 'env ENPII_DIALECT active' : ''}
-            />
-            <NumberInput
-              label="Max turns"
-              bind:value={maxTurns}
-              min={1}
-              max={200}
-              step={1}
-              disabled={saving}
-            />
-            <div class="col-span-2 flex flex-col gap-2">
-              <div class="text-xs font-medium text-studio-text-dim">Models</div>
-              <div class="flex flex-wrap gap-1.5">
-                {#each models as m (m)}
-                  <span
-                    class="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] leading-none {m === model
-                      ? 'border-studio-purple/40 text-studio-text'
-                      : 'text-studio-text-dim'}"
-                  >
-                    <button
-                      type="button"
-                      class="leading-none hover:text-studio-text"
-                      disabled={saving}
-                      onclick={() => (model = m)}
-                    >{m}</button>
-                    {#if models.length > 1}
-                      <button
-                        type="button"
-                        class="grid size-4 place-items-center rounded leading-none text-studio-text-dim hover:bg-white/10 hover:text-danger"
-                        aria-label={`Remove ${m}`}
-                        disabled={saving}
-                        onclick={() => removeModel(m)}
-                      >×</button>
-                    {/if}
-                  </span>
-                {/each}
+          <div class="flex flex-col gap-5">
+            <!-- Mode: enpii (managed) vs custom OpenAI/Anthropic endpoint -->
+            <div
+              class="flex items-center rounded-lg bg-black/25 p-0.5 ring-1 ring-white/8"
+              role="tablist"
+              aria-label={t('settings.provider.mode')}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={providerMode === 'enpii'}
+                class="flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors {providerMode === 'enpii'
+                  ? 'bg-studio-card text-studio-text shadow-sm ring-1 ring-white/10'
+                  : 'text-studio-text-dim hover:text-studio-text'}"
+                disabled={saving}
+                onclick={() => setProviderMode('enpii')}
+              >{t('settings.provider.enpii')}</button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={providerMode === 'custom'}
+                class="flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors {providerMode === 'custom'
+                  ? 'bg-studio-card text-studio-text shadow-sm ring-1 ring-white/10'
+                  : 'text-studio-text-dim hover:text-studio-text'}"
+                disabled={saving}
+                onclick={() => setProviderMode('custom')}
+              >{t('settings.provider.custom')}</button>
+            </div>
+
+            {#if providerMode === 'enpii'}
+              <div class="rounded-xl bg-black/20 p-4 ring-1 ring-white/6">
+                <div class="flex items-center gap-2">
+                  <span class="rounded-md bg-studio-purple/20 px-2 py-0.5 font-mono text-[12px] text-studio-lavender-muted">enpii</span>
+                  <span class="text-[12px] text-studio-text-dim">{t('settings.provider.defaultModel')}</span>
+                </div>
+                <p class="mt-2 m-0 text-[12px] leading-relaxed text-studio-text-dim">
+                  {t('settings.provider.enpiiHint')}
+                </p>
+                {#if envOverrides.baseUrl || envOverrides.apiKey || envOverrides.model}
+                  <p class="mt-2 m-0 text-[11px] text-studio-gold">
+                    {t('settings.provider.envOverride')}
+                    {[
+                      envOverrides.baseUrl ? 'BASE_URL' : '',
+                      envOverrides.apiKey ? 'API_KEY' : '',
+                      envOverrides.model ? 'MODEL' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </p>
+                {/if}
               </div>
-              <div class="flex items-end gap-2">
+            {:else}
+              <div class="flex flex-col gap-5">
                 <TextInput
-                  class="min-w-0 flex-1"
-                  label="Add model"
-                  bind:value={modelDraft}
-                  placeholder="claude-opus-5"
+                  label={t('settings.provider.baseUrl')}
+                  bind:value={baseUrl}
+                  placeholder="https://api.openai.com/v1"
                   autocomplete="off"
                   disabled={saving}
-                  onkeydown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      addModel()
-                    }
-                  }}
+                  hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'OpenAI- or Anthropic-compatible endpoint'}
                 />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  class="min-h-[38px] self-end px-3.5"
-                  disabled={saving || !modelDraft.trim()}
-                  onclick={addModel}
-                >Add</Button>
+                <TextInput
+                  label={hasKey ? `${t('settings.provider.apiKey')} (${t('common.ok')})` : t('settings.provider.apiKey')}
+                  type="password"
+                  bind:value={apiKey}
+                  placeholder={hasKey ? t('settings.provider.apiKeySet') : 'sk-…'}
+                  autocomplete="off"
+                  disabled={saving}
+                  hint={envOverrides.apiKey ? 'env ENPII_API_KEY active' : ''}
+                />
+                <SmartSelect
+                  label={t('settings.provider.dialect')}
+                  bind:value={dialect}
+                  options={dialectOpts}
+                  disabled={saving}
+                  hint={envOverrides.dialect ? 'env ENPII_DIALECT active' : 'Wire format for the endpoint'}
+                />
+                <SmartSelect
+                  label={t('settings.provider.model')}
+                  bind:value={model}
+                  options={models.map((m) => ({ value: m, label: m }))}
+                  disabled={saving || !models.length}
+                  placeholder={models.length ? 'Select…' : t('settings.provider.addModel')}
+                  hint={envOverrides.model ? 'env ENPII_MODEL active' : ''}
+                />
+                <div class="flex flex-col gap-2">
+                  <div class="text-xs font-medium text-studio-text-dim">{t('settings.provider.models')}</div>
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each models as m (m)}
+                      <span
+                        class="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] leading-none {m === model
+                          ? 'border-studio-purple/40 text-studio-text'
+                          : 'text-studio-text-dim'}"
+                      >
+                        <button
+                          type="button"
+                          class="leading-none hover:text-studio-text"
+                          disabled={saving}
+                          onclick={() => (model = m)}
+                        >{m}</button>
+                        {#if models.length > 1}
+                          <button
+                            type="button"
+                            class="grid size-4 place-items-center rounded leading-none text-studio-text-dim hover:bg-white/10 hover:text-danger"
+                            aria-label={t('common.remove')}
+                            disabled={saving}
+                            onclick={() => removeModel(m)}
+                          >×</button>
+                        {/if}
+                      </span>
+                    {:else}
+                      <span class="text-[11px] text-studio-text-dim">{t('settings.provider.addModel')}</span>
+                    {/each}
+                  </div>
+                  <div class="flex items-end gap-2">
+                    <TextInput
+                      class="min-w-0 flex-1"
+                      label={t('settings.provider.addModel')}
+                      bind:value={modelDraft}
+                      placeholder="gpt-4.1 / claude-opus-4"
+                      autocomplete="off"
+                      disabled={saving}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          addModel()
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      class="min-h-[38px] self-end px-3.5"
+                      disabled={saving || !modelDraft.trim()}
+                      onclick={addModel}
+                    >{t('common.add')}</Button>
+                  </div>
+                </div>
               </div>
+            {/if}
+
+            <div class="flex flex-col gap-5 border-t border-border-subtle pt-4">
+              <NumberInput
+                label={t('settings.permissions.maxTurns')}
+                bind:value={maxTurns}
+                min={1}
+                max={200}
+                step={1}
+                disabled={saving}
+              />
+              <Switch
+                bind:checked={streamTokens}
+                label={t('settings.permissions.streamTokens')}
+                description={t('settings.permissions.streamTokensDesc')}
+              />
             </div>
           </div>
         {:else if section === 'permissions'}
-          <div class="grid grid-cols-2 items-start gap-x-6 gap-y-5">
+          <div class="flex flex-col gap-5">
             <SmartSelect
-              label="Permission mode"
+              label={t('settings.permissions.mode')}
               bind:value={permissionMode}
               options={permissionOpts}
               disabled={saving}
             />
             <Textarea
-              class="col-span-2"
-              label="Extra deny globs"
-              rows={5}
+              label={t('settings.permissions.denyGlobs')}
+              rows={4}
               bind:value={denyGlobsText}
               disabled={saving}
               placeholder={'.env.production\n**/private/**\n**/*token*'}
               spellcheck={false}
+              hint={t('settings.permissions.denyGlobsHint')}
+            />
+            <Textarea
+              label={t('settings.permissions.allowRules')}
+              rows={7}
+              bind:value={allowRulesText}
+              disabled={saving}
+              placeholder={'run_shell(npm *)\nrun_shell(git *)\nweb_fetch(domain:github.com)\nweb_search'}
+              spellcheck={false}
+              hint={t('settings.permissions.allowRulesHint')}
             />
             <Switch
-              bind:checked={streamTokens}
-              label="Stream tokens"
-              description="Show partial assistant text as it arrives"
-              disabled={saving}
+              bind:checked={guardrailsEnabled}
+              label={t('settings.permissions.guardrails')}
+              description={t('settings.permissions.guardrailsDesc')}
             />
           </div>
         {:else if section === 'network'}
           <div class="flex flex-col gap-2.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="text-xs font-medium text-studio-text">SSH hosts</div>
+              <div class="text-xs font-medium text-studio-text">{t('settings.network.ssh')}</div>
               <div class="flex flex-wrap gap-1.5">
-                <Button variant="primary" size="sm" onclick={beginSshAdd}>+ Add host</Button>
+                <Button variant="primary" size="sm" onclick={beginSshAdd}>+ {t('settings.network.sshAdd')}</Button>
                 <Button variant="ghost" size="sm" onclick={openSshConfig}>ssh.json</Button>
-                <Button variant="ghost" size="sm" onclick={() => void hydrateSsh()}>Refresh</Button>
+                <Button variant="ghost" size="sm" onclick={() => void hydrateSsh()}>{t('common.retry')}</Button>
               </div>
             </div>
 
             {#if sshFormOpen}
               <div class="grid gap-2 rounded-lg border border-studio-purple/35 bg-studio-purple/10 p-3">
-                <div class="text-xs font-medium text-studio-text">{sshEditing ? `Edit · ${sshEditing}` : 'New host'}</div>
+                <div class="text-xs font-medium text-studio-text">{sshEditing ? `${t('settings.network.sshEdit')} · ${sshEditing}` : t('settings.network.sshAdd')}</div>
                 <div class="grid grid-cols-2 gap-2">
-                  <TextInput label="Name" bind:value={sshForm.name} placeholder="prod" disabled={sshBusy !== null} />
-                  <TextInput label="Host / IP" bind:value={sshForm.host} placeholder="203.0.113.10" disabled={sshBusy !== null} />
-                  <TextInput label="User" bind:value={sshForm.user} placeholder="ubuntu" disabled={sshBusy !== null} />
-                  <NumberInput label="Port" bind:value={sshForm.port} min={1} max={65535} disabled={sshBusy !== null} />
+                  <TextInput label={t('settings.network.sshName')} bind:value={sshForm.name} placeholder="prod" disabled={sshBusy !== null} />
+                  <TextInput label={t('settings.network.sshHost')} bind:value={sshForm.host} placeholder="203.0.113.10" disabled={sshBusy !== null} />
+                  <TextInput label={t('settings.network.sshUser')} bind:value={sshForm.user} placeholder="ubuntu" disabled={sshBusy !== null} />
+                  <NumberInput label={t('settings.network.sshPort')} bind:value={sshForm.port} min={1} max={65535} disabled={sshBusy !== null} />
                 </div>
                 <TextInput
-                  label="Identity file (optional)"
+                  label={t('settings.network.sshIdentity')}
                   bind:value={sshForm.identityFile}
                   placeholder="~/.ssh/id_ed25519"
                   disabled={sshBusy !== null}
                 />
                 {#if sshFormError}<p class="m-0 text-[11px] text-danger">{sshFormError}</p>{/if}
                 <div class="flex flex-wrap gap-1.5">
-                  <Button variant="primary" size="sm" loading={sshBusy !== null} onclick={() => void saveSshHost()}>Save</Button>
-                  <Button variant="ghost" size="sm" disabled={sshBusy !== null} onclick={cancelSshForm}>Cancel</Button>
+                  <Button variant="primary" size="sm" loading={sshBusy !== null} onclick={() => void saveSshHost()}>{t('common.save')}</Button>
+                  <Button variant="ghost" size="sm" disabled={sshBusy !== null} onclick={cancelSshForm}>{t('common.cancel')}</Button>
                 </div>
               </div>
             {/if}
 
             {#if sshHosts.length === 0 && !sshFormOpen}
-              <p class="text-[11px] text-studio-text-dim">No hosts yet.</p>
+              <p class="text-[11px] text-studio-text-dim">{t('settings.network.mcpEmpty')}</p>
             {:else if sshHosts.length}
               <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
                 {#each sshHosts as h (h.name)}
@@ -567,7 +884,7 @@
                       >
                     </div>
                     <div class="flex shrink-0 flex-wrap gap-1">
-                      <Button variant="ghost" size="sm" disabled={sshBusy !== null} onclick={() => beginSshEdit(h)}>Edit</Button>
+                      <Button variant="ghost" size="sm" disabled={sshBusy !== null} onclick={() => beginSshEdit(h)}>{t('settings.network.sshEdit')}</Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -575,49 +892,53 @@
                         onclick={() => {
                           app.setMode('terminal')
                           close()
-                          app.notify('info', 'Open SSH', `Terminal → SSH → ${h.name}`)
+                          queueMicrotask(() => {
+                            window.dispatchEvent(
+                              new CustomEvent('enpiistudio:terminal-ssh', { detail: { name: h.name } }),
+                            )
+                          })
                         }}
-                      >Connect</Button
+                      >{t('common.open')}</Button
                       >
                       <Button variant="danger" size="sm" disabled={sshBusy !== null} onclick={() => void removeSshHost(h.name)}
-                        >Delete</Button
+                        >{t('settings.network.sshDelete')}</Button
                       >
                     </div>
                   </li>
                 {/each}
               </ul>
             {/if}
-            <div class="text-xs font-medium text-studio-text">Tunnels</div>
+            <div class="text-xs font-medium text-studio-text">{t('settings.network.sshHint')}</div>
             {#if sshTunnels.length === 0}
-              <p class="text-[11px] text-studio-text-dim">None.</p>
+              <p class="text-[11px] text-studio-text-dim">{t('settings.network.mcpEmpty')}</p>
             {:else}
               <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
-                {#each sshTunnels as t (t.name)}
+                {#each sshTunnels as tunnel (tunnel.name)}
                   <li class="flex flex-row items-center justify-between gap-3 rounded-lg border border-border-subtle p-4">
                     <div class="min-w-0">
-                      <strong class="text-sm text-studio-text">{t.name}</strong>
-                      <code class="block font-mono text-[11px] text-studio-text-dim">localhost:{t.localPort} → {t.host} → {t.remoteHost}:{t.remotePort}</code>
-                      {#if t.running}<span class="ml-1.5 text-[10px] text-studio-success-shell">pid {t.pid ?? '?'}</span>{/if}
+                      <strong class="text-sm text-studio-text">{tunnel.name}</strong>
+                      <code class="block font-mono text-[11px] text-studio-text-dim">localhost:{tunnel.localPort} → {tunnel.host} → {tunnel.remoteHost}:{tunnel.remotePort}</code>
+                      {#if tunnel.running}<span class="ml-1.5 text-[10px] text-studio-success-shell">pid {tunnel.pid ?? '?'}</span>{/if}
                     </div>
                     <Button
-                      variant={t.running ? 'ghost' : 'primary'}
+                      variant={tunnel.running ? 'ghost' : 'primary'}
                       size="sm"
-                      loading={sshBusy === t.name}
-                      disabled={sshBusy !== null && sshBusy !== t.name}
-                      onclick={() => void onTunnelToggle(t)}
+                      loading={sshBusy === tunnel.name}
+                      disabled={sshBusy !== null && sshBusy !== tunnel.name}
+                      onclick={() => void onTunnelToggle(tunnel)}
                     >
-                      {t.running ? 'Stop' : 'Start'}
+                      {tunnel.running ? t('settings.network.sshStop') : t('settings.network.sshStart')}
                     </Button>
                   </li>
                 {/each}
               </ul>
             {/if}
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="text-xs font-medium text-studio-text">MCP</div>
-              <Button variant="ghost" size="sm" onclick={() => void hydrateMcp()}>Refresh</Button>
+              <div class="text-xs font-medium text-studio-text">{t('settings.network.mcp')}</div>
+              <Button variant="ghost" size="sm" onclick={() => void hydrateMcp()}>{t('common.retry')}</Button>
             </div>
             {#if mcpServers.length === 0}
-              <p class="text-[11px] text-studio-text-dim">None.</p>
+              <p class="text-[11px] text-studio-text-dim">{t('settings.network.mcpEmpty')}</p>
             {:else}
               <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
                 {#each mcpServers as s (s.name)}
@@ -636,19 +957,93 @@
               </ul>
             {/if}
           </div>
+        {:else if section === 'schedule'}
+          <div class="flex flex-col gap-2.5">
+            <p class="m-0 text-[11px] leading-relaxed text-studio-text-dim">{t('settings.schedule.hint')}</p>
+            {#if !app.activeProject}
+              <p class="text-[11px] text-studio-text-dim">{t('settings.schedule.needProject')}</p>
+            {:else}
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-xs font-medium text-studio-text">{t('settings.nav.schedule')}</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <Button variant="primary" size="sm" onclick={() => (cronFormOpen = true)}>+ {t('settings.schedule.add')}</Button>
+                  <Button variant="ghost" size="sm" onclick={() => void hydrateCron()}>{t('common.retry')}</Button>
+                </div>
+              </div>
+              {#if cronFormOpen}
+                <div class="grid gap-2 rounded-lg border border-studio-purple/35 bg-studio-purple/10 p-3">
+                  <TextInput label={t('settings.schedule.name')} bind:value={cronForm.name} placeholder="morning-check" disabled={cronBusy} />
+                  <TextInput label={t('settings.schedule.expr')} bind:value={cronForm.schedule} placeholder="0 9 * * 1-5" disabled={cronBusy} />
+                  <Textarea label={t('settings.schedule.prompt')} rows={3} bind:value={cronForm.prompt} disabled={cronBusy} placeholder="Review open PRs and summarize risk." />
+                  {#if cronFormError}<p class="m-0 text-[11px] text-danger">{cronFormError}</p>{/if}
+                  <div class="flex flex-wrap gap-1.5">
+                    <Button variant="primary" size="sm" loading={cronBusy} onclick={() => void saveCronForm()}>{t('common.save')}</Button>
+                    <Button variant="ghost" size="sm" disabled={cronBusy} onclick={() => { cronFormOpen = false; cronFormError = '' }}>{t('common.cancel')}</Button>
+                  </div>
+                </div>
+              {/if}
+              {#if cronJobs.length === 0 && !cronFormOpen}
+                <p class="text-[11px] text-studio-text-dim">{t('settings.schedule.empty')}</p>
+              {:else if cronJobs.length}
+                <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
+                  {#each cronJobs as job (job.id)}
+                    <li class="flex flex-col gap-1 rounded-lg border border-border-subtle p-3">
+                      <div class="flex flex-wrap items-start justify-between gap-2">
+                        <div class="min-w-0">
+                          <strong class="text-sm text-studio-text">{job.name}</strong>
+                          <code class="ml-1.5 font-mono text-[11px] text-studio-lavender">{job.schedule}</code>
+                          <span class="ml-1.5 text-[10px] {job.enabled ? 'text-studio-success-shell' : 'text-studio-text-dim'}">{job.enabled ? t('settings.schedule.enable') : t('settings.schedule.disable')}</span>
+                        </div>
+                        <div class="flex shrink-0 flex-wrap gap-1">
+                          <Button variant="ghost" size="sm" disabled={cronBusy} onclick={() => void onCronToggle(job)}>
+                            {job.enabled ? t('settings.schedule.disable') : t('settings.schedule.enable')}
+                          </Button>
+                          <Button variant="danger" size="sm" disabled={cronBusy} onclick={() => void onCronDelete(job)}>{t('settings.schedule.delete')}</Button>
+                        </div>
+                      </div>
+                      <div class="truncate text-[11px] text-studio-text-dim">{job.prompt}</div>
+                      <div class="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-white/35">
+                        <span>{t('settings.schedule.runs')} {job.runCount}</span>
+                        {#if job.nextRunAt}<span>{t('settings.schedule.next')} {job.nextRunAt}</span>{/if}
+                        {#if job.lastRunAt}<span>{t('settings.schedule.last')} {job.lastRunAt}</span>{/if}
+                        {#if job.lastError}<span class="text-danger">{t('settings.schedule.err')}: {job.lastError}</span>{/if}
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            {/if}
+          </div>
         {:else if section === 'appearance'}
-          <div class="grid grid-cols-2 items-start gap-x-6 gap-y-5">
+          <div class="flex flex-col gap-5">
             <SmartSelect
-              label="Theme"
+              label={t('settings.appearance.language')}
+              bind:value={locale}
+              options={localeOpts}
+            />
+            <SmartSelect
+              label={t('settings.appearance.theme')}
               bind:value={theme}
               options={themeOpts}
-              disabled={saving}
+            />
+            <SmartSelect
+              label={t('settings.appearance.fontFamily')}
+              bind:value={fontFamily}
+              options={fontFamilyOpts}
+              hint={t('settings.appearance.fontFamily.desc')}
+            />
+            <NumberInput
+              label={t('settings.appearance.uiZoom')}
+              bind:value={uiZoom}
+              min={UI_ZOOM_MIN}
+              max={UI_ZOOM_MAX}
+              step={UI_ZOOM_STEP}
+              hint={t('settings.appearance.uiZoom.desc')}
             />
             <Switch
-              bind:checked={streamTokens}
-              label="Gold running pulse"
-              description="Subtle gold indicator while agent is busy"
-              disabled={saving}
+              bind:checked={goldPulse}
+              label={t('settings.appearance.goldPulse')}
+              description={t('settings.appearance.goldPulse.desc')}
             />
           </div>
         {:else}
@@ -663,7 +1058,7 @@
                     : 'border-border-subtle text-studio-text-dim hover:bg-white/5 hover:text-studio-text'}"
                   onclick={() => (recording = item.id)}
                   onkeydown={(event) => recordKeybinding(event, item.id)}
-                >{recording === item.id ? 'Press shortcut…' : app.keybindings[item.id]}</button>
+                >{recording === item.id ? t('settings.keybindings.press') : app.keybindings[item.id]}</button>
               </div>
             {/each}
           </div>
@@ -678,20 +1073,20 @@
       </div>
 
       <footer class="flex items-center justify-end gap-2 border-t border-border-subtle px-6 py-4">
-        {#if section === 'keybindings' || section === 'network'}
+        {#if section === 'keybindings' || section === 'network' || section === 'appearance' || section === 'schedule'}
           {#if section === 'keybindings'}
-            <Button variant="ghost" onclick={() => app.resetKeybindings()}>Reset Defaults</Button>
+            <Button variant="ghost" onclick={() => app.resetKeybindings()}>{t('settings.resetDefaults')}</Button>
           {/if}
-          <Button variant="primary" onclick={close}>Done</Button>
+          <Button variant="primary" onclick={close}>{t('settings.done')}</Button>
         {:else}
-          <Button variant="ghost" onclick={close} disabled={saving}>Cancel</Button>
+          <Button variant="ghost" onclick={close} disabled={saving}>{t('settings.cancel')}</Button>
           <Button
             variant="primary"
             loading={saving}
-            disabled={!baseUrl.trim() || !model.trim()}
+            disabled={!canSave}
             onclick={() => void save()}
           >
-            Save
+            {t('settings.save')}
           </Button>
         {/if}
       </footer>

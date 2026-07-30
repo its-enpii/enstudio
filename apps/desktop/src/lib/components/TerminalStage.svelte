@@ -4,13 +4,35 @@
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
   import { listSsh, type SshHostInfo } from '../enpii'
-  import { state as app } from '../store.svelte'
+  import { state as app, fontStack, EDITOR_FONT_SIZE } from '../store.svelte'
   import { xtermTheme } from '../theme'
-  import { Dropdown, type DropdownItem } from './ui'
+  import { Icon } from '../icons'
+  import {
+    applyMirrorData,
+    commandToken,
+    createMirror,
+    ghostSuffix,
+    isAltScreen,
+    notePtyOutput,
+    pickBestMatch,
+    shouldShowGhost,
+    type LineMirror,
+  } from '../termGhost'
 
   type TerminalTab = { id: string; title: string; exited: boolean }
   type PaneIds = [string | null, string | null]
   type TerminalWorkspace = { tabs: TerminalTab[]; activeId: string | null; paneIds: PaneIds; paneTabs: [string[], string[]]; focusedPane: 0 | 1; nextTitle: number }
+  type GhostState = {
+    mirror: LineMirror
+    suffix: string
+    match: string | null
+    matches: string[]
+    menuOpen: boolean
+    selected: number
+    left: number
+    top: number
+    timer?: ReturnType<typeof setTimeout>
+  }
 
   let tabs = $state<TerminalTab[]>([])
   let activeId = $state<string | null>(null)
@@ -22,6 +44,15 @@
   let renameInput = $state<HTMLInputElement>()
   let primaryHost = $state<HTMLDivElement>()
   let secondaryHost = $state<HTMLDivElement>()
+  /** Ghost UI for focused terminal (DOM overlay on pane). */
+  let ghostText = $state('')
+  let ghostLeft = $state(0)
+  let ghostTop = $state(0)
+  let ghostPane = $state<0 | 1>(0)
+  let ghostMenuOpen = $state(false)
+  let ghostMatches = $state<string[]>([])
+  let ghostSelected = $state(0)
+  let ghostVisible = $state(false)
   let error = $state('')
   let currentProjectId: string | null = null
   const workspaces = new Map<string, TerminalWorkspace>()
@@ -32,6 +63,7 @@
   const terminalSizes = new Map<string, { cols: number; rows: number }>()
   const pendingData = new Map<string, string>()
   const creatingFor = new Set<string>()
+  const ghosts = new Map<string, GhostState>()
   const api = window.enpiistudio.terminal
 
   function workspaceFor(projectId: string): TerminalWorkspace {
@@ -90,26 +122,41 @@
   }
 
   const resizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const readyHosts = new Set<HTMLDivElement>()
+
+  function hostReady(host: HTMLDivElement | undefined): host is HTMLDivElement {
+    return Boolean(host && host.clientWidth > 80 && host.clientHeight > 40)
+  }
 
   function fitPane(pane: 0 | 1, immediate = false): void {
     const id = paneIds[pane]
     const host = hostForPane(pane)
-    if (!id || !host || host.clientWidth <= 0 || host.clientHeight <= 0) return
+    // Skip tiny/hidden hosts — fitting to ~20 cols wraps prompt then jumps (blink).
+    if (!id || !hostReady(host)) return
     const fit = fitAddons.get(id)
     const terminal = terminals.get(id)
     if (!fit || !terminal) return
     const apply = () => {
+      if (!hostReady(host)) return
       try {
         fit.fit()
+        // Guard post-fit: FitAddon can still land tiny mid-layout
+        if (terminal.cols < 40 || terminal.rows < 10) return
         const previous = terminalSizes.get(id)
-        if (previous?.cols === terminal.cols && previous.rows === terminal.rows) return
+        if (previous?.cols === terminal.cols && previous.rows === terminal.rows) {
+          host.style.opacity = '1'
+          readyHosts.add(host)
+          return
+        }
         terminalSizes.set(id, { cols: terminal.cols, rows: terminal.rows })
         void api.resize(id, terminal.cols, terminal.rows)
+        host.style.opacity = '1'
+        readyHosts.add(host)
       } catch {
         /* hidden or not mounted yet */
       }
     }
-    // Debounce — TUI CLIs (Codex etc.) thrash on rapid resize.
+    // Debounce — TUI CLIs thrash on rapid resize; initial settle needs a beat.
     if (immediate) {
       const t = resizeTimers.get(id)
       if (t) clearTimeout(t)
@@ -124,7 +171,7 @@
       setTimeout(() => {
         resizeTimers.delete(id)
         apply()
-      }, 80),
+      }, 100),
     )
   }
 
@@ -133,22 +180,265 @@
     fitPane(1, immediate)
   }
 
+  function ghostFor(id: string): GhostState {
+    let g = ghosts.get(id)
+    if (!g) {
+      g = {
+        mirror: createMirror(),
+        suffix: '',
+        match: null,
+        matches: [],
+        menuOpen: false,
+        selected: 0,
+        left: 0,
+        top: 0,
+      }
+      ghosts.set(id, g)
+    }
+    return g
+  }
+
+  function clearGhost(id: string, keepMirror = true): void {
+    const g = ghosts.get(id)
+    if (!g) return
+    if (g.timer) clearTimeout(g.timer)
+    g.timer = undefined
+    g.suffix = ''
+    g.match = null
+    g.matches = []
+    g.menuOpen = false
+    g.selected = 0
+    if (!keepMirror) g.mirror = createMirror()
+    if (activeId === id) syncGhostUi(id)
+  }
+
+  function cellMetrics(term: Terminal, host: HTMLDivElement): { cellW: number; cellH: number; padX: number; padY: number } {
+    const screen = host.querySelector('.xterm-screen') as HTMLElement | null
+    const cols = Math.max(term.cols, 1)
+    const rows = Math.max(term.rows, 1)
+    const w = screen?.clientWidth || host.clientWidth
+    const h = screen?.clientHeight || host.clientHeight
+    const padX = 12 // host p-3
+    const padY = 12
+    return { cellW: w / cols, cellH: h / rows, padX, padY }
+  }
+
+  function positionGhost(id: string): void {
+    const g = ghosts.get(id)
+    const term = terminals.get(id)
+    if (!g || !term) return
+    const pane: 0 | 1 = paneIds[0] === id ? 0 : paneIds[1] === id ? 1 : focusedPane
+    const host = hostForPane(pane)
+    if (!host) return
+    const { cellW, cellH, padX, padY } = cellMetrics(term, host)
+    const buf = term.buffer.active
+    const viewportY = buf.viewportY ?? 0
+    g.left = padX + buf.cursorX * cellW
+    g.top = padY + (buf.cursorY - viewportY) * cellH
+  }
+
+  function syncGhostUi(id: string | null): void {
+    if (!id || id !== activeId) {
+      // Still allow show if id is on focused pane
+      if (!id || (paneIds[focusedPane] !== id && activeId !== id)) {
+        ghostVisible = false
+        ghostMenuOpen = false
+        return
+      }
+    }
+    const g = ghosts.get(id)
+    if (!g || (!g.suffix && !g.menuOpen)) {
+      ghostVisible = false
+      ghostMenuOpen = false
+      ghostText = ''
+      return
+    }
+    positionGhost(id)
+    ghostPane = paneIds[0] === id ? 0 : 1
+    ghostLeft = g.left
+    ghostTop = g.top
+    ghostText = g.suffix
+    ghostMatches = g.matches
+    ghostSelected = g.selected
+    ghostMenuOpen = g.menuOpen
+    ghostVisible = Boolean(g.suffix) || g.menuOpen
+  }
+
+  async function refreshGhost(id: string): Promise<void> {
+    const g = ghosts.get(id)
+    const term = terminals.get(id)
+    if (!g || !term) return
+    const tab = tabs.find((t) => t.id === id)
+    if (tab?.exited) {
+      clearGhost(id)
+      return
+    }
+    const alt = isAltScreen(term as unknown as { buffer: { active: { type?: string }; normal?: unknown } })
+    const token = commandToken(g.mirror)
+    if (!token || alt) {
+      g.suffix = ''
+      g.match = null
+      g.matches = []
+      if (!g.menuOpen) syncGhostUi(id)
+      else syncGhostUi(id)
+      return
+    }
+    try {
+      const matches = (await api.pathComplete?.(token)) ?? []
+      g.matches = matches
+      const best = pickBestMatch(matches, token)
+      if (shouldShowGhost({ altScreen: alt, token, match: best })) {
+        g.match = best
+        g.suffix = ghostSuffix(token, best!)
+      } else {
+        g.match = null
+        g.suffix = ''
+      }
+      if (g.selected >= g.matches.length) g.selected = 0
+    } catch {
+      g.suffix = ''
+      g.match = null
+      g.matches = []
+    }
+    syncGhostUi(id)
+  }
+
+  function scheduleGhost(id: string): void {
+    const g = ghostFor(id)
+    if (g.timer) clearTimeout(g.timer)
+    g.timer = setTimeout(() => {
+      g.timer = undefined
+      void refreshGhost(id)
+    }, 50)
+  }
+
+  function acceptGhost(id: string, which?: string): void {
+    const g = ghosts.get(id)
+    if (!g) return
+    const token = commandToken(g.mirror)
+    const match = which ?? (g.menuOpen && g.matches[g.selected] ? g.matches[g.selected] : g.match)
+    if (!token || !match) return
+    const suffix = ghostSuffix(token, match)
+    if (!suffix) return
+    applyMirrorData(g.mirror, suffix)
+    void api.write(id, suffix)
+    g.menuOpen = false
+    g.suffix = ''
+    g.match = null
+    g.matches = []
+    syncGhostUi(id)
+    scheduleGhost(id)
+  }
+
+  function wireGhost(id: string, terminal: Terminal): void {
+    const g = ghostFor(id)
+    terminal.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true
+      const hasGhost = Boolean(g.suffix) || g.menuOpen
+      if (ev.key === ' ' && ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        ev.preventDefault()
+        void (async () => {
+          await refreshGhost(id)
+          if (g.matches.length) {
+            g.menuOpen = true
+            g.selected = 0
+            if (!g.suffix && g.matches[0]) {
+              const token = commandToken(g.mirror)
+              if (token) {
+                g.match = g.matches[0]!
+                g.suffix = ghostSuffix(token, g.matches[0]!)
+              }
+            }
+            syncGhostUi(id)
+          }
+        })()
+        return false
+      }
+      if (!hasGhost) return true
+      if (ev.key === 'Escape') {
+        g.menuOpen = false
+        g.suffix = ''
+        g.match = null
+        syncGhostUi(id)
+        return false
+      }
+      if (g.menuOpen && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+        ev.preventDefault()
+        const n = g.matches.length
+        if (!n) return false
+        g.selected = ev.key === 'ArrowDown' ? (g.selected + 1) % n : (g.selected - 1 + n) % n
+        const token = commandToken(g.mirror)
+        const m = g.matches[g.selected]
+        if (token && m) {
+          g.match = m
+          g.suffix = ghostSuffix(token, m)
+        }
+        syncGhostUi(id)
+        return false
+      }
+      if (ev.key === 'Tab' && !ev.altKey && !ev.metaKey) {
+        ev.preventDefault()
+        acceptGhost(id)
+        return false
+      }
+      if (ev.key === 'ArrowRight' && !ev.altKey && !ev.metaKey && !ev.ctrlKey && g.suffix && !g.menuOpen) {
+        // Only accept when mirror is "at end" — always true for our end-only mirror
+        ev.preventDefault()
+        acceptGhost(id)
+        return false
+      }
+      if (ev.key === 'Enter' && g.menuOpen) {
+        ev.preventDefault()
+        acceptGhost(id)
+        return false
+      }
+      if (ev.key === 'ArrowDown' && g.suffix && !g.menuOpen && g.matches.length > 1) {
+        ev.preventDefault()
+        g.menuOpen = true
+        g.selected = 0
+        syncGhostUi(id)
+        return false
+      }
+      return true
+    })
+    terminal.onData((data) => {
+      applyMirrorData(g.mirror, data)
+      void api.write(id, data)
+      // Reset menu on normal typing
+      if (g.menuOpen && data.length === 1 && data !== '\t') g.menuOpen = false
+      scheduleGhost(id)
+    })
+  }
+
   async function mountPane(pane: 0 | 1): Promise<void> {
     const id = paneIds[pane]
     const host = hostForPane(pane)
     if (!host) return
     if (!id) {
       host.replaceChildren()
+      host.style.opacity = '1'
       return
     }
     const terminal = terminals.get(id)
     if (!terminal) return
+    // Hide until first good fit — no wrapped-prompt flash
+    if (!readyHosts.has(host)) host.style.opacity = '0'
     if (!terminal.element) terminal.open(host)
     else if (host.firstElementChild !== terminal.element) host.replaceChildren(terminal.element)
-    // Double rAF: layout settles after open before fit (kills tiny→full flash)
-    fitPane(pane, true)
+    await waitHostSize(pane)
+    // fonts.ready: wrong cell metrics → wrong cols → wrap blink
+    try {
+      await document.fonts?.ready
+    } catch {
+      /* ignore */
+    }
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
     fitPane(pane, true)
+    // One more settle pass if layout still catching up
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    fitPane(pane, true)
+    // Always reveal — blank forever worse than rare wrap
+    host.style.opacity = '1'
   }
 
   async function activateTerminal(id: string, requestedPane: 0 | 1 = focusedPane): Promise<void> {
@@ -166,65 +456,71 @@
     if (!terminal) return
     await mountPane(pane)
     terminal.focus()
+    void refreshGhost(id)
   }
 
-  let sshHosts = $state<SshHostInfo[]>([])
-  let sshConfigPath = $state('')
-  const sshMenuItems = $derived<DropdownItem[]>([
-    ...sshHosts.map((h) => ({
-      id: h.name,
-      label: h.name,
-      description: `${h.user ? `${h.user}@` : ''}${h.host}:${h.port}`,
-    })),
-    ...(sshHosts.length ? [{ id: '_sep', label: '', separator: true }] : []),
-    {
-      id: '_edit',
-      label: 'Edit ssh.json…',
-      description: sshConfigPath || '~/.enpiistudio/ssh.json',
-    },
-  ])
-
-  async function refreshSshHosts(): Promise<void> {
+  async function connectSshByName(name: string): Promise<void> {
     try {
       const data = await listSsh()
-      sshHosts = data.hosts ?? []
-      sshConfigPath = data.configPath ?? ''
-    } catch {
-      sshHosts = []
+      const host = (data.hosts ?? []).find((h) => h.name === name)
+      if (!host) {
+        error = `SSH host not found: ${name}`
+        return
+      }
+      await launchSshHost(host)
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
     }
   }
 
-  async function onSshMenuSelect(id: string): Promise<void> {
-    if (id === '_edit') {
-      const path = sshConfigPath || (await listSsh().then((d) => d.configPath).catch(() => ''))
-      if (path) void window.enpiistudio.shell.openPath(path)
-      return
-    }
-    const host = sshHosts.find((h) => h.name === id)
-    if (host) void launchSshHost(host)
+  function onSshConnectEvent(e: Event): void {
+    const name = (e as CustomEvent<{ name?: string }>).detail?.name
+    if (name) void connectSshByName(name)
   }
 
   function measureHost(pane: 0 | 1): { cols: number; rows: number } {
     const host = hostForPane(pane)
-    // JetBrains Mono 12 / lineHeight 1.25
-    const cellW = 7.2
+    // JetBrains Mono 12 / lineHeight 1.25 — small cellW → seed cols ≥ final fit (no wrap)
+    const cellW = 7.0
     const cellH = 15
     const w = host?.clientWidth ?? 0
     const h = host?.clientHeight ?? 0
-    // Prefer real host size; only fall back when not laid out yet
-    const cols = Math.max(80, Math.floor((w > 40 ? w : 900) / cellW))
-    const rows = Math.max(24, Math.floor((h > 40 ? h : 500) / cellH))
-    return { cols, rows }
+    // Only trust real laid-out host; else generous seed (never tiny)
+    if (w > 80 && h > 40) {
+      return {
+        cols: Math.max(80, Math.floor(w / cellW)),
+        rows: Math.max(24, Math.floor(h / cellH)),
+      }
+    }
+    return { cols: 120, rows: 32 }
   }
 
   /** Wait until pane host has real layout (avoids tiny seed → jump-fit). */
-  async function waitHostSize(pane: 0 | 1, tries = 12): Promise<void> {
+  async function waitHostSize(pane: 0 | 1, tries = 24): Promise<boolean> {
+    let lastW = 0
+    let lastH = 0
+    let stable = 0
     for (let i = 0; i < tries; i++) {
       const host = hostForPane(pane)
-      if (host && host.clientWidth > 40 && host.clientHeight > 40) return
+      if (hostReady(host)) {
+        // Need 2 consecutive equal measurements — layout mid-transition is the blink.
+        if (host.clientWidth === lastW && host.clientHeight === lastH) {
+          stable += 1
+          if (stable >= 2) return true
+        } else {
+          stable = 0
+          lastW = host.clientWidth
+          lastH = host.clientHeight
+        }
+      } else {
+        stable = 0
+        lastW = 0
+        lastH = 0
+      }
       await tick()
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
     }
+    return hostReady(hostForPane(pane))
   }
 
   async function addTerminal(
@@ -235,7 +531,9 @@
   ): Promise<void> {
     if (!cwd) return
     if (!projectId) return
-    // Allow parallel vendor launches — key by project+command
+    // Don't spawn while Terminal stage is hidden — host is 0×0 → seed/fit thrash.
+    if (app.mode !== 'terminal' && !opts?.command) return
+    // Dedupe in-flight creates (shell / same vendor title)
     const createKey = `${projectId}:${opts?.command ?? 'shell'}:${opts?.title ?? ''}`
     if (creatingFor.has(createKey)) return
     creatingFor.add(createKey)
@@ -244,6 +542,11 @@
     error = ''
     try {
       await waitHostSize(targetPane)
+      try {
+        await document.fonts?.ready
+      } catch {
+        /* ignore */
+      }
       const seed = measureHost(targetPane)
       const created = await api.create(
         cwd,
@@ -260,8 +563,8 @@
         rows: seed.rows,
         cursorBlink: true,
         cursorStyle: 'bar',
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 12,
+        fontFamily: fontStack(app.ui.fontFamily),
+        fontSize: EDITOR_FONT_SIZE,
         lineHeight: 1.25,
         scrollback: 5_000,
         // Disable bold → bright swap thrash some TUIs re-render on.
@@ -270,7 +573,7 @@
       })
       const fit = new FitAddon()
       terminal.loadAddon(fit)
-      terminal.onData((data) => void api.write(created.id, data))
+      wireGhost(created.id, terminal)
       terminals.set(created.id, terminal)
       fitAddons.set(created.id, fit)
       terminalSizes.set(created.id, { cols: seed.cols, rows: seed.rows })
@@ -327,6 +630,8 @@
     fitAddons.delete(id)
     terminalSizes.delete(id)
     pendingData.delete(id)
+    clearGhost(id, false)
+    ghosts.delete(id)
     tabs = tabs.filter((tab) => tab.id !== id)
     paneTabs = [paneTabs[0].filter((tabId) => tabId !== id), paneTabs[1].filter((tabId) => tabId !== id)]
     paneIds = paneIds.map((paneId) => paneId === id ? null : paneId) as PaneIds
@@ -395,16 +700,44 @@
     paneTabs = [ [...workspace.paneTabs[0]], [...workspace.paneTabs[1]] ]
     focusedPane = workspace.focusedPane
     normalizePaneState()
+    readyHosts.clear()
+    if (primaryHost) primaryHost.style.opacity = '0'
+    if (secondaryHost) secondaryHost.style.opacity = '0'
     primaryHost?.replaceChildren()
     secondaryHost?.replaceChildren()
     await tick()
     if (destroyed || currentProjectId !== projectId) return
+    // Only mount/create when Terminal mode is visible — else host is display:none.
+    if (app.mode !== 'terminal') return
     if (paneIds[0] && terminals.has(paneIds[0])) {
       await mountPane(0)
       await mountPane(1)
       if (activeId) await activateTerminal(activeId, focusedPane)
+    } else if (tabs.length === 0) {
+      await addTerminal(cwd, projectId)
     }
-    else if (tabs.length === 0) await addTerminal(cwd, projectId)
+  }
+
+  async function onTerminalVisible(): Promise<void> {
+    if (destroyed || app.mode !== 'terminal') return
+    const projectId = currentProjectId ?? app.activeProjectId
+    const cwd = app.activeProject?.path
+    if (!projectId || !cwd) return
+    await tick()
+    await waitHostSize(0)
+    if (destroyed || app.mode !== 'terminal') return
+    if (paneIds[0] && terminals.has(paneIds[0])) {
+      await mountPane(0)
+      await mountPane(1)
+      if (activeId) terminals.get(activeId)?.focus()
+    } else if (tabs.length === 0) {
+      await addTerminal(cwd, projectId)
+    } else if (paneIds[0] && !terminals.has(paneIds[0])) {
+      // Workspace restored but PTY gone (reload) — fresh shell
+      await addTerminal(cwd, projectId)
+    } else {
+      fitVisible(true)
+    }
   }
 
   $effect(() => {
@@ -414,23 +747,61 @@
     untrack(() => void switchProject(projectId, cwd))
   })
 
+  // Entering Terminal mode: host unhides → wait stable size → mount/fit once.
+  $effect(() => {
+    const mode = app.mode
+    if (mode !== 'terminal') {
+      // Leave: drop ready flag so next enter re-hides until fit
+      readyHosts.clear()
+      return
+    }
+    untrack(() => void onTerminalVisible())
+  })
+
+  // Live mono family + re-fit after UI zoom (CSS zoom changes host px box).
+  $effect(() => {
+    const family = fontStack(app.ui.fontFamily)
+    void app.ui.uiZoom
+    for (const terminal of terminals.values()) {
+      terminal.options.fontFamily = family
+      terminal.options.fontSize = EDITOR_FONT_SIZE
+    }
+    untrack(() => fitVisible(true))
+  })
+
   onMount(() => {
+    // Warm PATH cache once (non-blocking).
+    void api.pathComplete?.('').catch(() => {})
     const offData = api.onData(({ id, data }) => {
       const terminal = terminals.get(id)
-      if (terminal) terminal.write(data)
-      else pendingData.set(id, `${pendingData.get(id) ?? ''}${data}`)
+      const g = ghosts.get(id)
+      if (g) notePtyOutput(g.mirror, data)
+      if (terminal) {
+        terminal.write(data)
+        // Reposition ghost after paint
+        requestAnimationFrame(() => {
+          if (g?.suffix || g?.menuOpen) {
+            positionGhost(id)
+            if (activeId === id || paneIds[focusedPane] === id) syncGhostUi(id)
+          }
+        })
+      } else pendingData.set(id, `${pendingData.get(id) ?? ''}${data}`)
     })
     const offExit = api.onExit(({ id, exitCode }) => {
       for (const workspace of workspaces.values()) {
         const tab = workspace.tabs.find((item) => item.id === id)
         if (tab) tab.exited = true
       }
+      clearGhost(id, false)
+      ghosts.delete(id)
       terminals.get(id)?.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)
     })
+    window.addEventListener('enpiistudio:terminal-ssh', onSshConnectEvent)
     resizeObserver = new ResizeObserver(() => fitVisible(false))
     return () => {
       offData()
       offExit()
+      window.removeEventListener('enpiistudio:terminal-ssh', onSshConnectEvent)
       resizeObserver?.disconnect()
     }
   })
@@ -453,6 +824,8 @@
     destroyed = true
     for (const t of resizeTimers.values()) clearTimeout(t)
     resizeTimers.clear()
+    for (const g of ghosts.values()) if (g.timer) clearTimeout(g.timer)
+    ghosts.clear()
     for (const id of terminals.keys()) void api.kill(id)
     for (const terminal of terminals.values()) terminal.dispose()
     terminals.clear()
@@ -465,37 +838,11 @@
   <div class="absolute right-0 top-0 z-[6] flex items-center justify-end gap-2 px-2 pt-1.5">
     <button
       type="button"
-      class="rounded px-1.5 py-1 font-mono text-[13px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+      class="grid size-7 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
       aria-label="Split terminal"
       title="Split terminal"
-      onclick={() => void splitTerminal()}>▥</button
+      onclick={() => void splitTerminal()}><Icon name="diff" size={14} /></button
     >
-    <Dropdown
-      items={sshMenuItems}
-      label="SSH"
-      align="end"
-      disabled={!app.activeProject}
-      onSelect={(id) => void onSshMenuSelect(id)}
-      class="!inline-flex"
-    >
-      {#snippet trigger({ open, toggle })}
-        <button
-          type="button"
-          class="cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 py-1 text-xs text-studio-text-dim hover:border-studio-gold/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title="Open SSH host"
-          disabled={!app.activeProject}
-          onclick={(e) => {
-            e.stopPropagation()
-            if (!open) void refreshSshHosts()
-            toggle()
-          }}
-        >
-          SSH ▾
-        </button>
-      {/snippet}
-    </Dropdown>
   </div>
   <section
     class="relative min-h-0 flex-1 overflow-hidden {paneIds[1]
@@ -505,13 +852,6 @@
     {#if error}
       <div class="absolute inset-x-0 top-10 z-10 p-3.5 font-mono text-[11px] text-studio-error">{error}</div>
     {/if}
-    {#if tabs.length === 0 && !error}
-      <button
-        type="button"
-        class="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-md border border-studio-purple/42 bg-studio-purple/18 px-3 py-2 text-[11px] text-studio-lavender-muted"
-        onclick={() => void addTerminal()}>New Terminal</button
-      >
-    {/if}
     <div
       class="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] overflow-hidden {focusedPane === 0
         ? 'ring-1 ring-inset ring-studio-purple/40'
@@ -519,7 +859,7 @@
       onfocusin={() => void focusPane(0)}
     >
       <div
-        class="flex min-h-9 min-w-0 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
+        class="flex min-h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
         role="tablist"
         aria-label="Primary terminal pane"
       >
@@ -527,7 +867,7 @@
           {@const tab = tabs.find((item) => item.id === id)}
           {#if tab}
             <div
-              class="flex items-center border-r border-white/5 {tab.id === activeId
+              class="flex h-full items-center border-r border-white/5 {tab.id === activeId
                 ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
                 : ''}"
             >
@@ -562,22 +902,67 @@
               {/if}
               <button
                 type="button"
-                class="mx-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                class="mx-1 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
                 aria-label={`Close ${tab.title}`}
-                onclick={() => void closeTerminal(tab.id)}>×</button
+                onclick={() => void closeTerminal(tab.id)}><Icon name="close" size={12} /></button
               >
             </div>
           {/if}
         {/each}
         <button
           type="button"
-          class="ml-1.5 rounded px-1.5 py-1 font-mono text-base text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          class="ml-1.5 grid size-7 shrink-0 place-items-center self-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
           aria-label="New terminal"
           title="New terminal"
-          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}>+</button
+          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}
+          ><Icon name="plus" size={14} /></button
         >
       </div>
-      <div class="box-border h-full min-h-0 w-full p-3" bind:this={primaryHost}></div>
+      <div class="relative min-h-0">
+        {#if paneTabs[0].length === 0 && !error}
+          <button
+            type="button"
+            class="absolute left-1/2 top-1/2 z-10 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/12 bg-studio-card text-studio-text shadow-md hover:border-studio-gold/40 hover:text-studio-gold"
+            aria-label="New terminal"
+            title="New terminal"
+            onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}
+          >
+            <Icon name="plus" size={18} />
+          </button>
+        {/if}
+        <div class="relative h-full min-h-0 w-full">
+          <div
+            class="box-border h-full min-h-0 w-full p-3 transition-opacity duration-75"
+            style="opacity:0"
+            bind:this={primaryHost}
+          ></div>
+          {#if ghostVisible && ghostPane === 0}
+            <div
+              class="pointer-events-none absolute z-[4] font-mono whitespace-pre text-studio-text-dim/50"
+              style="left:{ghostLeft}px;top:{ghostTop}px;font-size:{EDITOR_FONT_SIZE}px;line-height:1.25;font-family:{fontStack(app.ui.fontFamily)}"
+            >{ghostText}</div>
+            {#if ghostMenuOpen && ghostMatches.length}
+              <div
+                class="absolute z-[5] max-h-48 min-w-[10rem] overflow-auto rounded-md border border-border-subtle bg-studio-card py-1 shadow-lg"
+                style="left:{ghostLeft}px;top:{ghostTop + EDITOR_FONT_SIZE * 1.25 + 4}px"
+                role="listbox"
+              >
+                {#each ghostMatches as m, i (m)}
+                  <button
+                    type="button"
+                    class="block w-full px-2.5 py-1 text-left font-mono text-[11px] {i === ghostSelected
+                      ? 'bg-studio-purple/25 text-studio-text'
+                      : 'text-studio-text-dim hover:bg-white/6 hover:text-studio-text'}"
+                    role="option"
+                    aria-selected={i === ghostSelected}
+                    onclick={() => activeId && acceptGhost(activeId, m)}
+                  >{m}</button>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        </div>
+      </div>
     </div>
     <div
       class="min-h-0 min-w-0 overflow-hidden border-l border-white/8 {paneIds[1]
@@ -586,7 +971,7 @@
       onfocusin={() => void focusPane(1)}
     >
       <div
-        class="flex min-h-9 min-w-0 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
+        class="flex min-h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
         role="tablist"
         aria-label="Secondary terminal pane"
       >
@@ -594,7 +979,7 @@
           {@const tab = tabs.find((item) => item.id === id)}
           {#if tab}
             <div
-              class="flex items-center border-r border-white/5 {tab.id === activeId
+              class="flex h-full items-center border-r border-white/5 {tab.id === activeId
                 ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
                 : ''}"
             >
@@ -629,32 +1014,67 @@
               {/if}
               <button
                 type="button"
-                class="mx-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                class="mx-1 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
                 aria-label={`Close ${tab.title}`}
-                onclick={() => void closeTerminal(tab.id)}>×</button
+                onclick={() => void closeTerminal(tab.id)}><Icon name="close" size={12} /></button
               >
             </div>
           {/if}
         {/each}
         <button
           type="button"
-          class="ml-1.5 rounded px-1.5 py-1 font-mono text-base text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          class="ml-1.5 grid size-7 shrink-0 place-items-center self-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
           aria-label="New terminal in split pane"
           title="New terminal in split pane"
-          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}>+</button
-        >
-        <button
-          type="button"
-          class="mx-1 rounded px-1 py-1 font-mono text-[10px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
-          aria-label="Close split pane"
-          title="Close split pane"
-          onclick={(event) => {
-            event.stopPropagation()
-            void closeSplit()
-          }}>×</button
+          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}
+          ><Icon name="plus" size={14} /></button
         >
       </div>
-      <div class="box-border h-full min-h-0 w-full p-3" bind:this={secondaryHost}></div>
+      <div class="relative min-h-0">
+        {#if paneIds[1] && paneTabs[1].length === 0 && !error}
+          <button
+            type="button"
+            class="absolute left-1/2 top-1/2 z-10 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/12 bg-studio-card text-studio-text shadow-md hover:border-studio-gold/40 hover:text-studio-gold"
+            aria-label="New terminal in split pane"
+            title="New terminal in split pane"
+            onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}
+          >
+            <Icon name="plus" size={18} />
+          </button>
+        {/if}
+        <div class="relative h-full min-h-0 w-full">
+          <div
+            class="box-border h-full min-h-0 w-full p-3 transition-opacity duration-75"
+            style="opacity:0"
+            bind:this={secondaryHost}
+          ></div>
+          {#if ghostVisible && ghostPane === 1}
+            <div
+              class="pointer-events-none absolute z-[4] font-mono whitespace-pre text-studio-text-dim/50"
+              style="left:{ghostLeft}px;top:{ghostTop}px;font-size:{EDITOR_FONT_SIZE}px;line-height:1.25;font-family:{fontStack(app.ui.fontFamily)}"
+            >{ghostText}</div>
+            {#if ghostMenuOpen && ghostMatches.length}
+              <div
+                class="absolute z-[5] max-h-48 min-w-[10rem] overflow-auto rounded-md border border-border-subtle bg-studio-card py-1 shadow-lg"
+                style="left:{ghostLeft}px;top:{ghostTop + EDITOR_FONT_SIZE * 1.25 + 4}px"
+                role="listbox"
+              >
+                {#each ghostMatches as m, i (m)}
+                  <button
+                    type="button"
+                    class="block w-full px-2.5 py-1 text-left font-mono text-[11px] {i === ghostSelected
+                      ? 'bg-studio-purple/25 text-studio-text'
+                      : 'text-studio-text-dim hover:bg-white/6 hover:text-studio-text'}"
+                    role="option"
+                    aria-selected={i === ghostSelected}
+                    onclick={() => activeId && acceptGhost(activeId, m)}
+                  >{m}</button>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        </div>
+      </div>
     </div>
   </section>
 </div>
@@ -663,6 +1083,7 @@
 <style>
   :global(.xterm) {
     height: 100%;
+    width: 100%;
   }
   :global(.xterm-viewport) {
     overflow-y: auto !important;

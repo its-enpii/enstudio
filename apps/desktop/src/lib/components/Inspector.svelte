@@ -1,5 +1,6 @@
 <script lang="ts">
   import { state as app } from '../store.svelte'
+  // Text selection: chat/inspector content is selectable; session rows use role=button only for a11y.
   import {
     applyWorktreeSession,
     discardWorktreeSession,
@@ -21,8 +22,10 @@
     type WorktreeListItem,
     type WorktreePreview,
   } from '../enpii'
+  import { t } from '../i18n/index.svelte'
   import { ConfirmDialog, Switch } from './ui'
   import GitTools from './GitTools.svelte'
+  import SshTools from './SshTools.svelte'
 
   let wtPreview = $state<WorktreePreview | null>(null)
   let wtBusy = $state(false)
@@ -372,6 +375,8 @@
 <aside class="flex h-full w-full min-h-0 min-w-0 flex-col gap-5 overflow-x-hidden overflow-y-auto bg-transparent p-3">
   {#if app.mode === 'git'}
     <GitTools />
+  {:else if app.mode === 'terminal'}
+    <SshTools />
   {:else}
   <section class="flex shrink-0 flex-col gap-3">
     <div class="flex items-center justify-between gap-2">
@@ -390,78 +395,86 @@
   <section class="flex shrink-0 flex-col gap-3">
     <div class="m-0 flex items-center justify-between gap-2">
       <h3 class="studio-label m-0">Token Usage</h3>
-      <span class="font-mono text-[10px] text-studio-text-dim" title={shownUsage ? `session in ${shownUsage.prompt} · out ${shownUsage.completion} · Σ ${shownUsage.total}` : 'No usage from endpoint yet'}>
-        {#if shownUsage}
-          {formatTokens(shownUsage.prompt)} / {formatTokens(shownUsage.completion)}
-        {:else}
-          — / —
-        {/if}
-      </span>
-    </div>
-    <div class="relative h-1.5 w-full overflow-hidden rounded-lg bg-studio-grey" title={shownUsage ? 'session completion share of total' : undefined}>
-      <div
-        class="h-full rounded-lg bg-studio-purple"
-        style={shownUsage && shownUsage.total > 0
-          ? `width:${Math.min(100, Math.round((shownUsage.completion / shownUsage.total) * 100))}%`
-          : 'width:0'}
-      ></div>
-      {#if app.run?.maxTokens && app.run.usage}
-        <div
-          class="pointer-events-none absolute left-0 top-0 h-full rounded-lg bg-studio-gold/35"
-          style={`width:${Math.min(100, Math.round((app.run.usage.total / app.run.maxTokens) * 100))}%`}
-          title={`this run ${formatTokens(app.run.usage.total)} / budget ${formatTokens(app.run.maxTokens)}`}
-        ></div>
+      {#if shownUsage}
+        <span
+          class="font-mono text-[11px] font-medium tabular-nums text-studio-text"
+          title="Session totals (cumulative from provider)"
+        >
+          {formatTokens(shownUsage.total)}
+        </span>
+      {:else}
+        <span class="font-mono text-[10px] text-studio-text-dim">—</span>
       {/if}
     </div>
-    {#if shownUsage}
-      <div class="mt-1.5 flex flex-wrap gap-2 text-[11px] text-studio-text-dim">
-        <span>session in {formatTokens(shownUsage.prompt)}</span>
-        <span>out {formatTokens(shownUsage.completion)}</span>
-        <span>Σ {formatTokens(shownUsage.total)}</span>
-        {#if app.run?.usage && app.usage}
-          <span title="last/current run only">run {formatTokens(app.run.usage.total)}</span>
+
+    {#if shownUsage && shownUsage.total > 0}
+      {@const cached = shownUsage.cached ?? 0}
+      {@const fresh = Math.max(0, shownUsage.prompt - cached)}
+      {@const denom = shownUsage.total}
+      {@const freshPct = Math.min(100, Math.round((fresh / denom) * 100))}
+      {@const cachedPct = cached > 0 ? Math.min(100 - freshPct, Math.round((cached / denom) * 100)) : 0}
+      {@const outPct = Math.max(0, 100 - freshPct - cachedPct)}
+      <!-- Session mix: fresh in · cached · out — graphic first -->
+      <div
+        class="flex h-2 w-full overflow-hidden rounded-lg bg-studio-grey"
+        title={`in ${formatTokens(shownUsage.prompt)}${cached ? ` (cache ${formatTokens(cached)})` : ''} · out ${formatTokens(shownUsage.completion)} · Σ ${formatTokens(shownUsage.total)}`}
+      >
+        {#if freshPct > 0}
+          <div class="h-full bg-studio-purple transition-[width] duration-300" style={`width:${freshPct}%`}></div>
         {/if}
-        {#if app.run?.maxTokens && app.run.usage}
-          <span class={app.run.usage.total / app.run.maxTokens > 0.85 ? 'text-studio-gold' : ''}>
-            {Math.min(100, Math.round((app.run.usage.total / app.run.maxTokens) * 100))}% run budget
-          </span>
+        {#if cachedPct > 0}
+          <div class="h-full bg-studio-lavender transition-[width] duration-300" style={`width:${cachedPct}%`}></div>
+        {/if}
+        {#if outPct > 0}
+          <div class="h-full bg-studio-gold transition-[width] duration-300" style={`width:${outPct}%`}></div>
         {/if}
       </div>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] tabular-nums text-studio-text-dim">
+        <span class="flex items-center gap-1.5">
+          <span class="size-1.5 rounded-sm bg-studio-purple"></span>
+          in {formatTokens(shownUsage.prompt)}
+        </span>
+        {#if cached > 0}
+          <span class="flex items-center gap-1.5" title="Reported cache hits (subset of input)">
+            <span class="size-1.5 rounded-sm bg-studio-lavender"></span>
+            cache {formatTokens(cached)}
+          </span>
+        {/if}
+        <span class="flex items-center gap-1.5">
+          <span class="size-1.5 rounded-sm bg-studio-gold"></span>
+          out {formatTokens(shownUsage.completion)}
+        </span>
+      </div>
+    {:else}
+      <div class="h-2 w-full overflow-hidden rounded-lg bg-studio-grey"></div>
     {/if}
+
+    {#if app.run?.maxTokens && app.run.usage}
+      {@const budget = app.run.maxTokens}
+      {@const used = app.run.usage.total}
+      {@const pct = Math.min(100, Math.round((used / budget) * 100))}
+      <!-- This turn vs run budget -->
+      <div
+        class="h-1.5 w-full overflow-hidden rounded-lg bg-studio-grey/80"
+        title={`This turn ${formatTokens(used)} / budget ${formatTokens(budget)}`}
+      >
+        <div
+          class="h-full rounded-lg transition-[width] duration-300 {pct > 85 ? 'bg-studio-gold' : 'bg-studio-lavender'}"
+          style={`width:${pct}%`}
+        ></div>
+      </div>
+      <div class="flex justify-between font-mono text-[10px] tabular-nums text-studio-text-dim">
+        <span>turn {formatTokens(used)}</span>
+        <span class={pct > 85 ? 'text-studio-gold' : ''}>{pct}% · {formatTokens(budget)}</span>
+      </div>
+    {/if}
+
     {#if app.session}
       <div class="mt-0.5 min-w-0">
         <Switch compact bind:checked={memoryChecked} disabled={app.busy} description="Session memory" />
       </div>
     {/if}
   </section>
-
-  {#if app.diffs.length > 0}
-    <section class="flex min-h-0 shrink-0 flex-col gap-4">
-      <h3 class="studio-label m-0">Recent Diffs</h3>
-      <div class="flex max-h-36 min-w-0 flex-col gap-2 overflow-auto">
-        {#each app.diffs as d (d.id)}
-          <details class="rounded-lg border border-white/5 bg-studio-card p-4 text-xs hover:border-studio-purple/40">
-            <summary class="flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
-              <span class="flex min-w-0 items-center gap-3 truncate text-studio-text">
-                <svg class="size-3.5 shrink-0 text-studio-text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
-                </svg>
-                <span class="truncate font-mono">{d.summary.replace(/^(write_file|edit_file)\s+/, '').split(/\s+/)[0] ?? d.name}</span>
-              </span>
-              <span class="shrink-0">
-                {#if d.path}
-                  <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5 hover:text-studio-text" onclick={(event) => { event.preventDefault(); app.openCodeFile(d.path!) }}>Open</button>
-                {:else}<span class="text-studio-gold">+</span>{/if}
-              </span>
-            </summary>
-            {#if d.preview}
-              <pre class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-studio-text-dim">{d.preview}</pre>
-            {/if}
-          </details>
-        {/each}
-      </div>
-    </section>
-  {/if}
 
   <section class="flex shrink-0 flex-col gap-3">
     <h3 class="studio-label m-0">Sessions</h3>
@@ -639,10 +652,10 @@
 
 <ConfirmDialog
   open={discardWorktreeConfirm}
-  title="Close worktree?"
-  message="Uncommitted changes will be lost."
-  cancelLabel="Batal"
-  confirmLabel="Close & Discard"
+  title={t('inspector.closeWorktree')}
+  message={t('inspector.closeWorktreeMsg')}
+  cancelLabel={t('inspector.cancel')}
+  confirmLabel={t('inspector.closeWorktreeConfirm')}
   danger
   onCancel={closeDiscardWorktreeDialog}
   onConfirm={() => {
@@ -653,10 +666,10 @@
 
 <ConfirmDialog
   open={removeWorktreePath != null}
-  title="Remove worktree?"
+  title={t('inspector.removeWorktree')}
   message={removeWorktreePath ?? ''}
-  cancelLabel="Batal"
-  confirmLabel="Remove"
+  cancelLabel={t('inspector.cancel')}
+  confirmLabel={t('inspector.removeWorktreeConfirm')}
   danger
   onCancel={() => (removeWorktreePath = null)}
   onConfirm={() => {
@@ -666,10 +679,10 @@
 
 <ConfirmDialog
   open={applyAllConfirm}
-  title="Apply all agents?"
-  message={`Apply up to ${wtSessions.length} worktree agent(s) into main? Stops on first conflict.`}
-  cancelLabel="Batal"
-  confirmLabel="Apply all"
+  title={t('inspector.applyAll')}
+  message={t('inspector.applyAllMsg', { count: wtSessions.length })}
+  cancelLabel={t('inspector.cancel')}
+  confirmLabel={t('inspector.applyAllConfirm')}
   onCancel={() => (applyAllConfirm = false)}
   onConfirm={() => void onApplyAllAgents()}
 />

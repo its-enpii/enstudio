@@ -37,7 +37,8 @@ export function normalizeGoal(input: unknown, fallback: string): GoalContract {
   return {
     goal,
     acceptanceCriteria: criteria,
-    maxRounds: finiteInt(raw.maxRounds, 8, 1, MAX_ROUNDS),
+    // Default 24 — multi-step deps/research often burns >8 tool rounds.
+    maxRounds: finiteInt(raw.maxRounds, 24, 1, MAX_ROUNDS),
     maxTokens: finiteInt(raw.maxTokens, MAX_TOKENS, 1_000, MAX_TOKENS),
     maxRuntimeMs: finiteInt(raw.maxRuntimeMs, 30 * 60_000, 1_000, MAX_RUNTIME_MS),
     maxRepairAttempts: finiteInt(raw.maxRepairAttempts, 1, 0, 3),

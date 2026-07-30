@@ -4,9 +4,17 @@ import { isMutatingTool, isParallelSafeTool, PARALLEL_SAFE_TOOL_NAMES } from './
 
 test('parallel-safe tools are non-mutating', () => {
   for (const name of PARALLEL_SAFE_TOOL_NAMES) {
+    // memory_store is in WRITE set but only put/delete mutate — listed separately below.
+    if (name === 'memory_store') continue
     assert.equal(isMutatingTool(name), false, name)
     assert.equal(isParallelSafeTool(name), true, name)
   }
+  assert.equal(isMutatingTool('memory_store', JSON.stringify({ op: 'get' })), false)
+  assert.equal(isParallelSafeTool('memory_store', JSON.stringify({ op: 'get' })), true)
+  assert.equal(isMutatingTool('memory_store', JSON.stringify({ op: 'put' })), true)
+  assert.equal(isParallelSafeTool('memory_store', JSON.stringify({ op: 'put' })), false)
+  assert.equal(isMutatingTool('handoff'), false)
+  assert.equal(isParallelSafeTool('handoff'), true)
 })
 
 test('mutating tools are not parallel-safe', () => {

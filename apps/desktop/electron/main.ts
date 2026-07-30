@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   ipcMain,
   dialog,
+  Menu,
   Notification,
   session,
   shell,
@@ -16,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import * as pty from 'node-pty'
 import os from 'node:os'
 import { EnpiiClient } from './enpiiClient'
+import { listPathBins, pathComplete } from './pathBins'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -184,7 +186,7 @@ function vendorProviderInject(
   const nextArgs = [...args]
   const hasModelFlag = nextArgs.some((a) => a === '--model' || a === '-m' || a.startsWith('--model='))
   if (cfg.model && !hasModelFlag) {
-    if (bin === 'claude' || bin === 'codex' || bin === 'aider' || bin === 'gemini') {
+    if (bin === 'claude' || bin === 'codex' || bin === 'opencode' || bin === 'gemini' || bin === 'aider') {
       nextArgs.push('--model', cfg.model)
     }
   }
@@ -202,7 +204,81 @@ function killTerminals(): void {
   terminals.clear()
 }
 
+/** Standard Edit roles so Ctrl/Cmd+C/V/X/A work outside inputs (Windows Electron needs this). */
+function installAppMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [{
+          label: app.name,
+          submenu: [
+            { role: 'about' as const },
+            { type: 'separator' as const },
+            { role: 'services' as const },
+            { type: 'separator' as const },
+            { role: 'hide' as const },
+            { role: 'hideOthers' as const },
+            { role: 'unhide' as const },
+            { type: 'separator' as const },
+            { role: 'quit' as const },
+          ],
+        }]
+      : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac ? [{ role: 'pasteAndMatchStyle' as const }] : []),
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' },
+        ...(isMac
+          ? [
+              { type: 'separator' as const },
+              { role: 'front' as const },
+            ]
+          : []),
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 function createWindow(): void {
+  // Prefer more-rounded app-icon (taskbar); logo.png corners too subtle at 16–32px.
+  const iconCandidates = [
+    path.join(__dirname, '../src/lib/image/app-icon.ico'),
+    path.join(__dirname, '../src/lib/image/app-icon.png'),
+    path.join(__dirname, '../src/lib/image/logo.png'),
+    path.join(__dirname, '../dist/app-icon.ico'),
+    path.join(__dirname, '../dist/app-icon.png'),
+  ]
+  const iconPath = iconCandidates.find((p) => fs.existsSync(p))
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -210,6 +286,7 @@ function createWindow(): void {
     minHeight: 640,
     backgroundColor: '#040303',
     title: 'enpiistudio',
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -229,10 +306,15 @@ function createWindow(): void {
     void mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // Do not steal Ctrl/Cmd+C/V/X/A — Edit menu roles handle copy of selected chat text.
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
     const key = input.key.toLowerCase()
     const modifier = input.control || input.meta
+    // Leave clipboard shortcuts alone (selection copy in chat / inspector).
+    if (modifier && !input.alt && (key === 'c' || key === 'v' || key === 'x' || key === 'a' || key === 'z' || key === 'y')) {
+      return
+    }
     const shortcut = modifier && !input.alt
       ? key === 'w'
         ? 'close-tab'
@@ -255,6 +337,26 @@ function createWindow(): void {
     if (!shortcut) return
     event.preventDefault()
     mainWindow?.webContents.send('browser:shortcut', shortcut)
+  })
+
+  mainWindow.webContents.on('context-menu', (_evt, params) => {
+    const items: Electron.MenuItemConstructorOptions[] = []
+    if (params.selectionText?.trim()) {
+      items.push({ role: 'copy' })
+    }
+    if (params.isEditable) {
+      items.push(
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { type: 'separator' },
+        { role: 'selectAll' },
+      )
+    } else if (params.selectionText?.trim()) {
+      items.push({ type: 'separator' }, { role: 'selectAll' })
+    }
+    if (!items.length) return
+    Menu.buildFromTemplate(items).popup({ window: mainWindow ?? undefined })
   })
 
   mainWindow.on('closed', () => {
@@ -391,6 +493,7 @@ function setupDownloadManager(): void {
 }
 
 app.whenReady().then(() => {
+  installAppMenu()
   enpii.start()
 
   enpii.on('log', (line: string) => {
@@ -538,6 +641,13 @@ app.whenReady().then(() => {
     if (!terminal) return
     terminals.delete(id)
     terminal.kill()
+  })
+
+  /** PATH command basenames (cached). Optional prefix → filtered completions. */
+  ipcMain.handle('terminal:pathComplete', (_evt, prefix?: string) => {
+    const p = typeof prefix === 'string' ? prefix : ''
+    if (p.trim()) return pathComplete(p, 25)
+    return listPathBins().slice(0, 500)
   })
 
   ipcMain.handle('app:getVersion', () => app.getVersion())

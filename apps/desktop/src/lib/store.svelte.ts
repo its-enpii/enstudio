@@ -1,54 +1,69 @@
+import { setLocale as setI18nLocale, type Locale } from './i18n/index.svelte'
+
 export type Mode = 'agent' | 'code' | 'terminal' | 'git' | 'browser'
 export type ComposerMode = 'manual' | 'accept_edits' | 'plan' | 'full_auto'
-export type KeybindingAction = 'palette' | 'settings' | 'notifications' | `mode.${Mode}`
+export type KeybindingAction =
+  | 'palette'
+  | 'settings'
+  | 'notifications'
+  | 'font.larger'
+  | 'font.smaller'
+  | `mode.${Mode}`
 export type PermissionMode = 'read_only' | 'ask' | 'autopilot_workspace' | 'full'
 export type ProviderDialect = 'openai' | 'anthropic'
+export type { Locale }
 
-/** Single source — TopNav / palette / keybindings. */
-export const MODES: readonly { id: Mode; label: string; openLabel: string; shortcut: string }[] = [
-  { id: 'agent', label: 'Agent', openLabel: 'Open Agent', shortcut: 'Mod+1' },
-  { id: 'code', label: 'Code', openLabel: 'Open Code', shortcut: 'Mod+2' },
-  { id: 'terminal', label: 'Terminal', openLabel: 'Open Terminal', shortcut: 'Mod+3' },
-  { id: 'git', label: 'Git', openLabel: 'Open Git', shortcut: 'Mod+4' },
-  { id: 'browser', label: 'Browser', openLabel: 'Open Browser', shortcut: 'Mod+5' },
+/** Single source — TopNav / palette / keybindings. Labels via t(labelKey). */
+export const MODES: readonly { id: Mode; labelKey: string; openKey: string; shortcut: string }[] = [
+  { id: 'agent', labelKey: 'mode.agent', openKey: 'mode.agent.open', shortcut: 'Mod+1' },
+  { id: 'code', labelKey: 'mode.code', openKey: 'mode.code.open', shortcut: 'Mod+2' },
+  { id: 'terminal', labelKey: 'mode.terminal', openKey: 'mode.terminal.open', shortcut: 'Mod+3' },
+  { id: 'git', labelKey: 'mode.git', openKey: 'mode.git.open', shortcut: 'Mod+4' },
+  { id: 'browser', labelKey: 'mode.browser', openKey: 'mode.browser.open', shortcut: 'Mod+5' },
 ] as const
 
 export const COMPOSER_MODES: readonly {
   value: ComposerMode
-  label: string
-  description: string
+  labelKey: string
+  descriptionKey: string
   permission: PermissionMode
 }[] = [
-  { value: 'manual', label: 'Manual', description: 'Read-only agent', permission: 'read_only' },
-  { value: 'accept_edits', label: 'Accept Edits', description: 'Ask before changes', permission: 'ask' },
-  { value: 'plan', label: 'Plan', description: 'Plan without edits', permission: 'read_only' },
-  { value: 'full_auto', label: 'Full Auto', description: 'Allow all actions', permission: 'full' },
+  { value: 'manual', labelKey: 'composer.manual', descriptionKey: 'composer.manual.desc', permission: 'read_only' },
+  { value: 'accept_edits', labelKey: 'composer.acceptEdits', descriptionKey: 'composer.acceptEdits.desc', permission: 'ask' },
+  { value: 'plan', labelKey: 'composer.plan', descriptionKey: 'composer.plan.desc', permission: 'read_only' },
+  { value: 'full_auto', labelKey: 'composer.fullAuto', descriptionKey: 'composer.fullAuto.desc', permission: 'full' },
 ] as const
 
 export const PERMISSION_MODES: readonly {
   value: PermissionMode
-  label: string
-  description: string
+  labelKey: string
+  descriptionKey: string
 }[] = [
-  { value: 'ask', label: 'Ask', description: 'Confirm writes (default)' },
-  { value: 'read_only', label: 'Read only', description: 'Block all mutations' },
-  { value: 'autopilot_workspace', label: 'Autopilot workspace', description: 'Auto-allow writes in jail' },
-  { value: 'full', label: 'Full', description: 'Auto all — still jail + deny globs' },
+  { value: 'ask', labelKey: 'permission.ask', descriptionKey: 'permission.ask.desc' },
+  { value: 'read_only', labelKey: 'permission.readOnly', descriptionKey: 'permission.readOnly.desc' },
+  { value: 'autopilot_workspace', labelKey: 'permission.autopilot', descriptionKey: 'permission.autopilot.desc' },
+  { value: 'full', labelKey: 'permission.full', descriptionKey: 'permission.full.desc' },
 ] as const
 
 export const PROVIDER_DIALECTS: readonly {
   value: ProviderDialect
-  label: string
-  description: string
+  labelKey: string
+  descriptionKey: string
 }[] = [
-  { value: 'openai', label: 'OpenAI', description: 'Chat Completions + tools' },
-  { value: 'anthropic', label: 'Anthropic', description: 'Messages API shape' },
+  { value: 'openai', labelKey: 'dialect.openai', descriptionKey: 'dialect.openai.desc' },
+  { value: 'anthropic', labelKey: 'dialect.anthropic', descriptionKey: 'dialect.anthropic.desc' },
 ] as const
 
-export const GLOBAL_ACTIONS: readonly { id: Exclude<KeybindingAction, `mode.${Mode}`>; label: string; shortcut: string }[] = [
-  { id: 'palette', label: 'Command Palette', shortcut: 'Mod+K' },
-  { id: 'settings', label: 'Settings', shortcut: 'Mod+,' },
-  { id: 'notifications', label: 'Notifications', shortcut: 'Mod+Shift+N' },
+export const GLOBAL_ACTIONS: readonly {
+  id: Exclude<KeybindingAction, `mode.${Mode}`>
+  labelKey: string
+  shortcut: string
+}[] = [
+  { id: 'palette', labelKey: 'action.palette', shortcut: 'Mod+K' },
+  { id: 'settings', labelKey: 'action.settings', shortcut: 'Mod+,' },
+  { id: 'notifications', labelKey: 'action.notifications', shortcut: 'Mod+Shift+N' },
+  { id: 'font.larger', labelKey: 'action.zoomIn', shortcut: 'Mod+=' },
+  { id: 'font.smaller', labelKey: 'action.zoomOut', shortcut: 'Mod+-' },
 ] as const
 
 export const defaultKeybindings: Record<KeybindingAction, string> = {
@@ -67,8 +82,23 @@ function loadKeybindings(): Record<KeybindingAction, string> {
 
 export function keybindingFromEvent(event: KeyboardEvent): string | null {
   if (!event.metaKey && !event.ctrlKey && !event.altKey) return null
-  const modifiers = [event.metaKey || event.ctrlKey ? 'Mod' : '', event.altKey ? 'Alt' : '', event.shiftKey ? 'Shift' : ''].filter(Boolean)
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key
+  // Numpad/shift +/- : treat as zoom keys, ignore Shift so Ctrl+Shift+= still matches Mod+=.
+  let key = event.key
+  let ignoreShift = false
+  if (key === '+' || key === '=') {
+    key = '='
+    ignoreShift = true
+  } else if (key === '_' || key === '-') {
+    key = '-'
+    ignoreShift = true
+  } else if (key.length === 1) {
+    key = key.toUpperCase()
+  }
+  const modifiers = [
+    event.metaKey || event.ctrlKey ? 'Mod' : '',
+    event.altKey ? 'Alt' : '',
+    !ignoreShift && event.shiftKey ? 'Shift' : '',
+  ].filter(Boolean)
   if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null
   return [...modifiers, key].join('+')
 }
@@ -156,7 +186,19 @@ export interface Project {
   name: string
   path: string
   pinned?: boolean
+  /** Display label override (folder name stays on disk). */
+  displayName?: string
+  groupId?: string | null
+  /** Manual sidebar order (lower first). Pinned still float above. */
+  order?: number
   layout?: ProjectLayout
+}
+
+export interface ProjectGroup {
+  id: string
+  name: string
+  collapsed?: boolean
+  order?: number
 }
 
 export interface ChatMessage {
@@ -164,6 +206,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   text: string
   ts: number
+  /** Wall time from user send → turn idle (user bubbles). */
+  durationMs?: number
   /** Display-only chips for user turns (not re-sent). */
   attachments?: { name: string; kind?: 'text' | 'image' }[]
   tool?: {
@@ -175,6 +219,15 @@ export interface ChatMessage {
     summary?: string
     preview?: string
   }
+}
+
+/** Prompt waiting while agent is busy (FIFO). */
+export interface QueuedPrompt {
+  id: string
+  text: string
+  displayText?: string
+  images?: { name: string; mime: string; dataUrl: string }[]
+  attachments?: { name: string; kind?: 'text' | 'image' }[]
 }
 
 export interface ComposerAttachment {
@@ -221,6 +274,8 @@ export interface TokenUsage {
   prompt: number
   completion: number
   total: number
+  /** Cache hits (subset of prompt), when provider reports. */
+  cached?: number
 }
 
 export interface ApprovalRequest {
@@ -233,13 +288,21 @@ export interface ApprovalRequest {
   args?: string
 }
 
+/** One choice on an ask_user card (label is what gets sent back). */
+export interface AskOption {
+  label: string
+  description?: string
+  recommended?: boolean
+}
+
 /** Mid-run ask_user question from agent. */
 export interface AskUserRequest {
   requestId: string
   sessionId: string
   toolCallId: string
   question: string
-  options?: string[]
+  /** Rich options (preferred). */
+  options?: AskOption[]
   summary: string
 }
 
@@ -304,6 +367,8 @@ export interface ApprovalRecord {
   preview?: string
   args?: string
   decision: 'allow' | 'deny'
+  editedArgs?: string
+  reason?: string
   ts: number
 }
 
@@ -329,7 +394,10 @@ function sortProjects(list: Project[]): Project[] {
   return [...list].sort((a, b) => {
     const pin = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
     if (pin) return pin
-    return a.name.localeCompare(b.name)
+    const ao = a.order ?? 0
+    const bo = b.order ?? 0
+    if (ao !== bo) return ao - bo
+    return (a.displayName || a.name).localeCompare(b.displayName || b.name)
   })
 }
 
@@ -344,13 +412,16 @@ function loadProjects(): Project[] {
     const reset = layoutNeedsReset()
     const migrated = sortProjects([...new Map(parsed
       .filter((project) => typeof project?.path === 'string' && project.path.trim())
-      .map((project) => {
+      .map((project, index) => {
         const path = project.path
         const layout = reset ? defaultLayout() : clampProjectLayout({}, project.layout)
         return [projectPathKey(path), {
           ...project,
           id: projectId(path),
           pinned: Boolean(project.pinned),
+          displayName: typeof project.displayName === 'string' ? project.displayName : undefined,
+          groupId: typeof project.groupId === 'string' ? project.groupId : null,
+          order: typeof project.order === 'number' ? project.order : index,
           layout,
         }]
       })).values()])
@@ -366,6 +437,138 @@ function loadProjects(): Project[] {
 
 function saveProjects(list: Project[]): void {
   localStorage.setItem('enpiistudio.projects', JSON.stringify(list))
+}
+
+function loadGroups(): ProjectGroup[] {
+  try {
+    const raw = localStorage.getItem('enpiistudio.projectGroups')
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as ProjectGroup[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((g) => typeof g?.id === 'string' && typeof g?.name === 'string')
+      .map((g, index) => ({
+        id: g.id,
+        name: g.name.trim() || 'Group',
+        collapsed: Boolean(g.collapsed),
+        order: typeof g.order === 'number' ? g.order : index,
+      }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
+  } catch {
+    return []
+  }
+}
+
+function saveGroups(list: ProjectGroup[]): void {
+  localStorage.setItem('enpiistudio.projectGroups', JSON.stringify(list))
+}
+
+export type UiTheme = 'dark' | 'light' | 'system'
+
+/** Mono stacks for Code / Terminal / vendor CLIs. */
+export const FONT_FAMILIES = [
+  { id: 'jetbrains', label: 'JetBrains Mono', stack: "'JetBrains Mono', ui-monospace, monospace" },
+  { id: 'sfmono', label: 'SF Mono', stack: "'SF Mono', ui-monospace, Menlo, monospace" },
+  { id: 'cascadia', label: 'Cascadia Code', stack: "'Cascadia Code', 'Segoe UI Mono', monospace" },
+  { id: 'fira', label: 'Fira Code', stack: "'Fira Code', ui-monospace, monospace" },
+  { id: 'consolas', label: 'Consolas', stack: "Consolas, 'Courier New', monospace" },
+  { id: 'menlo', label: 'Menlo', stack: "Menlo, Monaco, monospace" },
+  { id: 'system', label: 'System mono', stack: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+] as const
+
+export type FontFamilyId = (typeof FONT_FAMILIES)[number]['id']
+
+/** Whole-UI zoom (%). Scales chat, chrome, code, terminal together. */
+export const UI_ZOOM_MIN = 80
+export const UI_ZOOM_MAX = 150
+export const UI_ZOOM_DEFAULT = 100
+export const UI_ZOOM_STEP = 10
+
+/** Base mono size for CodeMirror / xterm before CSS zoom. */
+export const EDITOR_FONT_SIZE = 13
+
+export interface UiPrefs {
+  theme: UiTheme
+  /** Gold pulse on busy indicators (.studio-signal). */
+  goldPulse: boolean
+  /** Stream assistant tokens as they arrive (UI). */
+  streamTokens: boolean
+  /** UI language. */
+  locale: Locale
+  /** Whole-app zoom percent (80–150). */
+  uiZoom: number
+  /** Code / terminal mono family id. */
+  fontFamily: FontFamilyId
+  /** Max model↔tool rounds per prompt (agent goal.maxRounds). */
+  maxTurns: number
+}
+
+const UI_PREFS_KEY = 'enpiistudio.uiPrefs'
+const DEFAULT_UI_PREFS: UiPrefs = {
+  theme: 'dark',
+  goldPulse: true,
+  streamTokens: true,
+  locale: 'en',
+  uiZoom: UI_ZOOM_DEFAULT,
+  fontFamily: 'jetbrains',
+  maxTurns: 24,
+}
+
+function clampMaxTurns(n: unknown): number {
+  const v = typeof n === 'number' ? Math.floor(n) : NaN
+  return Number.isFinite(v) ? Math.min(32, Math.max(1, v)) : 24
+}
+
+function clampZoom(n: number): number {
+  if (!Number.isFinite(n)) return UI_ZOOM_DEFAULT
+  const stepped = Math.round(n / UI_ZOOM_STEP) * UI_ZOOM_STEP
+  return Math.min(UI_ZOOM_MAX, Math.max(UI_ZOOM_MIN, stepped))
+}
+
+function normalizeFontFamily(id: unknown): FontFamilyId {
+  return FONT_FAMILIES.some((f) => f.id === id) ? (id as FontFamilyId) : 'jetbrains'
+}
+
+export function fontStack(id: FontFamilyId = 'jetbrains'): string {
+  return FONT_FAMILIES.find((f) => f.id === id)?.stack ?? FONT_FAMILIES[0].stack
+}
+
+function applyUiCss(prefs: UiPrefs): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  root.style.setProperty('--font-mono', fontStack(prefs.fontFamily))
+  // Prefer Electron webFrame zoom — CSS `zoom` on <html> breaks drag text selection.
+  root.style.zoom = ''
+  const factor = clampZoom(prefs.uiZoom) / 100
+  try {
+    window.enpiistudio?.app?.setZoomFactor?.(factor)
+  } catch {
+    // Fallback only if preload missing (e.g. pure browser preview).
+    root.style.zoom = `${prefs.uiZoom}%`
+  }
+}
+
+function loadUiPrefs(): UiPrefs {
+  try {
+    const raw = localStorage.getItem(UI_PREFS_KEY)
+    if (!raw) return { ...DEFAULT_UI_PREFS }
+    const parsed = JSON.parse(raw) as Partial<UiPrefs>
+    return {
+      theme: parsed.theme === 'light' || parsed.theme === 'system' || parsed.theme === 'dark' ? parsed.theme : 'dark',
+      goldPulse: parsed.goldPulse !== false,
+      streamTokens: parsed.streamTokens !== false,
+      locale: parsed.locale === 'id' ? 'id' : 'en',
+      uiZoom: clampZoom(typeof parsed.uiZoom === 'number' ? parsed.uiZoom : UI_ZOOM_DEFAULT),
+      fontFamily: normalizeFontFamily(parsed.fontFamily),
+      maxTurns: clampMaxTurns(parsed.maxTurns ?? DEFAULT_UI_PREFS.maxTurns),
+    }
+  } catch {
+    return { ...DEFAULT_UI_PREFS }
+  }
+}
+
+function saveUiPrefs(prefs: UiPrefs): void {
+  localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs))
 }
 
 interface ProjectWorkspace {
@@ -399,12 +602,18 @@ export interface LiveSessionState {
   checkpoints: AgentCheckpoint[]
   busy: boolean
   status: string
+  /** ms epoch when current turn started (for live elapsed). */
+  turnStartedAt?: number | null
+  promptQueue?: QueuedPrompt[]
 }
 
 class AppState {
   mode = $state<Mode>('agent')
   projects = $state<Project[]>(loadProjects())
+  projectGroups = $state<ProjectGroup[]>(loadGroups())
   activeProjectId = $state<string | null>(null)
+  /** Local UI prefs (Appearance + Provider runtime toggles). */
+  ui = $state<UiPrefs>(loadUiPrefs())
   session = $state<SessionInfo | null>(null)
   sessionList = $state<SessionInfo[]>([])
   messages = $state<ChatMessage[]>([])
@@ -418,12 +627,58 @@ class AppState {
   usage = $state<TokenUsage | null>(null)
   run = $state<RunTelemetry | null>(null)
   streamingId = $state<string | null>(null)
+  /** Current turn start (Date.now) while busy — drives live timer. */
+  turnStartedAt = $state<number | null>(null)
+  /** FIFO prompts to send after agent finishes. */
+  promptQueue = $state<QueuedPrompt[]>([])
   /** Active approval queue (multi pending). `approval` = head for compat. */
   pendingApprovals = $state<ApprovalRequest[]>([])
   /** Active ask_user queue. */
   pendingAsks = $state<AskUserRequest[]>([])
-  /** Session-level plan mode flag (from enter_plan_mode events). */
+  /** Session-level plan mode flag (from enter_plan_mode / Composer Plan). */
   planMode = $state(false)
+  /** Latest draft plan on disk (UI approve/reject). */
+  draftPlan = $state<{
+    id: string
+    status: string
+    title: string
+    steps: { title: string; detail?: string }[]
+    relPath: string
+  } | null>(null)
+  /** Latest approved plan (badge / context). */
+  activePlan = $state<{
+    id: string
+    status: string
+    title: string
+    steps: { title: string; detail?: string }[]
+    relPath: string
+  } | null>(null)
+  /** Mutation kinds granted via Allow for session (UI mirror; core is source of truth). */
+  sessionGrantKinds = $state<Array<'write' | 'shell' | 'git' | 'mcp'>>([])
+  /** In-chat team strips (hide when empty — not permanent Inspector panels). */
+  teamBoard = $state<
+    Array<{
+      id: string
+      title: string
+      status: string
+      blockedBy: string[]
+      note?: string
+      progress?: number
+    }>
+  >([])
+  teamMail = $state<
+    Array<{ id: string; from: string; to: string; content: string; type: string; createdAt: string }>
+  >([])
+  teamSubs = $state<
+    Array<{
+      id: string
+      name: string
+      description: string
+      status: string
+      worktreeBranch?: string
+      lastSummary?: string
+    }>
+  >([])
   get approval(): ApprovalRequest | null {
     return this.pendingApprovals[0] ?? null
   }
@@ -461,6 +716,13 @@ class AppState {
     dialect: ProviderDialect
     permissionMode: PermissionMode
     denyGlobs?: string[]
+    allowRules?: string[]
+    guardrails?: {
+      enabled: boolean
+      applyToInput?: boolean
+      applyToOutput?: boolean
+      applyToToolResults?: boolean
+    }
     hasKey: boolean
     envOverrides: {
       baseUrl: boolean
@@ -476,6 +738,10 @@ class AppState {
   liveSessions = new Map<string, LiveSessionState>()
   /** Busy flags for background sessions (Inspector badges). */
   sessionBusy = $state<Record<string, boolean>>({})
+  /** sessionId → projectId for multi-project busy dots. */
+  sessionProject = $state<Record<string, string>>({})
+  /** Last in-app approval toast id — update in place instead of spamming. */
+  approvalNotifId = $state<string | null>(null)
 
   get activeProject(): Project | null {
     return this.projects.find((p) => p.id === this.activeProjectId) ?? null
@@ -497,6 +763,8 @@ class AppState {
       checkpoints: [],
       busy: false,
       status,
+      turnStartedAt: null,
+      promptQueue: [],
     }
   }
 
@@ -518,6 +786,8 @@ class AppState {
       checkpoints: this.checkpoints,
       busy: this.busy,
       status: this.session?.status ?? 'idle',
+      turnStartedAt: this.turnStartedAt,
+      promptQueue: this.promptQueue,
     })
     this.sessionBusy = { ...this.sessionBusy, [sessionId]: this.busy }
   }
@@ -539,7 +809,57 @@ class AppState {
     this.diffs = live.diffs
     this.checkpoints = live.checkpoints
     this.busy = live.busy
+    this.turnStartedAt = live.turnStartedAt ?? null
+    this.promptQueue = live.promptQueue ?? []
     return true
+  }
+
+  enqueuePrompt(item: Omit<QueuedPrompt, 'id'> & { id?: string }): QueuedPrompt {
+    const full: QueuedPrompt = { id: item.id ?? crypto.randomUUID(), ...item }
+    this.promptQueue = [...this.promptQueue, full]
+    this.stashLiveSession()
+    return full
+  }
+
+  dequeuePrompt(): QueuedPrompt | null {
+    if (!this.promptQueue.length) return null
+    const [head, ...rest] = this.promptQueue
+    this.promptQueue = rest
+    this.stashLiveSession()
+    return head ?? null
+  }
+
+  removeQueuedPrompt(id: string): void {
+    this.promptQueue = this.promptQueue.filter((p) => p.id !== id)
+    this.stashLiveSession()
+  }
+
+  /** Stamp durationMs on the latest user message of this turn. */
+  finishTurnTimer(sessionId?: string | null): void {
+    const sid = sessionId ?? this.session?.id
+    const live = sid ? this.liveSessions.get(sid) : undefined
+    const started =
+      (this.session?.id === sid ? this.turnStartedAt : null) ?? live?.turnStartedAt ?? null
+    if (!started) return
+    const ms = Math.max(0, Date.now() - started)
+    const stamp = (messages: ChatMessage[]): ChatMessage[] => {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]!.role === 'user' && messages[i]!.durationMs == null) {
+          const next = messages.slice()
+          next[i] = { ...next[i]!, durationMs: ms }
+          return next
+        }
+      }
+      return messages
+    }
+    if (this.session?.id === sid) {
+      this.messages = stamp(this.messages)
+      this.turnStartedAt = null
+    }
+    if (live) {
+      live.messages = stamp(live.messages)
+      live.turnStartedAt = null
+    }
   }
 
   getLive(sessionId: string): LiveSessionState {
@@ -571,6 +891,8 @@ class AppState {
       if (patch.checkpoints) this.checkpoints = patch.checkpoints
       if (typeof patch.busy === 'boolean') this.busy = patch.busy
       if (patch.status) this.session = { ...this.session, status: patch.status }
+      if (patch.turnStartedAt !== undefined) this.turnStartedAt = patch.turnStartedAt
+      if (patch.promptQueue) this.promptQueue = patch.promptQueue
     }
   }
 
@@ -580,11 +902,83 @@ class AppState {
     live.busy = busy
     this.liveSessions.set(sessionId, live)
     if (this.session?.id === sessionId) this.busy = busy
+    if (this.activeProjectId && this.session?.id === sessionId) {
+      this.sessionProject = { ...this.sessionProject, [sessionId]: this.activeProjectId }
+    }
+  }
+
+  /** Bind session → project (call on open/new session). */
+  bindSessionProject(sessionId: string, projectId?: string | null): void {
+    const pid = projectId ?? this.activeProjectId
+    if (!pid) return
+    this.sessionProject = { ...this.sessionProject, [sessionId]: pid }
   }
 
   isSessionBusy(sessionId: string): boolean {
     if (this.session?.id === sessionId) return this.busy
     return Boolean(this.sessionBusy[sessionId] ?? this.liveSessions.get(sessionId)?.busy)
+  }
+
+  /** Any agent turn running for this project (active or background session). */
+  isProjectBusy(projectId: string): boolean {
+    // Touch $state so sidebar re-renders when busy/approvals change.
+    void this.busy
+    void this.pendingApprovals.length
+    void this.sessionBusy
+    if (this.activeProjectId === projectId && (this.busy || this.pendingApprovals.length > 0)) {
+      return true
+    }
+    for (const [sid, pid] of Object.entries(this.sessionProject)) {
+      if (pid !== projectId) continue
+      if (this.isSessionBusy(sid)) return true
+      const live = this.liveSessions.get(sid)
+      if (live && (live.busy || live.pendingApprovals.length > 0)) return true
+    }
+    return false
+  }
+
+  /** One toast for the approval queue — refresh detail, don't stack 20 cards. */
+  notifyApprovalQueue(detail: string, background = false): void {
+    const n = this.pendingApprovals.length
+    const title = background
+      ? 'Approval (other session)'
+      : n > 1
+        ? `Approval required (${n})`
+        : 'Approval required'
+    if (this.approvalNotifId) {
+      const existing = this.notifications.find((x) => x.id === this.approvalNotifId)
+      if (existing && existing.visible) {
+        this.notifications = this.notifications.map((item) =>
+          item.id === this.approvalNotifId
+            ? { ...item, title, detail, ts: Date.now(), read: false, visible: true, type: 'warning' as const }
+            : item,
+        )
+        return
+      }
+    }
+    const id = crypto.randomUUID()
+    this.approvalNotifId = id
+    this.notifications = [
+      {
+        id,
+        type: 'warning',
+        title,
+        detail,
+        ts: Date.now(),
+        read: false,
+        visible: true,
+      },
+      ...this.notifications,
+    ].slice(0, 50)
+    // Sticky longer while queue open — still auto-hide eventually
+    window.setTimeout(() => this.dismissNotification(id), 8000)
+  }
+
+  clearApprovalNotif(): void {
+    if (this.approvalNotifId) {
+      this.dismissNotification(this.approvalNotifId)
+      this.approvalNotifId = null
+    }
   }
 
   mutateLive(sessionId: string, mutator: (live: LiveSessionState) => void): void {
@@ -604,6 +998,8 @@ class AppState {
       this.diffs = live.diffs
       this.checkpoints = live.checkpoints
       this.busy = live.busy
+      this.turnStartedAt = live.turnStartedAt ?? null
+      this.promptQueue = live.promptQueue ?? []
       if (live.status) this.session = { ...this.session, status: live.status }
     }
   }
@@ -665,16 +1061,23 @@ class AppState {
       this.selectProject(existing.id)
       return existing
     }
+    const maxOrder = this.projects.reduce((m, p) => Math.max(m, p.order ?? 0), -1)
     const project: Project = {
       id,
       name,
       path: folderPath,
+      order: maxOrder + 1,
+      groupId: null,
       layout: { sidebarWidth: LAYOUT_DEFAULT.sidebar, inspectorWidth: LAYOUT_DEFAULT.inspector },
     }
-    this.projects = sortProjects([project, ...this.projects])
+    this.projects = sortProjects([...this.projects, project])
     saveProjects(this.projects)
     this.selectProject(id)
     return project
+  }
+
+  projectLabel(project: Project): string {
+    return project.displayName?.trim() || project.name
   }
 
   toggleProjectPin(id: string): void {
@@ -682,6 +1085,104 @@ class AppState {
       this.projects.map((p) => (p.id === id ? { ...p, pinned: !p.pinned } : p)),
     )
     saveProjects(this.projects)
+  }
+
+  renameProject(id: string, displayName: string): void {
+    const label = displayName.trim()
+    this.projects = this.projects.map((p) =>
+      p.id === id ? { ...p, displayName: label || undefined } : p,
+    )
+    saveProjects(this.projects)
+  }
+
+  createProjectGroup(name = 'New group'): ProjectGroup {
+    const group: ProjectGroup = {
+      id: crypto.randomUUID(),
+      name: name.trim() || 'New group',
+      collapsed: false,
+      order: this.projectGroups.reduce((m, g) => Math.max(m, g.order ?? 0), -1) + 1,
+    }
+    this.projectGroups = [...this.projectGroups, group]
+    saveGroups(this.projectGroups)
+    return group
+  }
+
+  renameProjectGroup(id: string, name: string): void {
+    const label = name.trim()
+    if (!label) return
+    this.projectGroups = this.projectGroups.map((g) => (g.id === id ? { ...g, name: label } : g))
+    saveGroups(this.projectGroups)
+  }
+
+  toggleProjectGroup(id: string): void {
+    this.projectGroups = this.projectGroups.map((g) =>
+      g.id === id ? { ...g, collapsed: !g.collapsed } : g,
+    )
+    saveGroups(this.projectGroups)
+  }
+
+  setProjectGroup(projectId: string, groupId: string | null): void {
+    this.projects = this.projects.map((p) => (p.id === projectId ? { ...p, groupId } : p))
+    saveProjects(this.projects)
+  }
+
+  /** Dissolve group — projects become ungrouped; group removed. */
+  ungroupProjectGroup(id: string): void {
+    this.projects = this.projects.map((p) => (p.groupId === id ? { ...p, groupId: null } : p))
+    this.projectGroups = this.projectGroups.filter((g) => g.id !== id)
+    saveProjects(this.projects)
+    saveGroups(this.projectGroups)
+  }
+
+  removeProjectGroup(id: string): void {
+    this.ungroupProjectGroup(id)
+  }
+
+  /** Reorder by full id sequence (projects only). Preserves relative pin priority via sort. */
+  reorderProjects(orderedIds: string[]): void {
+    const rank = new Map(orderedIds.map((id, i) => [id, i]))
+    this.projects = sortProjects(
+      this.projects.map((p) => (rank.has(p.id) ? { ...p, order: rank.get(p.id)! } : p)),
+    )
+    saveProjects(this.projects)
+  }
+
+  reorderProjectGroups(orderedIds: string[]): void {
+    const rank = new Map(orderedIds.map((id, i) => [id, i]))
+    this.projectGroups = [...this.projectGroups]
+      .map((g) => (rank.has(g.id) ? { ...g, order: rank.get(g.id)! } : g))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
+    saveGroups(this.projectGroups)
+  }
+
+  /** Move project before/after target (same list order). */
+  moveProjectRelative(dragId: string, targetId: string, place: 'before' | 'after'): void {
+    if (dragId === targetId) return
+    const ids = sortProjects(this.projects).map((p) => p.id)
+    const from = ids.indexOf(dragId)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0) return
+    ids.splice(from, 1)
+    const insertAt = ids.indexOf(targetId) + (place === 'after' ? 1 : 0)
+    ids.splice(Math.max(0, insertAt), 0, dragId)
+    // Inherit target group so DnD into a group works
+    const target = this.projects.find((p) => p.id === targetId)
+    if (target) {
+      this.projects = this.projects.map((p) =>
+        p.id === dragId ? { ...p, groupId: target.groupId ?? null } : p,
+      )
+    }
+    this.reorderProjects(ids)
+  }
+
+  moveProjectToGroupEdge(dragId: string, groupId: string | null, place: 'start' | 'end' = 'end'): void {
+    const inGroup = sortProjects(this.projects.filter((p) => (p.groupId ?? null) === groupId)).map((p) => p.id)
+    const rest = sortProjects(this.projects.filter((p) => (p.groupId ?? null) !== groupId && p.id !== dragId)).map((p) => p.id)
+    const nextIn = inGroup.filter((id) => id !== dragId)
+    if (place === 'start') nextIn.unshift(dragId)
+    else nextIn.push(dragId)
+    this.projects = this.projects.map((p) => (p.id === dragId ? { ...p, groupId } : p))
+    this.reorderProjects([...nextIn, ...rest.filter((id) => !nextIn.includes(id))])
   }
 
   setProjectLayout(patch: Partial<ProjectLayout>): void {
@@ -815,20 +1316,31 @@ class AppState {
   }
 
   /** Accumulate provider usage into **session** totals (per turn add, not replace). */
-  setUsage(u: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }, mode: 'add' | 'replace' = 'add'): void {
-    const next = {
+  setUsage(
+    u: {
+      prompt_tokens?: number
+      completion_tokens?: number
+      total_tokens?: number
+      cached_tokens?: number
+    },
+    mode: 'add' | 'replace' = 'add',
+  ): void {
+    const next: TokenUsage = {
       prompt: u.prompt_tokens ?? 0,
       completion: u.completion_tokens ?? 0,
       total: u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0),
+      cached: u.cached_tokens ?? 0,
     }
     if (mode === 'replace' || !this.usage) {
-      this.usage = next
+      this.usage = next.cached ? next : { prompt: next.prompt, completion: next.completion, total: next.total }
       return
     }
+    const cached = (this.usage.cached ?? 0) + (next.cached ?? 0)
     this.usage = {
       prompt: this.usage.prompt + next.prompt,
       completion: this.usage.completion + next.completion,
       total: this.usage.total + next.total,
+      cached: cached || undefined,
     }
   }
 
@@ -843,6 +1355,7 @@ class AppState {
       prompt_tokens?: number
       completion_tokens?: number
       total_tokens?: number
+      cached_tokens?: number
     } | undefined
     const next: RunTelemetry = {
       runId: this.run?.runId,
@@ -883,10 +1396,12 @@ class AppState {
     }
     if (usage) {
       // Run-only snapshot. Session totals accumulate via setUsage on final `usage` event.
+      const cached = usage.cached_tokens ?? 0
       next.usage = {
         prompt: usage.prompt_tokens ?? 0,
         completion: usage.completion_tokens ?? 0,
         total: usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+        cached: cached > 0 ? cached : undefined,
       }
     }
     this.run = next
@@ -947,6 +1462,57 @@ class AppState {
     if (found) this.clearApproval(requestId)
     return found
   }
+
+  private persistUi(): void {
+    saveUiPrefs(this.ui)
+  }
+
+  setGoldPulse(on: boolean): void {
+    this.ui = { ...this.ui, goldPulse: on }
+    this.persistUi()
+  }
+
+  setStreamTokens(on: boolean): void {
+    this.ui = { ...this.ui, streamTokens: on }
+    this.persistUi()
+  }
+
+  setTheme(theme: UiTheme): void {
+    this.ui = { ...this.ui, theme }
+    this.persistUi()
+  }
+
+  setLocale(locale: Locale): void {
+    const next: Locale = locale === 'id' ? 'id' : 'en'
+    this.ui = { ...this.ui, locale: next }
+    setI18nLocale(next)
+    this.persistUi()
+  }
+
+  setUiZoom(zoom: number): void {
+    this.ui = { ...this.ui, uiZoom: clampZoom(zoom) }
+    applyUiCss(this.ui)
+    this.persistUi()
+  }
+
+  bumpUiZoom(deltaSteps = 1): void {
+    this.setUiZoom(this.ui.uiZoom + deltaSteps * UI_ZOOM_STEP)
+  }
+
+  setFontFamily(id: FontFamilyId): void {
+    this.ui = { ...this.ui, fontFamily: normalizeFontFamily(id) }
+    applyUiCss(this.ui)
+    this.persistUi()
+  }
+
+  setMaxTurns(n: number): void {
+    this.ui = { ...this.ui, maxTurns: clampMaxTurns(n) }
+    this.persistUi()
+  }
 }
 
 export const state = new AppState()
+
+// Sync i18n + zoom/font CSS with persisted prefs before first paint.
+setI18nLocale(state.ui.locale)
+applyUiCss(state.ui)

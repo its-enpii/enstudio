@@ -45,6 +45,13 @@
   onMount(() => {
     const unbind = bindEnpiiEvents()
     void pingEnpii()
+    // Re-apply zoom via webFrame after preload is live (clears any leftover CSS zoom).
+    try {
+      document.documentElement.style.zoom = ''
+      window.enpiistudio?.app?.setZoomFactor?.(state.ui.uiZoom / 100)
+    } catch {
+      /* ignore */
+    }
     if (state.activeProjectId) {
       state.setProjectLayout({})
       void hydrateProjectSession()
@@ -66,7 +73,10 @@
   })
 </script>
 
-<div class="box-border flex h-full w-full flex-col bg-studio-dark">
+<div
+  class="box-border flex h-full w-full flex-col bg-studio-dark {state.ui.goldPulse ? '' : 'gold-pulse-off'}"
+  data-theme={state.ui.theme}
+>
   <!-- Unified titlebar -->
   <div
     class="flex h-11 shrink-0 items-center gap-3 border-b border-border-subtle bg-studio-sidebar px-3"
@@ -95,8 +105,8 @@
       ></div>
     </div>
 
-    <main class="min-h-0 min-w-0 bg-studio-dark">
-      <div class="grid h-full min-h-0 overflow-hidden" style="grid-template-rows: minmax(0, 1fr) auto">
+    <main class="min-h-0 min-w-0 bg-studio-dark select-text" data-selectable>
+      <div class="grid h-full min-h-0 overflow-hidden select-text" style="grid-template-rows: minmax(0, 1fr) auto">
         {#if state.mode === 'agent'}
           <AgentStage />
         {/if}

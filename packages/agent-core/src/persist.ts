@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { repairChatMessages } from './chat-repair.js'
 import type { SessionMeta } from './types.js'
 import type { ChatMessage } from './provider/openai.js'
 import { indexList, indexUpsert } from './session-index.js'
@@ -75,6 +76,9 @@ export function loadSession(
     const raw = fs.readFileSync(sessionPath(projectRoot, sessionId), 'utf8')
     const data = JSON.parse(raw) as PersistedSession
     if (!data?.meta?.id) return null
+    if (Array.isArray(data.messages) && data.messages.length) {
+      data.messages = repairChatMessages(data.messages)
+    }
     return data
   } catch {
     return null
@@ -96,7 +100,12 @@ export function loadSessionById(sessionId: string): PersistedSession | null {
     if (!fs.existsSync(file)) continue
     try {
       const data = JSON.parse(fs.readFileSync(file, 'utf8')) as PersistedSession
-      if (data?.meta?.id === sessionId) return data
+      if (data?.meta?.id === sessionId) {
+        if (Array.isArray(data.messages) && data.messages.length) {
+          data.messages = repairChatMessages(data.messages)
+        }
+        return data
+      }
     } catch {
       /* skip */
     }

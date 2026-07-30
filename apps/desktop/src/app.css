@@ -28,7 +28,10 @@
 
   /* Text — Apple HIG-ish */
   --color-studio-text: #f5f5f7;
+  /* Secondary / muted chrome — not for long assistant body (too grey on dark). */
   --color-studio-text-dim: #98989d;
+  /* Chat body between primary and dim — readable without white flash on bold. */
+  --color-studio-text-body: #c4c4c8;
 
   /* Hairline separators */
   --color-border-subtle: rgba(255, 255, 255, 0.08);
@@ -72,7 +75,7 @@
   --ease-studio: cubic-bezier(0.25, 0.1, 0.25, 1);
 
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
@@ -125,6 +128,46 @@
     letter-spacing: -0.01em;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+  }
+
+  /*
+    Nuclear selectable: Electron + desktop shells often feel unselectable outside inputs.
+    Everything is text-selectable; only pure chrome controls opt out.
+  */
+  html,
+  body,
+  #app,
+  #app * {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  button,
+  button *,
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'],
+  [role='separator'],
+  summary,
+  nav,
+  .studio-traffic,
+  .studio-traffic *,
+  [data-no-select],
+  [data-no-select] *,
+  .select-none,
+  .select-none * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  /* Inputs always selectable even inside chrome. */
+  input,
+  textarea,
+  [contenteditable='true'],
+  pre,
+  code {
+    -webkit-user-select: text !important;
+    user-select: text !important;
   }
 
   ::selection {
@@ -186,6 +229,11 @@
   .studio-signal {
     background: var(--color-studio-gold);
     animation: studio-signal 1.8s var(--ease-studio) infinite;
+  }
+
+  /* Appearance → Gold running pulse off */
+  .gold-pulse-off .studio-signal {
+    animation: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

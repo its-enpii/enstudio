@@ -1,3 +1,4 @@
+import { normalizeUsage } from '../usage.js'
 import type { ChatMessage, ChatResult, ToolCall, ToolDef } from './openai.js'
 
 type RetryEvent = {
@@ -194,15 +195,19 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
   }
 }
 
-function usageFromAnthropic(u?: { input_tokens?: number; output_tokens?: number }): ChatResult['usage'] | undefined {
+function usageFromAnthropic(u?: {
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+}): ChatResult['usage'] | undefined {
   if (!u) return undefined
-  const prompt = u.input_tokens ?? 0
-  const completion = u.output_tokens ?? 0
-  return {
-    prompt_tokens: prompt,
-    completion_tokens: completion,
-    total_tokens: prompt + completion,
-  }
+  return normalizeUsage({
+    input_tokens: u.input_tokens,
+    output_tokens: u.output_tokens,
+    cache_read_input_tokens: u.cache_read_input_tokens,
+    cache_creation_input_tokens: u.cache_creation_input_tokens,
+  })
 }
 
 function parseNonStream(data: {
@@ -436,7 +441,11 @@ export async function anthropicMessages(opts: {
         }
       } else if (type === 'message_delta') {
         const delta = json.delta as { stop_reason?: string | null } | undefined
-        const u = json.usage as { input_tokens?: number; output_tokens?: number } | undefined
+        const u = json.usage as {
+          input_tokens?: number
+          output_tokens?: number
+          cache_read_input_tokens?: number
+        } | undefined
         if (delta?.stop_reason) {
           finish_reason =
             delta.stop_reason === 'tool_use'
@@ -447,11 +456,31 @@ export async function anthropicMessages(opts: {
                   ? 'length'
                   : delta.stop_reason
         }
-        if (u) usage = usageFromAnthropic(u)
+        // message_delta often only has output_tokens — merge onto message_start input.
+        if (u) {
+          const part = usageFromAnthropic(u)
+          if (part) {
+            usage = {
+              prompt_tokens: part.prompt_tokens || usage?.prompt_tokens,
+              completion_tokens: part.completion_tokens || usage?.completion_tokens,
+              total_tokens:
+                (part.prompt_tokens || usage?.prompt_tokens || 0) +
+                (part.completion_tokens || usage?.completion_tokens || 0),
+              cached_tokens: part.cached_tokens || usage?.cached_tokens,
+            }
+          }
+        }
       } else if (type === 'message_start') {
-        const msg = json.message as { model?: string; usage?: { input_tokens?: number; output_tokens?: number } } | undefined
+        const msg = json.message as {
+          model?: string
+          usage?: {
+            input_tokens?: number
+            output_tokens?: number
+            cache_read_input_tokens?: number
+          }
+        } | undefined
         if (msg?.model) model = msg.model
-        if (msg?.usage) usage = usageFromAnthropic(msg.usage)
+        if (msg?.usage) usage = usageFromAnthropic(msg.usage) ?? usage
       }
     }
   }

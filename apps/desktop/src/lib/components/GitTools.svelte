@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { state as app } from '../store.svelte'
   import { clearGitCommitSelection, focusGitCommit, gitPanel } from '../git-panel.svelte'
+  import { Icon } from '../icons'
   import {
     getGitCommitDiff,
     getGitCommitFiles,
@@ -143,11 +144,12 @@
       <span class="studio-label">Remote</span>
       <button
         type="button"
-        class="rounded-lg bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-studio-text-dim ring-1 ring-white/8 hover:bg-white/[0.1] hover:text-studio-text disabled:opacity-40"
+        class="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-studio-text-dim ring-1 ring-white/8 hover:bg-white/[0.1] hover:text-studio-text disabled:opacity-40"
         disabled={loading || busy}
         onclick={() => void refresh()}
       >
-        {loading ? '…' : 'Refresh'}
+        <Icon name="refresh" size={12} class={loading ? 'animate-spin' : ''} />
+        Refresh
       </button>
     </div>
     <div class="rounded-xl bg-black/20 p-3 ring-1 ring-white/6">
@@ -166,7 +168,12 @@
       <div class="flex items-center justify-between gap-2 py-1 text-[12px]">
         <span class="text-studio-text-dim">Sync</span>
         <strong class="text-studio-text">
-          {#if status?.ahead || status?.behind}↑{status?.ahead ?? 0} ↓{status?.behind ?? 0}{:else}up to date{/if}
+          {#if status?.ahead || status?.behind}
+            <span class="inline-flex items-center gap-1">
+              <Icon name="arrow-up" size={10} />{status?.ahead ?? 0}
+              <Icon name="arrow-down" size={10} />{status?.behind ?? 0}
+            </span>
+          {:else}up to date{/if}
         </strong>
       </div>
     </div>
@@ -193,10 +200,9 @@
                 : ''}"
             onclick={() => void toggleCommit(commit)}
           >
-            <span
-              class="mt-0.5 grid size-4 shrink-0 place-items-center rounded text-[10px] text-studio-text-dim"
-              >{open ? '⌄' : '›'}</span
-            >
+            <span class="mt-0.5 grid size-4 shrink-0 place-items-center text-studio-text-dim">
+              <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+            </span>
             <span class="min-w-0 flex-1">
               <span class="block truncate text-[12px] font-medium leading-snug text-studio-text"
                 >{commit.subject}</span
@@ -222,21 +228,20 @@
                     <button
                       type="button"
                       class="flex w-full items-center gap-1.5 rounded-md py-1 pr-1.5 text-left text-[11px] leading-snug hover:bg-white/8 {selected
-                        ? 'bg-studio-purple/25 text-studio-text'
-                        : 'text-studio-text-dim hover:text-studio-text'}"
+                        ? 'bg-studio-purple/25'
+                        : ''}"
                       style={`padding-left:${6 + row.depth * 12}px`}
-                      title={row.path}
+                      title={`${row.path} · ${row.file.status === 'A' ? 'new' : row.file.status === 'D' ? 'deleted' : 'modified'}`}
                       disabled={busy}
                       onclick={() => void loadCommitFile(commit, row.file!)}
                     >
                       <span
-                        class="w-3 shrink-0 text-center font-mono text-[10px] {row.file.status === 'A'
+                        class="min-w-0 truncate {row.file.status === 'A'
                           ? 'text-studio-success'
                           : row.file.status === 'D'
                             ? 'text-danger'
-                            : 'text-studio-gold'}">{row.file.status}</span
+                            : 'text-studio-gold'}">{row.name}</span
                       >
-                      <span class="min-w-0 truncate">{row.name}</span>
                     </button>
                   {:else}
                     <button
@@ -246,9 +251,12 @@
                       title={row.path}
                       onclick={() => toggleFolder(commit.hash, row.path)}
                     >
-                      <span class="w-3 shrink-0 text-center text-[10px]"
-                        >{collapsedFolders[`${commit.hash}:${row.path}`] ? '›' : '⌄'}</span
-                      >
+                      <span class="grid w-3 shrink-0 place-items-center">
+                        <Icon
+                          name={collapsedFolders[`${commit.hash}:${row.path}`] ? 'chevron-right' : 'chevron-down'}
+                          size={10}
+                        />
+                      </span>
                       <span class="min-w-0 truncate font-medium">{row.name}</span>
                     </button>
                   {/if}

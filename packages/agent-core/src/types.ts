@@ -52,6 +52,8 @@ export interface SessionUsageTotals {
   prompt: number
   completion: number
   total: number
+  /** Cumulative cache hits (subset of prompt), when provider reports. */
+  cached?: number
 }
 
 export interface SessionMeta {

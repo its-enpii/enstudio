@@ -1,3 +1,5 @@
+import { normalizeUsage } from '../usage.js'
+
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 export type ChatContentPart =
   | { type: 'text'; text: string }
@@ -25,6 +27,8 @@ export interface ChatResult {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    /** Cache hits (subset of prompt), when provider/gateway reports. */
+    cached_tokens?: number
   }
   model?: string
 }
@@ -142,6 +146,8 @@ export async function chatCompletions(opts: {
     messages: opts.messages,
     stream,
   }
+  // Without this, many OpenAI-compat streams omit the final usage chunk → UI undercounts.
+  if (stream) body.stream_options = { include_usage: true }
   if (opts.tools?.length) {
     body.tools = opts.tools
     body.tool_choice = 'auto'
@@ -210,7 +216,7 @@ export async function chatCompletions(opts: {
         }
         finish_reason?: string
       }[]
-      usage?: ChatResult['usage']
+      usage?: unknown
       model?: string
     }
     const msg = data.choices?.[0]?.message
@@ -220,7 +226,7 @@ export async function chatCompletions(opts: {
       content,
       tool_calls: msg?.tool_calls,
       finish_reason: data.choices?.[0]?.finish_reason,
-      usage: data.usage,
+      usage: normalizeUsage(data.usage),
       model: data.model,
     }
   }
@@ -290,7 +296,7 @@ export async function chatCompletions(opts: {
         }
       }
       if (choice?.finish_reason) finish_reason = choice.finish_reason
-      if (json.usage) usage = json.usage
+      if (json.usage) usage = normalizeUsage(json.usage) ?? usage
       if (json.model) model = json.model
     }
   }

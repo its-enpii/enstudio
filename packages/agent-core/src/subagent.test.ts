@@ -5,7 +5,9 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
 import {
+  applySubAgentWorktree,
   clearLiveSubAgents,
+  discardSubAgentWorktree,
   listSubAgents,
   messageSubAgent,
   spawnSubAgent,
@@ -23,6 +25,7 @@ const mockConfig: ProviderConfig = {
   baseUrl: 'http://127.0.0.1:9',
   apiKey: 'test',
   model: 'test',
+  models: ['test'],
   dialect: 'openai',
   permissionMode: 'ask',
 }
@@ -93,5 +96,10 @@ describe('subagent registry', () => {
   it('list empty project starts empty', () => {
     clearLiveSubAgents()
     assert.equal(listSubAgents(root).length, 0)
+  })
+
+  it('apply/discard fail without live agent', () => {
+    assert.equal(applySubAgentWorktree('dead').ok, false)
+    assert.equal(discardSubAgentWorktree('dead').ok, false)
   })
 })

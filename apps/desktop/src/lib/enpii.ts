@@ -8,31 +8,82 @@ import {
 
 let hydrateInFlight: Promise<void> | null = null
 
+function approvalMutationKind(name: string): 'write' | 'shell' | 'git' | 'mcp' {
+  if (name === 'run_shell') return 'shell'
+  if (name.startsWith('git_')) {
+    const read = /^(git_status|git_diff|git_history|git_branches|git_stashes|git_remotes|git_conflicts)$/
+    if (!read.test(name)) return 'git'
+  }
+  if (name === 'mcp_call_tool') return 'mcp'
+  return 'write'
+}
+
 export async function respondApproval(
   decision: 'allow' | 'deny',
   requestId?: string,
   scope: 'once' | 'session' = 'once',
+  opts?: { editedArgs?: string; reason?: string },
 ): Promise<void> {
   const a = requestId
     ? state.pendingApprovals.find((x) => x.requestId === requestId) ?? null
     : state.approval
   if (!a) return
+  // Snapshot siblings of same kind before RPC — session grant clears them server-side too.
+  const kind = approvalMutationKind(a.name)
+  const related =
+    decision === 'allow' && scope === 'session'
+      ? state.pendingApprovals.filter((x) => approvalMutationKind(x.name) === kind)
+      : [a]
   try {
     await window.enpiistudio.enpii.request('session.approve', {
       sessionId: a.sessionId,
       requestId: a.requestId,
       decision,
       scope: decision === 'allow' ? scope : 'once',
+      ...(decision === 'allow' && opts?.editedArgs ? { editedArgs: opts.editedArgs } : {}),
+      ...(decision === 'deny' && opts?.reason ? { reason: opts.reason } : {}),
     })
     const label = decision === 'allow' && scope === 'session' ? 'allow-session' : decision
-    state.pushLog(`[approval] ${label} ${a.name}`)
-    state.approvals = [{ requestId: a.requestId, toolCallId: a.toolCallId, name: a.name, summary: a.summary, preview: a.preview, args: a.args, decision, ts: Date.now() }, ...state.approvals].slice(0, 50)
+    const edited = decision === 'allow' && opts?.editedArgs ? ' (edited)' : ''
+    state.pushLog(`[approval] ${label}${edited} ${a.name}${related.length > 1 ? ` (+${related.length - 1} same kind)` : ''}`)
+    if (decision === 'allow' && scope === 'session') {
+      const k = kind
+      if (!state.sessionGrantKinds.includes(k)) {
+        state.sessionGrantKinds = [...state.sessionGrantKinds, k]
+      }
+    }
+    const now = Date.now()
+    state.approvals = [
+      ...related.map((item) => ({
+        requestId: item.requestId,
+        toolCallId: item.toolCallId,
+        name: item.name,
+        summary: item.summary,
+        preview: item.preview,
+        args: item.requestId === a.requestId && opts?.editedArgs ? opts.editedArgs : item.args,
+        decision,
+        editedArgs: item.requestId === a.requestId ? opts?.editedArgs : undefined,
+        reason: item.requestId === a.requestId ? opts?.reason : undefined,
+        ts: now,
+      })),
+      ...state.approvals,
+    ].slice(0, 50)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    state.pushLog(`[approval] failed: ${message}`)
-    state.notify('error', 'Approval failed', message)
+    // Stale card after sibling session-grant — drop quietly.
+    if (/no pending approval|not running/i.test(message)) {
+      state.pushLog(`[approval] already settled ${a.requestId.slice(0, 8)}…`)
+    } else {
+      state.pushLog(`[approval] failed: ${message}`)
+      state.notify('error', 'Approval failed', message)
+    }
   } finally {
-    state.clearApproval(a.requestId)
+    if (decision === 'allow' && scope === 'session') {
+      for (const item of related) state.clearApproval(item.requestId)
+    } else {
+      state.clearApproval(a.requestId)
+    }
+    if (!state.pendingApprovals.length) state.clearApprovalNotif()
   }
 }
 
@@ -51,6 +102,9 @@ export async function respondAllApprovals(
     })
     const label = decision === 'allow' && scope === 'session' ? 'allow-session' : decision
     state.pushLog(`[approval] ${label} all (${queue.length})`)
+    if (decision === 'allow' && scope === 'session') {
+      state.sessionGrantKinds = ['write', 'shell', 'git', 'mcp']
+    }
     const now = Date.now()
     state.approvals = [
       ...queue.map((a) => ({
@@ -71,6 +125,7 @@ export async function respondAllApprovals(
     state.notify('error', 'Batch approval failed', message)
   } finally {
     state.clearApproval()
+    state.clearApprovalNotif()
   }
 }
 
@@ -95,6 +150,13 @@ export async function respondAsk(answer: string, requestId?: string): Promise<vo
   }
 }
 
+export type GuardrailsPublic = {
+  enabled: boolean
+  applyToInput?: boolean
+  applyToOutput?: boolean
+  applyToToolResults?: boolean
+}
+
 export type ProviderPublic = {
   baseUrl: string
   model: string
@@ -102,6 +164,9 @@ export type ProviderPublic = {
   dialect: ProviderDialect
   permissionMode: PermissionMode
   denyGlobs?: string[]
+  /** Claude-style allow rules, e.g. run_shell(npm *). */
+  allowRules?: string[]
+  guardrails?: GuardrailsPublic
   hasKey: boolean
   envOverrides: {
     baseUrl: boolean
@@ -120,7 +185,10 @@ function applyProvider(cfg: ProviderPublic, healthPrefix?: string): void {
 
 export async function loadProviderConfig(): Promise<ProviderPublic | null> {
   try {
-    const cfg = (await window.enpiistudio.enpii.request('config.get')) as ProviderPublic
+    const projectRoot = state.activeProject?.path
+    const cfg = (await window.enpiistudio.enpii.request('config.get', {
+      projectRoot,
+    })) as ProviderPublic
     applyProvider(cfg)
     return cfg
   } catch (err) {
@@ -139,16 +207,353 @@ export async function saveProviderConfig(patch: {
   dialect?: ProviderDialect
   permissionMode?: PermissionMode
   denyGlobs?: string[]
+  allowRules?: string[]
+  guardrails?: GuardrailsPublic
 }): Promise<ProviderPublic> {
-  const cfg = (await window.enpiistudio.enpii.request(
-    'config.set',
-    patch,
-  )) as ProviderPublic
+  const projectRoot = state.activeProject?.path
+  const cfg = (await window.enpiistudio.enpii.request('config.set', {
+    ...patch,
+    // Reload with project overlay so allowRules union is visible after save.
+    projectRoot,
+  })) as ProviderPublic
   applyProvider(cfg)
   state.pushLog(
-    `[config] saved model=${cfg.model} mode=${cfg.permissionMode} key=${cfg.hasKey ? 'ok' : 'missing'}`,
+    `[config] saved model=${cfg.model} mode=${cfg.permissionMode} allow=${cfg.allowRules?.length ?? 0} key=${cfg.hasKey ? 'ok' : 'missing'}`,
   )
   return cfg
+}
+
+export type DiskPlan = {
+  id: string
+  status: 'draft' | 'approved' | 'rejected'
+  title: string
+  steps: { title: string; detail?: string }[]
+  sessionId?: string
+  createdAt: string
+  updatedAt: string
+  path: string
+  relPath: string
+}
+
+/** Sync runtime.planMode with Composer Plan (UI-driven, not only model tool). */
+export async function setSessionPlanMode(active: boolean): Promise<void> {
+  const sessionId = state.session?.id
+  if (!sessionId) {
+    state.planMode = active
+    return
+  }
+  await window.enpiistudio.enpii.request('session.set_plan_mode', { sessionId, active })
+  state.planMode = active
+  state.stashLiveSession(sessionId)
+  state.pushLog(`[plan] mode ${active ? 'ON' : 'OFF'}`)
+}
+
+export async function fetchLatestPlan(
+  status?: 'draft' | 'approved' | 'rejected',
+): Promise<DiskPlan | null> {
+  const sessionId = state.session?.id
+  const projectRoot = state.activeProject?.path
+  if (!sessionId && !projectRoot) return null
+  const res = (await window.enpiistudio.enpii.request('session.plan_latest', {
+    sessionId,
+    projectRoot,
+    status,
+  })) as { plan?: DiskPlan | null }
+  return res.plan ?? null
+}
+
+export async function approveDiskPlan(planId?: string): Promise<DiskPlan | null> {
+  const sessionId = state.session?.id
+  const projectRoot = state.activeProject?.path
+  if (!sessionId && !projectRoot) throw new Error('Open a project first')
+  const res = (await window.enpiistudio.enpii.request('session.plan_approve', {
+    sessionId,
+    projectRoot,
+    planId,
+  })) as { ok: boolean; plan?: DiskPlan; content?: string }
+  if (!res.ok || !res.plan) throw new Error(res.content || 'approve failed')
+  state.planMode = false
+  state.draftPlan = null
+  state.activePlan = res.plan
+  // Target A: after human approves plan, trust workspace writes (shell/git still ask unless full).
+  try {
+    await saveProviderConfig({ permissionMode: 'autopilot_workspace' })
+    state.composerMode = 'accept_edits'
+    if (!state.sessionGrantKinds.includes('write')) {
+      state.sessionGrantKinds = [...state.sessionGrantKinds, 'write']
+    }
+    state.pushLog('[plan] approved → permissionMode=autopilot_workspace + write grant hint')
+  } catch (err) {
+    state.pushLog(
+      `[plan] approve ok but permission bump failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+  state.notify('success', 'Plan approved', `${res.plan.title} · workspace autopilot`)
+  state.stashLiveSession(sessionId)
+  return res.plan
+}
+
+export type BoardTaskRow = {
+  id: string
+  title: string
+  detail?: string
+  status: string
+  blockedBy: string[]
+  note?: string
+  progress?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MailRow = {
+  id: string
+  from: string
+  to: string
+  content: string
+  type: string
+  createdAt: string
+}
+
+export type SubAgentRow = {
+  id: string
+  name: string
+  description: string
+  status: string
+  worktreePath?: string
+  worktreeBranch?: string
+  updatedAt?: string
+  lastSummary?: string
+}
+
+export async function listBoardTasks(status?: string): Promise<BoardTaskRow[]> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) return []
+  const res = (await window.enpiistudio.enpii.request('board.list', {
+    projectRoot,
+    status,
+  })) as { tasks?: BoardTaskRow[] }
+  return res.tasks ?? []
+}
+
+export async function updateBoardTask(
+  taskId: string,
+  patch: {
+    status?: string
+    note?: string
+    progress?: number
+    title?: string
+    addBlockedBy?: string[]
+    removeBlockedBy?: string[]
+    clearBlockedBy?: boolean
+  },
+): Promise<BoardTaskRow | null> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) throw new Error('Open a project first')
+  const res = (await window.enpiistudio.enpii.request('board.update', {
+    projectRoot,
+    taskId,
+    ...patch,
+  })) as { task?: BoardTaskRow }
+  return res.task ?? null
+}
+
+export async function createBoardTask(title: string, detail?: string): Promise<BoardTaskRow | null> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) throw new Error('Open a project first')
+  const res = (await window.enpiistudio.enpii.request('board.create', {
+    projectRoot,
+    title,
+    detail,
+  })) as { task?: BoardTaskRow }
+  return res.task ?? null
+}
+
+export async function peekMailbox(agentId = 'main', limit = 20): Promise<MailRow[]> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) return []
+  const res = (await window.enpiistudio.enpii.request('mailbox.peek', {
+    projectRoot,
+    agentId,
+    limit,
+  })) as { messages?: MailRow[] }
+  return res.messages ?? []
+}
+
+export async function listLiveSubAgents(): Promise<SubAgentRow[]> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) return []
+  const res = (await window.enpiistudio.enpii.request('subagent.list', {
+    projectRoot,
+  })) as { agents?: SubAgentRow[] }
+  return res.agents ?? []
+}
+
+export async function applySubAgent(id: string, opts?: { remove?: boolean; keepBranch?: boolean }): Promise<string> {
+  const res = (await window.enpiistudio.enpii.request('subagent.apply', {
+    id,
+    remove: opts?.remove,
+    keepBranch: opts?.keepBranch,
+  })) as { content?: string }
+  void refreshTeamSurface()
+  return res.content ?? 'applied'
+}
+
+export async function discardSubAgent(id: string, opts?: { deleteBranch?: boolean }): Promise<string> {
+  const res = (await window.enpiistudio.enpii.request('subagent.discard', {
+    id,
+    deleteBranch: opts?.deleteBranch,
+  })) as { content?: string }
+  void refreshTeamSurface()
+  return res.content ?? 'discarded'
+}
+
+export type CronJobRow = {
+  id: string
+  name: string
+  schedule: string
+  prompt: string
+  enabled: boolean
+  runCount: number
+  lastRunAt?: string
+  nextRunAt?: string
+  lastError?: string
+  failStreak?: number
+}
+
+export async function listCronJobs(): Promise<CronJobRow[]> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) return []
+  const res = (await window.enpiistudio.enpii.request('cron.list', {
+    projectRoot,
+  })) as { jobs?: CronJobRow[] }
+  return res.jobs ?? []
+}
+
+export async function createCronJob(input: {
+  name: string
+  schedule: string
+  prompt: string
+  enabled?: boolean
+}): Promise<CronJobRow> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) throw new Error('Open a project first')
+  const res = (await window.enpiistudio.enpii.request('cron.create', {
+    projectRoot,
+    ...input,
+  })) as { job?: CronJobRow; content?: string }
+  if (!res.job) throw new Error(res.content || 'cron create failed')
+  return res.job
+}
+
+export async function deleteCronJob(idOrName: string): Promise<void> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) throw new Error('Open a project first')
+  await window.enpiistudio.enpii.request('cron.delete', { projectRoot, id: idOrName, name: idOrName })
+}
+
+export async function toggleCronJob(idOrName: string, enabled?: boolean): Promise<CronJobRow> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) throw new Error('Open a project first')
+  const res = (await window.enpiistudio.enpii.request('cron.toggle', {
+    projectRoot,
+    id: idOrName,
+    name: idOrName,
+    enabled,
+  })) as { job?: CronJobRow; content?: string }
+  if (!res.job) throw new Error(res.content || 'cron toggle failed')
+  return res.job
+}
+
+/** Refresh hide-if-empty team strips (board / mail / subs). No-op without project. */
+export async function refreshTeamSurface(): Promise<void> {
+  const projectRoot = state.activeProject?.path
+  if (!projectRoot) {
+    state.teamBoard = []
+    state.teamMail = []
+    state.teamSubs = []
+    return
+  }
+  try {
+    const [tasks, mail, agents] = await Promise.all([
+      listBoardTasks(),
+      peekMailbox('main', 12),
+      listLiveSubAgents(),
+    ])
+    // Open + recently touched only — hide completed noise.
+    const open = tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress')
+    state.teamBoard = open.slice(0, 12).map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      blockedBy: t.blockedBy ?? [],
+      note: t.note,
+      progress: t.progress,
+    }))
+    state.teamMail = mail.slice(0, 8)
+    state.teamSubs = agents
+      .filter((a) => a.status === 'running' || a.status === 'idle' || a.status === 'error')
+      .slice(0, 8)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        status: a.status,
+        worktreeBranch: a.worktreeBranch,
+        lastSummary: a.lastSummary,
+      }))
+  } catch (err) {
+    state.pushLog(
+      `[team] refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
+const TEAM_TOOL_NAMES = new Set([
+  'task_create',
+  'task_update',
+  'task_stop',
+  'task_list',
+  'task_get',
+  'mailbox_send',
+  'mailbox_inbox',
+  'mailbox_broadcast',
+  'agent',
+  'send_message',
+  'agent_apply',
+  'agent_discard',
+])
+
+export function maybeRefreshTeamFromTool(name?: string): void {
+  if (!name || !TEAM_TOOL_NAMES.has(name)) return
+  void refreshTeamSurface()
+}
+
+export async function rejectDiskPlan(planId?: string): Promise<DiskPlan | null> {
+  const sessionId = state.session?.id
+  const projectRoot = state.activeProject?.path
+  if (!sessionId && !projectRoot) throw new Error('Open a project first')
+  const res = (await window.enpiistudio.enpii.request('session.plan_reject', {
+    sessionId,
+    projectRoot,
+    planId,
+  })) as { ok: boolean; plan?: DiskPlan; content?: string }
+  if (!res.ok || !res.plan) throw new Error(res.content || 'reject failed')
+  state.draftPlan = null
+  state.notify('info', 'Plan rejected', res.plan.title)
+  state.stashLiveSession(sessionId)
+  return res.plan
+}
+
+export async function refreshDraftPlan(): Promise<void> {
+  try {
+    const draft = await fetchLatestPlan('draft')
+    state.draftPlan = draft
+    if (!state.activePlan || state.activePlan.status !== 'approved') {
+      state.activePlan = (await fetchLatestPlan('approved')) ?? state.activePlan
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export type SshTunnelInfo = {
@@ -687,7 +1092,7 @@ export async function refreshSessionList(): Promise<void> {
       sizeBytes?: number
       busy?: boolean
       worktree?: boolean
-      usage?: { prompt?: number; completion?: number; total?: number }
+      usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
     }[]
     const mapped = list.map((s) => ({
       id: s.id,
@@ -706,6 +1111,7 @@ export async function refreshSessionList(): Promise<void> {
             prompt: s.usage.prompt ?? 0,
             completion: s.usage.completion ?? 0,
             total: s.usage.total ?? 0,
+            cached: s.usage.cached ?? 0,
           }
         : undefined,
     }))
@@ -754,13 +1160,18 @@ export async function ensureSession(): Promise<string | null> {
   return s?.id ?? null
 }
 
-export async function stopAgentTurn(): Promise<void> {
+export async function stopAgentTurn(opts?: { clearQueue?: boolean }): Promise<void> {
   if (!state.session) return
   const sessionId = state.session.id
   await window.enpiistudio.enpii.request('session.stop', { sessionId })
   state.setSessionBusy(sessionId, false)
   state.clearApproval()
   state.streamingId = null
+  state.turnStartedAt = null
+  state.finishTurnTimer(sessionId)
+  if (opts?.clearQueue !== false) {
+    state.promptQueue = []
+  }
   state.updateRun({ status: 'cancelled', lastEvent: 'stopped by user' })
   state.stashLiveSession(sessionId)
 }
@@ -947,6 +1358,7 @@ export async function newSession(): Promise<void> {
     worktreeBranch?: string
   }
 
+  state.bindSessionProject(meta.id, project.id)
   state.session = {
     id: meta.id,
     title: meta.title,
@@ -1217,12 +1629,25 @@ export async function applyWorktreeSession(opts: {
     const keepNote = result.keptBranch ? ` · kept ${result.keptBranch}` : ''
     state.pushLog(`[worktree] applied ${result.merged}${result.removed ? ' · removed' : ''}${keepNote}`)
     state.notify('success', 'Worktree applied', `Merged ${result.merged} into main${keepNote}`)
-    await newSession()
+    await activateNextWorktreeOrFresh(session.id)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     state.pushLog(`[worktree] apply failed: ${message}`)
     state.notify('error', 'Apply failed', message)
   }
+}
+
+/** After apply/discard: jump to next remaining WT session, else fresh main chat. */
+async function activateNextWorktreeOrFresh(excludeId: string): Promise<void> {
+  await refreshSessionList()
+  const next = state.sessionList.find(
+    (s) => s.id !== excludeId && Boolean(s.worktreeBranch || s.baseProjectRoot),
+  )
+  if (next) {
+    await openSession(next.id)
+    return
+  }
+  await newSession()
 }
 
 export async function discardWorktreeSession(opts: { confirmed?: boolean } = {}): Promise<void> {
@@ -1238,6 +1663,7 @@ export async function discardWorktreeSession(opts: { confirmed?: boolean } = {})
     return
   }
   if (!opts.confirmed) return
+  const discardedId = session.id
   try {
     if (state.busy || state.pendingApprovals.length > 0) {
       await window.enpiistudio.enpii.request('session.stop', { sessionId: session.id })
@@ -1255,7 +1681,9 @@ export async function discardWorktreeSession(opts: { confirmed?: boolean } = {})
         : 'Removed isolated tree'
     state.pushLog(`[worktree] discarded${result.alreadyGone ? ' · orphan' : ''}${result.deletedBranch ? ` · ${result.deletedBranch}` : ''}`)
     state.notify('info', 'Worktree discarded', note)
-    await newSession()
+    // Drop discarded from list immediately so next pick is clean
+    state.sessionList = state.sessionList.filter((s) => s.id !== discardedId)
+    await activateNextWorktreeOrFresh(discardedId)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     state.pushLog(`[worktree] discard failed: ${message}`)
@@ -1292,7 +1720,7 @@ export async function openSession(sessionId: string): Promise<void> {
               baseProjectRoot?: string
               worktreeBranch?: string
               loadMemory?: boolean
-              usage?: { prompt?: number; completion?: number; total?: number }
+              usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
             }
           }
           listed = {
@@ -1308,6 +1736,7 @@ export async function openSession(sessionId: string): Promise<void> {
                   prompt: loaded.meta.usage.prompt ?? 0,
                   completion: loaded.meta.usage.completion ?? 0,
                   total: loaded.meta.usage.total ?? 0,
+                  cached: loaded.meta.usage.cached ?? 0,
                 }
               : undefined,
           }
@@ -1315,6 +1744,7 @@ export async function openSession(sessionId: string): Promise<void> {
           /* fall through with sparse meta */
         }
       }
+      state.bindSessionProject(sessionId, state.activeProjectId)
       state.session = {
         id: sessionId,
         title: listed?.title ?? 'Session',
@@ -1343,7 +1773,7 @@ export async function openSession(sessionId: string): Promise<void> {
         baseProjectRoot?: string
         worktreeBranch?: string
         loadMemory?: boolean
-        usage?: { prompt?: number; completion?: number; total?: number }
+        usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
       }
       messages: { role: string; content: string; toolName?: string }[]
     }
@@ -1353,6 +1783,7 @@ export async function openSession(sessionId: string): Promise<void> {
           prompt: diskUsage.prompt ?? 0,
           completion: diskUsage.completion ?? 0,
           total: diskUsage.total ?? 0,
+          cached: diskUsage.cached ?? 0,
         }
       : null
     state.session = {
@@ -1366,6 +1797,7 @@ export async function openSession(sessionId: string): Promise<void> {
       loadMemory: loaded.meta.loadMemory,
       usage: usage ?? undefined,
     }
+    state.bindSessionProject(loaded.meta.id, state.activeProjectId)
     state.messages = mapDiskMessages(loaded.messages ?? [])
     state.composer = ''
     state.attachments = []
@@ -1392,39 +1824,90 @@ export async function sendPrompt(
     displayText?: string
     images?: { name: string; mime: string; dataUrl: string }[]
     attachments?: { name: string; kind?: 'text' | 'image' }[]
+    /** Internal: already dequeued — do not re-queue if somehow still busy. */
+    fromQueue?: boolean
   },
 ): Promise<void> {
   const sessionId = await ensureSession()
   if (!sessionId) throw new Error('Open a project first')
+
+  // FIFO wait: if agent mid-turn, park prompt until idle (user asked for queue, not hard-block).
+  if (state.isSessionBusy(sessionId) && !options?.fromQueue) {
+    state.enqueuePrompt({
+      text,
+      displayText: options?.displayText,
+      images: options?.images,
+      attachments: options?.attachments,
+    })
+    state.notify('info', 'Queued', 'Sends when the current turn finishes')
+    return
+  }
 
   state.pushMessage({
     role: 'user',
     text: options?.displayText ?? text,
     attachments: options?.attachments,
   })
+  const started = Date.now()
+  state.turnStartedAt = started
+  state.bindSessionProject(sessionId, state.activeProjectId)
   state.setSessionBusy(sessionId, true)
   state.resetRun()
   state.streamingId = null
+  // Keep start on live map even if UI switches session mid-turn.
+  const liveStart = state.getLive(sessionId)
+  liveStart.turnStartedAt = started
+  liveStart.busy = true
   state.stashLiveSession(sessionId)
   try {
     await window.enpiistudio.enpii.request('session.prompt', {
       sessionId,
       text,
       images: options?.images,
+      goal: {
+        goal: text,
+        maxRounds: state.ui.maxTurns,
+      },
     })
     await refreshSessionList()
   } finally {
+    state.finishTurnTimer(sessionId)
     // Only clear busy if still this session (user may have switched away).
     state.setSessionBusy(sessionId, false)
     if (state.session?.id === sessionId) {
       state.streamingId = null
+      state.turnStartedAt = null
     } else {
       const live = state.getLive(sessionId)
       live.busy = false
       live.streamingId = null
-      state.patchLive(sessionId, { busy: false, streamingId: null, status: 'idle' })
+      live.turnStartedAt = null
+      state.patchLive(sessionId, { busy: false, streamingId: null, status: 'idle', turnStartedAt: null })
     }
     state.stashLiveSession(sessionId)
+    void flushPromptQueue(sessionId)
+  }
+}
+
+/** Drain one queued prompt after turn ends (recursive via sendPrompt finally). */
+async function flushPromptQueue(sessionId: string): Promise<void> {
+  if (state.session?.id !== sessionId) return
+  if (state.isSessionBusy(sessionId)) return
+  const next = state.dequeuePrompt()
+  if (!next) return
+  try {
+    await sendPrompt(next.text, {
+      displayText: next.displayText,
+      images: next.images,
+      attachments: next.attachments,
+      fromQueue: true,
+    })
+  } catch (err) {
+    state.pushMessage({
+      role: 'system',
+      text: `Queued prompt failed: ${err instanceof Error ? err.message : String(err)}`,
+    })
+    void flushPromptQueue(sessionId)
   }
 }
 
@@ -1566,6 +2049,13 @@ export function bindEnpiiEvents(): () => void {
         checkpointId?: string
         prompt?: string
         files?: AgentCheckpoint['files']
+        active?: boolean
+        planId?: string
+        planPath?: string
+        planStatus?: string
+        question?: string
+        options?: string[]
+        plan?: unknown
       }
     }
     const p = msg.params
@@ -1731,35 +2221,69 @@ export function bindEnpiiEvents(): () => void {
         preview: p.preview ?? '',
         args: p.args,
       }
+      // Count before enqueue — only OS-notify on first of a batch.
+      const prevCount = active
+        ? state.pendingApprovals.length
+        : (state.liveSessions.get(eventSessionId)?.pendingApprovals.length ?? 0)
       if (active) {
         state.enqueueApproval(approval)
         state.stashLiveSession(eventSessionId)
       } else {
         applyBackground((live) => {
-          live.pendingApprovals = [approval, ...live.pendingApprovals.filter((a) => a.requestId !== approval.requestId)]
+          live.pendingApprovals = [
+            approval,
+            ...live.pendingApprovals.filter((a) => a.requestId !== approval.requestId),
+          ]
           live.busy = true
           live.status = 'awaiting_approval'
         })
       }
-      const title = active
-        ? (state.pendingApprovals.length > 1 ? `Approval required (${state.pendingApprovals.length})` : 'Approval required')
-        : 'Approval (background session)'
-      state.notify('warning', title, p.summary ?? p.name)
-      void window.enpiistudio.app.showNotification?.({
-        title,
-        body: p.summary ?? p.name,
-        urgency: 'critical',
-      })
+      const n = active
+        ? state.pendingApprovals.length
+        : (state.liveSessions.get(eventSessionId)?.pendingApprovals.length ?? 1)
+      const detail = String(p.summary ?? p.name)
+      // In-app: single updating toast (no +19 spam).
+      state.notifyApprovalQueue(detail, !active)
+      // OS: only when queue was empty (first pending), not every tool in the batch.
+      if (prevCount === 0) {
+        void window.enpiistudio.app.showNotification?.({
+          title: active ? (n > 1 ? `Approval required (${n})` : 'Approval required') : 'Approval (other session)',
+          body: detail,
+          urgency: 'critical',
+        })
+      }
       return
     }
 
     if (p.type === 'ask_user_request' && p.requestId && p.question) {
+      const rawOpts = Array.isArray(p.options) ? p.options : undefined
+      const options = rawOpts
+        ?.map((item) => {
+          if (typeof item === 'string') {
+            const label = item.trim()
+            return label ? { label } : null
+          }
+          if (item && typeof item === 'object') {
+            const o = item as Record<string, unknown>
+            const label = String(o.label ?? o.title ?? o.value ?? '').trim()
+            if (!label) return null
+            const description = String(o.description ?? o.detail ?? '').trim()
+            return {
+              label,
+              description: description || undefined,
+              recommended: o.recommended === true || undefined,
+            }
+          }
+          return null
+        })
+        .filter((x): x is { label: string; description?: string; recommended?: boolean } => Boolean(x))
+        .slice(0, 6)
       const ask = {
         requestId: String(p.requestId),
         sessionId: eventSessionId,
         toolCallId: String(p.toolCallId ?? p.requestId),
         question: String(p.question),
-        options: Array.isArray(p.options) ? p.options.map(String) : undefined,
+        options: options?.length ? options : undefined,
         summary: String(p.summary ?? p.question),
       }
       if (active) {
@@ -1782,16 +2306,87 @@ export function bindEnpiiEvents(): () => void {
     }
 
     if (p.type === 'plan_mode') {
-      const activePlan = p.active === true
+      const on = p.active === true
       if (active) {
-        state.planMode = activePlan
+        state.planMode = on
+        if (p.planStatus === 'approved' || p.planStatus === 'rejected') {
+          void refreshDraftPlan()
+        }
         state.stashLiveSession(eventSessionId)
       } else {
         applyBackground((live) => {
-          live.planMode = activePlan
+          live.planMode = on
         })
       }
       return
+    }
+
+    if (p.type === 'plan_updated') {
+      void refreshDraftPlan()
+      return
+    }
+
+    if (p.type === 'subagent_start' || p.type === 'subagent_done') {
+      void refreshTeamSurface()
+      if (p.type === 'subagent_done' && active) {
+        const sid = String(p.subagentId ?? '')
+        const ok = p.ok !== false
+        const summary = String(p.summary ?? p.description ?? '').slice(0, 160)
+        state.pushMessage({
+          role: 'system',
+          text: ok
+            ? `Sub ${sid || 'agent'} done${summary ? `: ${summary}` : ''}`
+            : `Sub ${sid || 'agent'} failed${summary ? `: ${summary}` : ''}`,
+        })
+        state.stashLiveSession(eventSessionId)
+      }
+      return
+    }
+
+    if (p.type === 'cron_fire') {
+      const name = String(p.name ?? p.jobId ?? 'job')
+      state.notify('info', `Cron · ${name}`, String(p.prompt ?? 'running…').slice(0, 120))
+      void window.enpiistudio.app.showNotification?.({
+        title: `Cron · ${name}`,
+        body: String(p.prompt ?? 'Agent turn started').slice(0, 160),
+        urgency: 'low',
+      })
+      return
+    }
+
+    if (p.type === 'cron_done') {
+      const name = String(p.name ?? p.jobId ?? 'job')
+      const ok = p.ok !== false
+      const err = String(p.error ?? '').slice(0, 160)
+      const disabled = p.disabled === true
+      const title = ok ? `Cron done · ${name}` : `Cron failed · ${name}`
+      const body = ok
+        ? disabled
+          ? 'Finished (job auto-disabled)'
+          : 'Finished'
+        : disabled
+          ? `${err || 'error'} · auto-disabled`
+          : err || 'error'
+      state.notify(ok ? 'success' : 'error', title, body)
+      void window.enpiistudio.app.showNotification?.({
+        title,
+        body,
+        urgency: ok ? 'low' : 'critical',
+      })
+      return
+    }
+
+    // After plan_tasks tool result, refresh draft card.
+    if (
+      p.type === 'tool_result' &&
+      p.name === 'plan_tasks' &&
+      p.ok !== false
+    ) {
+      void refreshDraftPlan()
+    }
+
+    if (p.type === 'tool_result' && typeof p.name === 'string') {
+      maybeRefreshTeamFromTool(p.name)
     }
 
     if (p.type === 'tool_result' && p.toolCallId) {
@@ -1826,6 +2421,13 @@ export function bindEnpiiEvents(): () => void {
 
     if (p.type === 'diff' && p.summary) {
       if (active) {
+        // Prefer rich unified diff on the matching tool card (write/edit).
+        if (p.toolCallId && p.preview) {
+          state.updateTool(String(p.toolCallId), {
+            preview: String(p.preview).slice(0, 12_000),
+            summary: p.summary,
+          })
+        }
         state.pushDiff({
           name: p.name ?? 'write',
           path: p.path ?? toolPath(p.args),
@@ -1894,19 +2496,25 @@ export function bindEnpiiEvents(): () => void {
 
     // Turn usage: accumulate for live UI. session_usage (below) replaces with disk totals after prompt.
     if (p.type === 'usage' && p.usage) {
-      const applyUsage = (live: { usage: { prompt: number; completion: number; total: number } | null }) => {
+      const applyUsage = (live: {
+        usage: { prompt: number; completion: number; total: number; cached?: number } | null
+      }) => {
         const next = {
           prompt: p.usage!.prompt_tokens ?? 0,
           completion: p.usage!.completion_tokens ?? 0,
           total: p.usage!.total_tokens ?? (p.usage!.prompt_tokens ?? 0) + (p.usage!.completion_tokens ?? 0),
+          cached: p.usage!.cached_tokens ?? 0,
         }
         live.usage = live.usage
           ? {
               prompt: live.usage.prompt + next.prompt,
               completion: live.usage.completion + next.completion,
               total: live.usage.total + next.total,
+              cached: (live.usage.cached ?? 0) + next.cached || undefined,
             }
-          : next
+          : next.cached
+            ? next
+            : { prompt: next.prompt, completion: next.completion, total: next.total }
       }
       if (active) {
         state.setUsage(p.usage, 'add')
@@ -1922,6 +2530,7 @@ export function bindEnpiiEvents(): () => void {
         prompt: p.usage.prompt_tokens ?? 0,
         completion: p.usage.completion_tokens ?? 0,
         total: p.usage.total_tokens ?? (p.usage.prompt_tokens ?? 0) + (p.usage.completion_tokens ?? 0),
+        cached: p.usage.cached_tokens ?? 0,
       }
       if (active) {
         state.setUsage(
@@ -1929,6 +2538,7 @@ export function bindEnpiiEvents(): () => void {
             prompt_tokens: totals.prompt,
             completion_tokens: totals.completion,
             total_tokens: totals.total,
+            cached_tokens: totals.cached,
           },
           'replace',
         )
@@ -2009,7 +2619,11 @@ export function bindEnpiiEvents(): () => void {
         const previousStatus = state.session.status
         state.session = { ...state.session, status }
         state.updateRun({ status: status ?? state.run?.status ?? 'running' })
-        if (terminal) state.setSessionBusy(eventSessionId, false)
+        if (terminal) {
+          state.finishTurnTimer(eventSessionId)
+          state.setSessionBusy(eventSessionId, false)
+          if (state.session?.id === eventSessionId) state.turnStartedAt = null
+        }
         if (status === 'completed' && previousStatus !== 'completed') {
           state.notify('success', 'Agent completed', state.session.title)
         }
@@ -2017,8 +2631,10 @@ export function bindEnpiiEvents(): () => void {
       } else {
         applyBackground((live) => {
           live.status = status
-          if (terminal) live.busy = false
-          else if (status === 'running' || status === 'awaiting_approval') live.busy = true
+          if (terminal) {
+            live.busy = false
+            live.turnStartedAt = null
+          } else if (status === 'running' || status === 'awaiting_approval') live.busy = true
         })
         if (status === 'completed') {
           const title = state.sessionList.find((s) => s.id === eventSessionId)?.title ?? 'Session'

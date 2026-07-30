@@ -38,11 +38,6 @@ export function isHttpMcpConfig(v: unknown): v is McpHttpServerConfig {
   return Boolean(v && typeof v === 'object' && typeof (v as McpHttpServerConfig).url === 'string' && (v as McpHttpServerConfig).url.trim())
 }
 
-type Pending = {
-  resolve: (v: unknown) => void
-  reject: (e: Error) => void
-}
-
 type JsonRpc = {
   jsonrpc?: string
   id?: number | string

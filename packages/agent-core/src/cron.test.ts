@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
+  canFireCron,
   collectDueCronJobs,
   cronCreate,
   cronDelete,
@@ -11,7 +12,10 @@ import {
   cronMarkRan,
   cronMatches,
   cronToggle,
+  FAIL_STREAK_DISABLE,
+  MAX_FIRES_PER_HOUR,
   nextCronFire,
+  recordCronFire,
   validateCronExpression,
 } from './cron.js'
 
@@ -123,4 +127,44 @@ test('collectDueCronJobs picks matching enabled jobs once per minute', () => {
     else process.env.ENPII_HOME = prev
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('cronMarkRan auto-disables after fail streak', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'enpii-cron-fail-'))
+  const prev = process.env.ENPII_HOME
+  process.env.ENPII_HOME = home
+  const root = path.join(home, 'proj')
+  fs.mkdirSync(root, { recursive: true })
+  try {
+    const created = cronCreate(root, {
+      name: 'flaky',
+      schedule: '0 3 * * *',
+      prompt: 'nightly',
+    })
+    assert.equal(created.ok, true)
+    if (!created.ok) return
+    for (let i = 0; i < FAIL_STREAK_DISABLE - 1; i++) {
+      const r = cronMarkRan(root, created.job.id, { ok: false, error: `boom${i}` })
+      assert.notEqual(r.disabled, true)
+      assert.equal(cronList(root).jobs[0]!.enabled, true)
+    }
+    const last = cronMarkRan(root, created.job.id, { ok: false, error: 'final' })
+    assert.equal(last.disabled, true)
+    const job = cronList(root).jobs[0]!
+    assert.equal(job.enabled, false)
+    assert.equal(job.failStreak, FAIL_STREAK_DISABLE)
+    assert.match(job.lastError ?? '', /auto-disabled/)
+  } finally {
+    if (prev === undefined) delete process.env.ENPII_HOME
+    else process.env.ENPII_HOME = prev
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('hourly fire budget blocks after MAX_FIRES_PER_HOUR', () => {
+  const now = Date.now()
+  for (let i = 0; i < MAX_FIRES_PER_HOUR; i++) recordCronFire(now)
+  const blocked = canFireCron(now)
+  assert.equal(blocked.ok, false)
+  if (!blocked.ok) assert.match(blocked.reason, /hourly/)
 })

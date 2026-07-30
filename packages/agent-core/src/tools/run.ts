@@ -33,6 +33,7 @@ import {
   gitUnstageAll,
 } from '../git.js'
 import { memoryDelete, memorySearch, memoryWrite } from '../context.js'
+import { storeDelete, storeGet, storePut, storeSearch } from '../memory-store.js'
 import {
   mcpCallTool,
   mcpGetPrompt,
@@ -45,6 +46,7 @@ import { webFetch, webSearch } from '../web.js'
 import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from '../tasks.js'
 import { cronCreate, cronDelete, cronList, cronToggle } from '../cron.js'
 import { mailboxBroadcast, mailboxPeek, mailboxReceive, mailboxSend } from '../mailbox.js'
+import { savePlan } from '../plans.js'
 
 const DEFAULT_READ = 120_000
 const DEFAULT_GLOB = 200
@@ -114,7 +116,7 @@ export async function runTool(
   root: string,
   name: string,
   argsJson: string,
-  options?: { denyGlobs?: string[]; homeDir?: string; bypassDeny?: boolean },
+  options?: { denyGlobs?: string[]; homeDir?: string; bypassDeny?: boolean; sessionId?: string },
 ): Promise<ToolResult> {
   let args: Record<string, unknown> = {}
   try {
@@ -155,7 +157,19 @@ export async function runTool(
           .filter((task) => task.title)
           .slice(0, 12)
         if (tasks.length < 2) return fail('plan_tasks requires at least 2 titled tasks')
-        return ok('task plan published', JSON.stringify(tasks))
+        // Durable draft under ~/.enpiistudio/projects/<hash>/plans/<id>.md
+        const saved = savePlan(root, {
+          steps: tasks.map((t) => ({ title: t.title, detail: t.detail })),
+          title: tasks[0]?.title,
+          sessionId: options?.sessionId,
+        })
+        const payload = saved.ok
+          ? { tasks, planId: saved.plan.id, path: saved.plan.relPath, status: saved.plan.status }
+          : { tasks }
+        const summary = saved.ok
+          ? `task plan published → ${saved.plan.relPath}`
+          : 'task plan published'
+        return ok(summary, JSON.stringify(payload))
       }
       case 'list_dir':
         return listDir(root, String(args.path ?? '.'))
@@ -190,7 +204,13 @@ export async function runTool(
           denyGlobs,
         })
       case 'write_file':
-        return writeFileTool(root, String(args.path ?? ''), String(args.content ?? ''), denyGlobs)
+        return writeFileTool(
+          root,
+          String(args.path ?? ''),
+          String(args.content ?? ''),
+          denyGlobs,
+          args.overwrite === true,
+        )
       case 'edit_file':
         return editFileTool(
           root,
@@ -239,6 +259,41 @@ export async function runTool(
         })
         return result.ok ? ok(result.summary, result.content) : fail(result.summary)
       }
+      case 'memory_store': {
+        const op = String(args.op ?? '').trim()
+        const namespace = Array.isArray(args.namespace) ? args.namespace.map(String) : []
+        const key = String(args.key ?? '')
+        const scope = args.scope === 'global' ? 'global' : 'project'
+        if (op === 'put') {
+          const result = storePut(root, {
+            namespace,
+            key,
+            value: args.value,
+            scope,
+            homeDir,
+          })
+          return result.ok ? ok(result.summary, result.content) : fail(result.summary)
+        }
+        if (op === 'get') {
+          const result = storeGet(root, { namespace, key, scope, homeDir })
+          return result.ok ? ok(result.summary, result.content) : fail(result.summary)
+        }
+        if (op === 'delete') {
+          const result = storeDelete(root, { namespace, key, scope, homeDir })
+          return result.ok ? ok(result.summary, result.content) : fail(result.summary)
+        }
+        if (op === 'search') {
+          const result = storeSearch(root, {
+            namespace: namespace.length ? namespace : undefined,
+            query: typeof args.query === 'string' ? args.query : undefined,
+            scope: args.scope === 'global' || args.scope === 'project' ? scope : 'all',
+            homeDir,
+            maxResults: typeof args.maxResults === 'number' ? args.maxResults : 20,
+          })
+          return result.ok ? ok(result.summary, result.content) : fail(result.summary)
+        }
+        return fail(`memory_store unknown op: ${op || '(empty)'}`)
+      }
       case 'task_create': {
         const r = taskCreate(root, {
           title: typeof args.title === 'string' ? args.title : undefined,
@@ -273,6 +328,10 @@ export async function runTool(
           note: typeof args.note === 'string' ? args.note : undefined,
           progress: typeof args.progress === 'number' ? args.progress : undefined,
           addBlockedBy: Array.isArray(args.addBlockedBy) ? args.addBlockedBy.map(String) : undefined,
+          removeBlockedBy: Array.isArray(args.removeBlockedBy)
+            ? args.removeBlockedBy.map(String)
+            : undefined,
+          clearBlockedBy: args.clearBlockedBy === true,
           activeForm: typeof args.activeForm === 'string' ? args.activeForm : undefined,
         })
         return r.ok ? ok(`task ${r.task.id} updated`, r.content) : fail(r.content)
@@ -582,6 +641,7 @@ export function previewWriteTool(
   if (name === 'write_file') {
     const rel = String(args.path ?? '')
     const content = String(args.content ?? '')
+    const force = args.overwrite === true
     let prev = ''
     let exists = false
     try {
@@ -600,8 +660,9 @@ export function previewWriteTool(
     const preview = exists
       ? unifiedLineDiff(prev, content, rel || 'file')
       : unifiedLineDiff('', content, rel || 'file')
+    const mode = exists ? (force ? 'overwrite' : 'EXISTS — needs overwrite:true or edit_file') : 'create'
     return {
-      summary: `write_file ${rel} (${content.length} chars, ${exists ? 'overwrite' : 'create'})`,
+      summary: `write_file ${rel} (${content.length} chars, ${mode})`,
       preview,
     }
   }
@@ -639,6 +700,24 @@ export function previewWriteTool(
       summary: `memory_delete ${scope}/${note}.md`,
       preview: `Delete durable memory note: ${scope}/${note}.md`,
     }
+  }
+  if (name === 'memory_store') {
+    const op = String(args.op ?? '')
+    const ns = Array.isArray(args.namespace) ? args.namespace.map(String).join('/') : ''
+    const key = String(args.key ?? '')
+    const scope = args.scope === 'global' ? 'global' : 'project'
+    const pathLabel = [scope, ns, key].filter(Boolean).join('/')
+    if (op === 'put') {
+      const preview = typeof args.value === 'string' ? args.value : JSON.stringify(args.value ?? null, null, 2)
+      return {
+        summary: `memory_store put ${pathLabel}`,
+        preview: (preview ?? '').slice(0, 4000),
+      }
+    }
+    if (op === 'delete') {
+      return { summary: `memory_store delete ${pathLabel}`, preview: `Delete store entry ${pathLabel}` }
+    }
+    return { summary: `memory_store ${op || '?'} ${pathLabel}`.trim(), preview: JSON.stringify(args).slice(0, 400) }
   }
   if (name === 'run_shell') {
     const command = String(args.command ?? '')
@@ -811,14 +890,26 @@ function runShellTool(
   })
 }
 
-function writeFileTool(root: string, rel: string, content: string, denyGlobs: string[] = []): ToolResult {
+function writeFileTool(
+  root: string,
+  rel: string,
+  content: string,
+  denyGlobs: string[] = [],
+  overwrite = false,
+): ToolResult {
   if (!rel) return fail('path required')
   if (isDeniedPath(rel, denyGlobs)) return fail(`path denied by sensitive glob: ${rel}`)
   if (content.length > MAX_WRITE) return fail(`content too large (>${MAX_WRITE} chars)`)
   const abs = resolveInRoot(root, rel)
+  const existed = isFile(abs)
+  // Existing non-empty-ish files need explicit overwrite or edit_file (unique replace).
+  if (existed && !overwrite) {
+    return fail(
+      `write_file refused: ${rel} already exists. Use edit_file for partial changes, or write_file with overwrite=true for full replace.`,
+    )
+  }
   const dir = path.dirname(abs)
   fs.mkdirSync(dir, { recursive: true })
-  const existed = isFile(abs)
   fs.writeFileSync(abs, content, 'utf8')
   const action = existed ? 'overwrote' : 'created'
   return ok(`write_file ${rel} (${action}, ${content.length} chars)`, `${action} ${rel}`)

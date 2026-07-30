@@ -190,6 +190,23 @@ describe('tools write', () => {
       assert.equal(w.ok, true)
       assert.equal(fs.readFileSync(path.join(tmp, 'a/hello.txt'), 'utf8'), 'hello world')
 
+      // Existing file: write_file blocked without overwrite
+      const blocked = await runTool(
+        tmp,
+        'write_file',
+        JSON.stringify({ path: 'a/hello.txt', content: 'nuked' }),
+      )
+      assert.equal(blocked.ok, false)
+      assert.match(blocked.summary, /already exists|overwrite/i)
+      assert.equal(fs.readFileSync(path.join(tmp, 'a/hello.txt'), 'utf8'), 'hello world')
+
+      const forced = await runTool(
+        tmp,
+        'write_file',
+        JSON.stringify({ path: 'a/hello.txt', content: 'hello world', overwrite: true }),
+      )
+      assert.equal(forced.ok, true)
+
       const e = await runTool(
         tmp,
         'edit_file',

@@ -74,7 +74,11 @@ test('worktree preview apply and discard', () => {
 
     const applied = gitWorktreeApply(root, created.path, { remove: true })
     assert.equal(applied.removed, true)
-    assert.equal(fs.readFileSync(path.join(root, 'note.txt'), 'utf8'), 'one\ntwo\n')
+    // Git on Windows may checkout CRLF; compare normalized.
+    assert.equal(
+      fs.readFileSync(path.join(root, 'note.txt'), 'utf8').replace(/\r\n/g, '\n'),
+      'one\ntwo\n',
+    )
     assert.equal(fs.existsSync(created.path), false)
 
     const keep = gitWorktreeAdd(root, { name: 'try-keep' })

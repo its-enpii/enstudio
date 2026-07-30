@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { layoutRect, layoutViewport } from '../../domZoom'
+
   /** value: ISO date `YYYY-MM-DD` or empty string */
   let {
     value = $bindable(''),
@@ -81,9 +83,8 @@
 
   function placePanel(): void {
     if (!triggerEl) return
-    const r = triggerEl.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    const r = layoutRect(triggerEl)
+    const { width: vw, height: vh } = layoutViewport()
     const gap = 6
     let top = r.bottom + gap
     let left = r.left

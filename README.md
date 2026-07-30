@@ -1,132 +1,137 @@
-# enpiistudio
+Prioritas belanja icon — monoline stroke 24×24, 1.75 weight (match existing).
 
-Personal agentic coding workspace. Built-in agent: **enpii**.
+App / shell (wajib)
 
-See [`docs/`](./docs/) for architecture, design, PRD, rules, and schema.
+┌───────────────────────┬─────────────────────────────────┬─────────────┐
+│         Icon          │           Dipakai di            │  Sekarang   │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ App mark (logo enpii) │ window, tray, installer, splash │ huruf E     │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Agent                 │ TopNav mode                     │ text        │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Code / file           │ TopNav                          │ text        │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Terminal              │ TopNav                          │ text        │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Git / branch          │ TopNav                          │ text        │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Browser / globe       │ TopNav                          │ text        │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Bell                  │ TopNav                          │ ✅ SVG      │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Settings / gear       │ TopNav                          │ ✅ SVG      │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Search                │ sidebar                         │ ✅ SVG      │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Folder-plus           │ open project                    │ ✅ SVG      │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Star / pin            │ pin project, bookmark           │ ★☆          │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ X / close             │ modal, tab, find                │ × + 1 SVG   │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Plus                  │ new tab, add model/host         │ +           │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ Chevron L/R/D         │ tree, back/fwd, dropdown        │ ‹›⌄ + 1 SVG │
+├───────────────────────┼─────────────────────────────────┼─────────────┤
+│ More vertical ⋮       │ browser overflow                │ ⋮           │
+└───────────────────────┴─────────────────────────────────┴─────────────┘
 
-## Stack (v0)
+Agent
 
-- Electron + Svelte 5 + Vite
-- `@enpiistudio/agent-core` Node sidecar (stdio JSON-RPC)
-- User-owned OpenAI-compatible **or** Anthropic Messages endpoint
+| Icon | Dipakai |
+|---|---|
+| Paperclip | attach | ✅ |
+| Send | composer | ✅ |
+| Stop / square | cancel run | text “Running…” |
+| Check | approve tool | text |
+| Ban / X-circle | reject | text |
+| Sparkles / bot | agent empty / vendor | — |
+| Claude / Codex / Aider / Gemini marks | vendor tabs (opsional brand) | text label |
 
-## Develop
+Code
 
-```bash
-npm install
-npm run build -w @enpiistudio/agent-core
-npm run dev
-```
+┌──────────────────────┬──────────────────────┐
+│         Icon         │       Dipakai        │
+├──────────────────────┼──────────────────────┤
+│ File                 │ tree file            │
+├──────────────────────┼──────────────────────┤
+│ Folder / folder-open │ tree dir             │
+├──────────────────────┼──────────────────────┤
+│ Save                 │ dirty tab (opsional) │
+├──────────────────────┼──────────────────────┤
+│ Diff                 │ modified indicator   │
+└──────────────────────┴──────────────────────┘
 
-### Package / share (unsigned v0)
+Terminal / SSH
 
-```bash
-node apps/desktop/scripts/gen-icon.mjs   # once — apps/desktop/build/icon.png
-npm run pack                            # unpacked dir (smoke)
-npm run dist                            # current-OS installers → apps/desktop/release/
-npm run dist:linux                      # AppImage + deb
-npm run dist:win                        # NSIS + portable (run on Windows or with wine)
-npm run dist:mac                        # dmg (run on macOS)
-```
+┌───────────────┬───────────────┐
+│     Icon      │    Dipakai    │
+├───────────────┼───────────────┤
+│ Terminal      │ pane          │
+├───────────────┼───────────────┤
+│ Server / plug │ SSH host      │
+├───────────────┼───────────────┤
+│ Key           │ identity file │
+├───────────────┼───────────────┤
+│ Refresh       │ reconnect     │
+└───────────────┴───────────────┘
 
-Artifacts land in `apps/desktop/release/`. **Unsigned by default** — expect SmartScreen (Windows) / Gatekeeper (macOS) warnings when sharing. Open anyway / right-click Open on first launch.
+Git
 
-**Signing later (optional env — no code change):**
+┌──────────────────────────────┬────────────────────────────────┐
+│             Icon             │            Dipakai             │
+├──────────────────────────────┼────────────────────────────────┤
+│ Git-branch                   │ remote card                    │
+├──────────────────────────────┼────────────────────────────────┤
+│ Git-commit                   │ history                        │
+├──────────────────────────────┼────────────────────────────────┤
+│ Arrow-up / down              │ push/pull ahead-behind ↑↓      │
+├──────────────────────────────┼────────────────────────────────┤
+│ Plus-circle / minus / pencil │ status A / D / M (ganti huruf) │
+├──────────────────────────────┼────────────────────────────────┤
+│ Refresh                      │ refresh status                 │
+└──────────────────────────────┴────────────────────────────────┘
 
-| OS | Env |
-|----|-----|
-| Windows Authenticode | `CSC_LINK` (pfx path/url), `CSC_KEY_PASSWORD` |
-| macOS notarize | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` (+ unset mac `identity: null` when using a real Developer ID) |
+Browser
 
-Auto-update / GitHub Releases publish is out of scope for v0.
+| Icon | Dipakai |
+|---|---|
+| Arrow-left / right | back/forward |
+| Reload | ↻ |
+| Stop | loading cancel |
+| Star | bookmark |
+| Download | downloads panel |
+| History / clock | history | ✅ clock di Inspector |
+| External-link | open external |
+| Moon / sun | theme toggle |
+| Find / magnifier | find in page |
 
-DevTools (detached):
+Settings / generic UI
 
-```powershell
-# PowerShell
-$env:ENPII_DEVTOOLS = "1"; npm run dev
-```
+| Icon | Dipakai |
+|---|---|
+| Trash | delete SSH host / model |
+| Pencil / edit | edit host |
+| Copy | copy path/hash |
+| Check | saved / success |
+| Alert / warning | error | ✅ 1 di Agent |
+| Info | empty states |
+| Eye / eye-off | show API key |
+| Link | base URL |
+| Cpu / chip | model |
 
-```bash
-# bash / Git Bash
-ENPII_DEVTOOLS=1 npm run dev
-```
-
-Or: `npm run dev:devtools` from repo root / desktop package.
-
-If Electron prints `failed to install correctly` after `npm install` (common on some Windows setups when the zip is cached but not extracted):
-
-```powershell
-$zip = "$env:LOCALAPPDATA\electron\Cache\*\electron-v*-win32-x64.zip" | Get-Item | Select-Object -First 1
-Expand-Archive $zip.FullName node_modules\electron\dist -Force
-Set-Content node_modules\electron\path.txt "electron.exe" -NoNewline
-```
-
-## Config (local only — never commit secrets)
-
-Priority: `ENPII_*` env → project `.enpii/config.toml` → `~/.enpiistudio/config.toml` → legacy `config.json` → defaults.
-
-| Path | Purpose |
-|------|---------|
-| `~/.enpiistudio/config.toml` | Provider (baseUrl, apiKey, model, dialect, permissionMode, denyGlobs) |
-| `~/.enpiistudio/mcp.json` | MCP servers (stdio and/or HTTP `url`) |
-| `~/.enpiistudio/ssh.json` | SSH hosts + local-forward tunnels |
-| `~/.enpiistudio/sessions/` | JSON transcripts + SQLite `index.db` |
-| `.enpii/AGENT.md` | Project agent instructions |
-| `.enpii/config.toml` | Project overlay (no API keys) |
-| `.enpii/mcp.json` | Project MCP servers |
-| `.enpii/skills/**/*.md` | Project skills |
-
-See `.env.example` for env vars.
-
-## Workspace layout
-
-```
-apps/desktop          Electron shell + Svelte UI
-packages/agent-core   enpii sidecar
-docs/                 product docs
-reference/            OpenHarness · ClawTeam · loop-engineering (patterns only)
-```
-
-## Status
-
-See **[`docs/progress.md`](./docs/progress.md)** for shipped detail and the **v1 agent roadmap** (web → tasks → sub-agent → plan/ask → cron), mapped from `reference/OpenHarness`, `reference/ClawTeam`, `reference/loop-engineering`.
-
-v0 daily-driver (PRD M5 + early shell extras) is in tree. Next agent work is **M6+** in [`docs/prd.md`](./docs/prd.md).
-
-## Project context
-
-- Put project instructions in `.enpii/AGENT.md`.
-- Put shareable skills in `.enpii/skills/**/*.md`.
-- Put global skills in `~/.enpiistudio/skills/**/*.md`.
-- Project skills override global skills with the same `name`.
-- Load a skill body for one run with `/skill <name>` in the prompt.
-
-Skill frontmatter supports scalar `name` and `description` fields:
-
-```md
 ---
-name: review
-description: Review changes conservatively
----
-Run focused checks before broad checks.
-```
+Bundle cari sekarang (hemat)
 
-- [x] Monorepo scaffold
-- [x] UI chrome (projects | modes | inspector)
-- [x] enpii health + LLM loop (OpenAI + Anthropic dialects)
-- [x] Read/write tools + ask-mode approval queue
-- [x] Session persist / SQLite index / resume
-- [x] Settings · shell · terminal (PTY) · git · code · browser
-- [x] Worktree multi-agent (spawn / board / fan-out / apply-all)
-- [x] MCP client (stdio + HTTP) tools/resources/prompts · SSH tunnels + interactive PTY · vendor CLI host
-- [x] TOML config · deny globs · memory toggle · layout per project · auto `.enpii/`
-- [x] Packaging scaffold (`electron-builder` + multi-target dist + signing env hooks)
-- [x] v1 agent: `web_fetch` / `web_search` (OpenHarness patterns, SSRF guard)
-- [x] v1 agent: in-loop durable `task_*` board
-- [x] v1 agent: `agent` / worktree sub-agent + `send_message`
-- [x] v1 agent: plan mode + ask_user mid-run
-- [x] v1 agent: parallel read-only tools per round
-- [x] v1 agent: durable `cron_*` schedule (sidecar ticker)
-- [x] v1 agent: swarm file mailbox + task blockedBy
-- [ ] Signed installers when certs available (codesign / notarize / Authenticode)
+Cukup 1 set Heroicons / Lucide / Phosphor regular:
+
+1. app-logo custom (kamu desain)
+2. sparkles, code, terminal, git-branch, globe
+3. bell, cog, search, folder-plus, star
+4. x, plus, chevron-{left,right,down}, dots-vertical
+5. paperclip, send, stop, check, ban
+6. file, folder, folder-open, save
+7. server, key, refresh
+8. arrow-{up,down,left,right}, download, external-link, moon, sun
+9. trash, pencil, copy, eye, eye-off, alert-triangle, info
+10. plus-circle, minus-circle (git A/D)

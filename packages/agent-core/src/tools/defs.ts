@@ -4,7 +4,8 @@ export const TOOL_DEFS = [
     type: 'function' as const,
     function: {
       name: 'plan_tasks',
-      description: 'Publish a concise execution plan before making changes. Use 2-12 concrete steps; each step needs a title and may include detail.',
+      description:
+        'OPTIONAL. Publish a 2–12 step plan only for large multi-step work. Skip for simple edits/Q&A. Saves draft markdown under ~/.enpiistudio/projects/<hash>/plans/. Does not create task board ids — do not task_update plan step ids.',
       parameters: {
         type: 'object',
         properties: {
@@ -145,12 +146,16 @@ export const TOOL_DEFS = [
     function: {
       name: 'write_file',
       description:
-        'Create or overwrite a UTF-8 text file under the project root. Requires approval in ask mode.',
+        'Create a UTF-8 text file under the project root. If the file already exists, fails unless overwrite=true — prefer edit_file for partial changes. Requires approval in ask mode.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'File path relative to project root' },
           content: { type: 'string', description: 'Full file contents to write' },
+          overwrite: {
+            type: 'boolean',
+            description: 'Required true to replace an existing file entirely. Default false.',
+          },
         },
         required: ['path', 'content'],
         additionalProperties: false,
@@ -411,13 +416,14 @@ export const TOOL_DEFS = [
     function: {
       name: 'run_shell',
       description:
-        'Run a non-interactive shell command in the project workspace. stdout/stderr captured. Requires approval in ask mode (and autopilot). Prefer short commands (tests, builds, git status).',
+        'Run a non-interactive command in the project workspace via Node shell:true (Windows = ComSpec, usually cmd.exe; Unix = sh). stdout/stderr captured. May need approval. Prefer short commands. On Windows do NOT use PowerShell cmdlets (Select-Object, Select-String, Get-*) unless the command is explicitly `powershell -NoProfile -Command "..."`. Prefer findstr/dir/npm/git plain syntax on cmd.',
       parameters: {
         type: 'object',
         properties: {
           command: {
             type: 'string',
-            description: 'Shell command to run (non-interactive)',
+            description:
+              'Shell command (syntax must match host shell — cmd on typical Windows, sh on Unix)',
           },
           cwd: {
             type: 'string',
@@ -502,6 +508,66 @@ export const TOOL_DEFS = [
   {
     type: 'function' as const,
     function: {
+      name: 'memory_store',
+      description:
+        'Structured namespace/key JSON store under ~/.enpiistudio/memory/store (put/get/search/delete). Prefer for prefs/facts; use memory_write for freeform notes. put/delete need approval in ask mode.',
+      parameters: {
+        type: 'object',
+        properties: {
+          op: {
+            type: 'string',
+            enum: ['put', 'get', 'search', 'delete'],
+            description: 'Store operation',
+          },
+          namespace: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Namespace path segments, e.g. ["users","prefs"] (required for put/get/delete; optional filter for search)',
+          },
+          key: { type: 'string', description: 'Entry key (put/get/delete)' },
+          value: {
+            description: 'JSON value to store (put only)',
+          },
+          scope: {
+            type: 'string',
+            enum: ['project', 'global'],
+            description: 'project (default) or global; search may use all via omit',
+          },
+          query: { type: 'string', description: 'Substring filter for search' },
+          maxResults: { type: 'number', description: 'Search hit cap (default 20)' },
+        },
+        required: ['op'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'handoff',
+      description:
+        'Switch parent-session role bias for subsequent turns: main | scout | implement | review. Not a sub-agent spawn — same transcript. Use agent for isolated worktrees.',
+      parameters: {
+        type: 'object',
+        properties: {
+          role: {
+            type: 'string',
+            enum: ['main', 'scout', 'implement', 'review'],
+            description: 'Target role (main clears handoff)',
+          },
+          brief: {
+            type: 'string',
+            description: 'Optional extra guidance while in this role',
+          },
+        },
+        required: ['role'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'task_create',
       description:
         'Create a durable project task on the session board (survives across turns). Use for multi-step work tracking. Prefer this over only plan_tasks when steps must stay open across tools.',
@@ -565,7 +631,7 @@ export const TOOL_DEFS = [
     function: {
       name: 'task_update',
       description:
-        'Update a durable project task (title, detail, status, note, progress 0–100, blockedBy). Mark completed when done.',
+        'Update a durable project task (title, detail, status, note, progress 0–100, blockedBy). Completing/cancelling auto-clears this id from other tasks\' blockedBy. Manual removeBlockedBy/clearBlockedBy also work.',
       parameters: {
         type: 'object',
         properties: {
@@ -582,6 +648,15 @@ export const TOOL_DEFS = [
             type: 'array',
             items: { type: 'string' },
             description: 'Append blocking task ids',
+          },
+          removeBlockedBy: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Remove blocking task ids (unblock handoff)',
+          },
+          clearBlockedBy: {
+            type: 'boolean',
+            description: 'Clear all blockers',
           },
           activeForm: { type: 'string' },
         },
@@ -686,7 +761,8 @@ export const TOOL_DEFS = [
     type: 'function' as const,
     function: {
       name: 'exit_plan_mode',
-      description: 'Leave plan mode and restore normal mutation permissions.',
+      description:
+        'Leave plan mode, restore normal mutation permissions, and approve the latest draft plan on disk (if any) as durable markdown under ~/.enpiistudio/projects/<hash>/plans/.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
@@ -695,15 +771,30 @@ export const TOOL_DEFS = [
     function: {
       name: 'ask_user',
       description:
-        'Ask the user a mid-run question and wait for their answer (optional multiple-choice options). Prefer for product decisions, not for tool output.',
+        'Ask the user a mid-run decision question and wait. Prefer for product choices. options: up to 6 strings OR objects {label, description?, recommended?}. User pick returns the label text. Free-text always available in UI.',
       parameters: {
         type: 'object',
         properties: {
           question: { type: 'string', description: 'Question to show the user' },
           options: {
             type: 'array',
-            items: { type: 'string' },
-            description: 'Optional short choices (max 6)',
+            description:
+              'Choices (max 6). String = label only. Object: label (required), description (short blurb), recommended (bool).',
+            items: {
+              oneOf: [
+                { type: 'string' },
+                {
+                  type: 'object',
+                  properties: {
+                    label: { type: 'string' },
+                    description: { type: 'string' },
+                    recommended: { type: 'boolean' },
+                  },
+                  required: ['label'],
+                  additionalProperties: false,
+                },
+              ],
+            },
           },
         },
         required: ['question'],
@@ -716,7 +807,7 @@ export const TOOL_DEFS = [
     function: {
       name: 'agent',
       description:
-        'Spawn an isolated sub-agent in a git worktree, run one prompt (max 4 rounds), return result + agentId. Use for parallel investigation or risky edits. Follow up with send_message. Nested agent auto-approves workspace writes (no nested UI approval).',
+        'Spawn an isolated sub-agent in a git worktree (max 4 rounds). Default sync awaits result. async:true returns agentId immediately so parent continues (max 4 live). Follow up with send_message when idle; merge with agent_apply or drop with agent_discard. Roles: scout|implement|review.',
       parameters: {
         type: 'object',
         properties: {
@@ -732,10 +823,21 @@ export const TOOL_DEFS = [
             type: 'string',
             description: 'Optional short name/slug',
           },
+          role: {
+            type: 'string',
+            enum: ['scout', 'implement', 'review'],
+            description:
+              'scout=read-only investigate; implement=make focused edits; review=critique diffs/risks. Prepended to nested prompt.',
+          },
           isolation: {
             type: 'string',
             enum: ['worktree', 'shared'],
             description: 'worktree (default) = new enpii/* branch worktree; shared = same project root',
+          },
+          async: {
+            type: 'boolean',
+            description:
+              'If true, return agentId immediately and run nested turn in background (parent not blocked). Default false.',
           },
         },
         required: ['description', 'prompt'],
@@ -748,7 +850,7 @@ export const TOOL_DEFS = [
     function: {
       name: 'send_message',
       description:
-        'Send a follow-up prompt to a live sub-agent from agent tool (same process). Returns the sub-agent reply.',
+        'Send a follow-up prompt to a live sub-agent from agent tool (same process). Fails if still running — wait for subagent_done / idle.',
       parameters: {
         type: 'object',
         properties: {
@@ -756,6 +858,50 @@ export const TOOL_DEFS = [
           message: { type: 'string', description: 'Follow-up message / prompt' },
         },
         required: ['agentId', 'message'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'agent_apply',
+      description:
+        'Merge a finished sub-agent worktree into the main project. Sub must be idle (not running). Default removes worktree after merge.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agentId: { type: 'string', description: 'Id from agent tool' },
+          remove: {
+            type: 'boolean',
+            description: 'Remove worktree after merge (default true)',
+          },
+          keepBranch: {
+            type: 'boolean',
+            description: 'Keep enpii/* branch after remove (default false)',
+          },
+        },
+        required: ['agentId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'agent_discard',
+      description:
+        'Discard a sub-agent worktree without merging (aborts if still running). Deletes enpii/* branch by default.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agentId: { type: 'string', description: 'Id from agent tool' },
+          deleteBranch: {
+            type: 'boolean',
+            description: 'Delete enpii/* branch (default true)',
+          },
+        },
+        required: ['agentId'],
         additionalProperties: false,
       },
     },
@@ -979,6 +1125,7 @@ export const WRITE_TOOL_NAMES = new Set([
   'replace_file',
   'memory_write',
   'memory_delete',
+  'memory_store',
   'cron_create',
   'cron_delete',
   'cron_toggle',
@@ -987,7 +1134,17 @@ export const SHELL_TOOL_NAMES = new Set(['run_shell'])
 export const MCP_MUTATING_TOOL_NAMES = new Set(['mcp_call_tool'])
 export const GIT_MUTATING_TOOL_NAMES = new Set(['git_stage', 'git_unstage', 'git_commit', 'git_branch', 'git_stash', 'git_fetch', 'git_pull', 'git_push', 'git_resolve_conflict', 'git_tag'])
 
-export function isMutatingTool(name: string): boolean {
+/** memory_store get/search are read-only; put/delete mutate. */
+export function isMutatingTool(name: string, argsJson?: string): boolean {
+  if (name === 'memory_store') {
+    try {
+      const op = String((JSON.parse(argsJson || '{}') as { op?: string }).op ?? '')
+      return op === 'put' || op === 'delete' || op === ''
+    } catch {
+      return true
+    }
+  }
+  if (name === 'handoff') return false
   return (
     WRITE_TOOL_NAMES.has(name) ||
     SHELL_TOOL_NAMES.has(name) ||
@@ -1012,6 +1169,7 @@ export const PARALLEL_SAFE_TOOL_NAMES = new Set([
   'git_tags',
   'git_conflicts',
   'memory_search',
+  'handoff',
   'web_fetch',
   'web_search',
   'mcp_list_tools',
@@ -1026,8 +1184,9 @@ export const PARALLEL_SAFE_TOOL_NAMES = new Set([
   'plan_tasks',
 ])
 
-export function isParallelSafeTool(name: string): boolean {
-  return PARALLEL_SAFE_TOOL_NAMES.has(name) && !isMutatingTool(name)
+export function isParallelSafeTool(name: string, argsJson?: string): boolean {
+  if (name === 'memory_store') return !isMutatingTool(name, argsJson)
+  return PARALLEL_SAFE_TOOL_NAMES.has(name) && !isMutatingTool(name, argsJson)
 }
 
 export type ToolName =
@@ -1062,6 +1221,8 @@ export type ToolName =
   | 'memory_write'
   | 'memory_search'
   | 'memory_delete'
+  | 'memory_store'
+  | 'handoff'
   | 'task_create'
   | 'task_get'
   | 'task_list'
@@ -1076,6 +1237,8 @@ export type ToolName =
   | 'ask_user'
   | 'agent'
   | 'send_message'
+  | 'agent_apply'
+  | 'agent_discard'
   | 'mailbox_send'
   | 'mailbox_inbox'
   | 'mailbox_broadcast'

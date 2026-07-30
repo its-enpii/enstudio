@@ -1,10 +1,11 @@
 <script lang="ts">
   // Must alias — `import { state }` makes `$state` look like a store subscription
   import { state as app } from '../store.svelte'
+  import { t } from '../i18n/index.svelte'
 
   function relativeTime(ts: number): string {
     const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000))
-    if (seconds < 60) return 'now'
+    if (seconds < 60) return t('common.now')
     const minutes = Math.floor(seconds / 60)
     if (minutes < 60) return `${minutes}m`
     const hours = Math.floor(minutes / 60)
@@ -47,16 +48,16 @@
   <section
     bind:this={panelEl}
     class="studio-glass fixed right-4 top-14 z-[230] flex max-h-[70vh] w-80 flex-col overflow-hidden rounded-2xl border border-border-subtle bg-studio-panel/95 shadow-xl"
-    aria-label="Notifications panel"
+    aria-label={t('notifications.panel')}
     role="dialog"
   >
     <header class="flex items-center justify-between border-b border-border-subtle px-3 py-2.5">
-      <strong class="text-[13px] font-semibold text-studio-text">Notifications</strong>
+      <strong class="text-[13px] font-semibold text-studio-text">{t('notifications.title')}</strong>
       {#if app.notifications.length}
         <button
           type="button"
           class="text-[11px] text-studio-text-dim hover:text-studio-text"
-          onclick={() => app.clearNotifications()}>Clear</button
+          onclick={() => app.clearNotifications()}>{t('notifications.clear')}</button
         >
       {/if}
     </header>
@@ -71,7 +72,7 @@
           <time class="shrink-0 text-[10px] text-studio-text-dim">{relativeTime(item.ts)}</time>
         </article>
       {:else}
-        <div class="p-4 text-center text-xs text-studio-text-dim">No notifications.</div>
+        <div class="p-4 text-center text-xs text-studio-text-dim">{t('notifications.empty')}</div>
       {/each}
     </div>
   </section>

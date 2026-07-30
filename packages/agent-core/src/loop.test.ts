@@ -6,6 +6,7 @@ import test from 'node:test'
 import {
   compactionTranscript,
   isCasualPrompt,
+  repairChatMessages,
   runDirectEdit,
   runPromptTurn,
   shouldAutoCompact,
@@ -25,9 +26,14 @@ test('compaction transcript preserves roles and truncates older context', () => 
 
 test('shouldAutoCompact thresholds', () => {
   assert.equal(shouldAutoCompact([{ role: 'user', content: 'hi' }]), false)
-  const many = Array.from({ length: 36 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
+  // Mid-task tool chatter (36–89 msgs) must not force compact.
+  const mid = Array.from({ length: 50 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
+  assert.equal(shouldAutoCompact(mid), false)
+  const many = Array.from({ length: 90 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
   assert.equal(shouldAutoCompact(many), true)
-  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 800 }, 1000), true)
+  // Token pressure only when maxTokens is a tight run budget (≤200k).
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 900 }, 1000), true)
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 700_000 }, 1_000_000), false)
   assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 100 }, 1000), false)
 })
 
@@ -44,6 +50,42 @@ test('splitForCompaction keeps recent tail raw', () => {
   const short = splitForCompaction(msgs.slice(0, 3), 8)
   assert.equal(short.toSummarize.length, 0)
   assert.equal(short.keep.length, 3)
+})
+
+test('splitForCompaction does not cut mid tool chain', () => {
+  const msgs = [
+    { role: 'user' as const, content: 'a' },
+    { role: 'assistant' as const, content: null, tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'grep', arguments: '{}' } }] },
+    { role: 'tool' as const, tool_call_id: 'c1', name: 'grep', content: 'ok' },
+    { role: 'user' as const, content: 'b' },
+  ]
+  // keepRecent=2 would raw-cut at index 2 (tool) — must slide to assistant
+  const { keep } = splitForCompaction(msgs, 2)
+  assert.notEqual(keep[0]?.role, 'tool')
+  assert.ok(keep.some((m) => m.role === 'assistant' && m.tool_calls?.length))
+  assert.ok(keep.some((m) => m.role === 'tool' && m.tool_call_id === 'c1'))
+})
+
+test('repairChatMessages drops orphan tools and fills missing results', () => {
+  const fixed = repairChatMessages([
+    { role: 'tool', tool_call_id: 'orphan', name: 'grep', content: 'x' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id: 'c1', type: 'function', function: { name: 'grep', arguments: '{}' } },
+        { id: 'c2', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+      ],
+    },
+    { role: 'tool', tool_call_id: 'c1', name: 'grep', content: 'hit' },
+    // c2 missing
+    { role: 'user', content: 'next' },
+  ])
+  assert.equal(fixed[0]?.role, 'assistant')
+  assert.equal(fixed.filter((m) => m.role === 'tool').length, 2)
+  assert.equal(fixed.find((m) => m.tool_call_id === 'c2')?.content?.toString().includes('unavailable'), true)
+  assert.equal(fixed.some((m) => m.tool_call_id === 'orphan'), false)
+  assert.equal(fixed.at(-1)?.role, 'user')
 })
 
 test('undoCompactRuntime restores pre-compact snapshot', () => {
@@ -103,6 +145,7 @@ test('casual greetings bypass the provider and tools', async () => {
       baseUrl: 'http://127.0.0.1:1',
       apiKey: '',
       model: 'test',
+      models: ['test'],
       dialect: 'openai',
       permissionMode: 'ask',
     },

@@ -2,6 +2,8 @@
 
 _Auto-generated starter brief. Edit freely — enpii will not overwrite once you change this file._
 
+Language: match the user. Indonesian in → Indonesian out. No Vietnamese or other mix unless asked. Code/paths/commands stay as-is.
+
 Project: enpiistudio
 
 Top-level:

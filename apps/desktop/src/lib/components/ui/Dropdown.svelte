@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
+  import { Icon } from '../../icons'
+  import { layoutRect, layoutViewport } from '../../domZoom'
 
   export type DropdownItem = {
     id: string
@@ -42,9 +44,9 @@
 
   function placeMenu(): void {
     if (!triggerEl) return
-    const r = triggerEl.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    // CSS zoom on <html> → convert visual rect to layout coords for position:fixed.
+    const r = layoutRect(triggerEl)
+    const { width: vw, height: vh } = layoutViewport()
     const gap = 4
     const maxH = 280
     let top = r.bottom + gap
@@ -135,14 +137,11 @@
         }}
       >
         <span>{label || 'Menu'}</span>
-        <svg
-          class="size-3.5 text-studio-text-dim transition-transform {open ? 'rotate-180' : ''}"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <Icon
+          name="chevron-down"
+          size={14}
+          class="text-studio-text-dim transition-transform {open ? 'rotate-180' : ''}"
+        />
       </button>
     {/if}
   </div>

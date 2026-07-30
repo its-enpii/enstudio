@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { state as app } from '../store.svelte'
   import { bumpGitPanel, clearGitCommitSelection, gitPanel } from '../git-panel.svelte'
+  import { Icon } from '../icons'
   import {
     applyGitStash,
     commitGitFiles,
@@ -41,6 +42,7 @@
     type GitStatus,
     type GitTag,
   } from '../enpii'
+  import { t } from '../i18n/index.svelte'
   import { ConfirmDialog, Switch } from './ui'
 
   let status = $state<GitStatus | null>(null)
@@ -51,6 +53,7 @@
   let error = $state('')
   let commitMessage = $state('')
   let discardTarget = $state<GitFileStatus | null>(null)
+  let discardAllOpen = $state(false)
   let conflictDetail = $state<GitConflict | null>(null)
   let resolveTarget = $state<{ file: GitFileStatus; resolution: 'ours' | 'theirs' | 'mark' } | null>(null)
   let branches = $state<GitBranch[]>([])
@@ -84,10 +87,23 @@
   const filteredBranches = $derived(branches.filter((branch) => branch.name.toLowerCase().includes(branchSearch.trim().toLowerCase())))
   const viewingCommit = $derived(Boolean(gitPanel.selectedCommit && gitPanel.selectedCommitPath))
 
-  function statusCode(file: GitFileStatus): string {
-    if (file.conflicted) return 'C'
-    if (file.untracked) return 'U'
-    return `${file.index.trim()}${file.worktree.trim()}` || 'M'
+  /** Color-only status: green=new, gold=mod, red=del (no letter icons). */
+  function statusColor(file: GitFileStatus): string {
+    if (file.conflicted) return 'text-studio-gold'
+    if (file.untracked) return 'text-studio-success'
+    const code = `${file.index}${file.worktree}`
+    if (code.includes('D')) return 'text-danger'
+    if (code.includes('A')) return 'text-studio-success'
+    return 'text-studio-gold'
+  }
+
+  function statusLabel(file: GitFileStatus): string {
+    if (file.conflicted) return 'conflict'
+    if (file.untracked) return 'new'
+    const code = `${file.index}${file.worktree}`
+    if (code.includes('D')) return 'deleted'
+    if (code.includes('A')) return 'new'
+    return 'modified'
   }
 
   function diffClass(line: string): string {
@@ -328,6 +344,24 @@
     discardTarget = file
   }
 
+  function requestDiscardAll(): void {
+    if (changedFiles.length === 0) return
+    discardAllOpen = true
+  }
+
+  async function confirmDiscardAll(): Promise<void> {
+    const project = app.activeProject
+    const files = [...changedFiles]
+    discardAllOpen = false
+    if (!project || files.length === 0) return
+    await mutate(async () => {
+      for (const file of files) {
+        await discardGitFile(project.path, file.path, file.untracked)
+      }
+      return getGitStatus(project.path)
+    })
+  }
+
   async function createStash(): Promise<void> {
     const project = app.activeProject
     if (!project) return
@@ -525,12 +559,12 @@
   {:else}
     <header class="flex min-h-9 items-center border-b border-border-subtle bg-studio-sidebar/60 px-3">
       <button type="button" class="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-[12px] text-studio-text-dim hover:bg-white/[0.05] hover:text-studio-text" aria-expanded={branchMenuOpen} onclick={() => (branchMenuOpen = !branchMenuOpen)}>
-        <span class="size-1.5 rounded-full bg-studio-success"></span>
+        <Icon name="git-branch" size={12} class="shrink-0 text-studio-success" />
         <strong class="font-semibold tracking-tight text-studio-text">{status?.branch ?? 'Git'}</strong>
         {#if status?.upstream}<span class="font-mono text-[11px]">{status.upstream}</span>{/if}
-        {#if status?.ahead}<span class="text-studio-gold">↑{status.ahead}</span>{/if}
-        {#if status?.behind}<span class="text-studio-gold">↓{status.behind}</span>{/if}
-        <span class="ml-0.5 text-studio-text-dim/50">⌄</span>
+        {#if status?.ahead}<span class="inline-flex items-center gap-0.5 text-studio-gold"><Icon name="arrow-up" size={10} />{status.ahead}</span>{/if}
+        {#if status?.behind}<span class="inline-flex items-center gap-0.5 text-studio-gold"><Icon name="arrow-down" size={10} />{status.behind}</span>{/if}
+        <Icon name="chevron-down" size={12} class="ml-0.5 text-studio-text-dim/50" />
       </button>
     </header>
     {#if branchMenuOpen}
@@ -554,8 +588,8 @@
                       {#if branch.upstream}<small class="truncate font-mono text-[10px] text-studio-text-dim">{branch.upstream}</small>{/if}
                     </span>
                   </button>
-                  {#if !branch.remote}<button type="button" class="rounded-full text-[11px] text-studio-text-dim hover:bg-white/8 hover:text-studio-text" title="Rename" aria-label={`Rename ${branch.name}`} onclick={() => startRename(branch)}>✎</button>{/if}
-                  {#if !branch.remote && !branch.current}<button type="button" class="rounded-full text-[11px] text-danger hover:bg-danger-bg" title="Delete" aria-label={`Delete ${branch.name}`} onclick={() => requestBranchDelete(branch)}>×</button>{/if}
+                  {#if !branch.remote}<button type="button" class="grid size-6 place-items-center rounded-full text-studio-text-dim hover:bg-white/8 hover:text-studio-text" title="Rename" aria-label={`Rename ${branch.name}`} onclick={() => startRename(branch)}><Icon name="pencil" size={11} /></button>{/if}
+                  {#if !branch.remote && !branch.current}<button type="button" class="grid size-6 place-items-center rounded-full text-danger hover:bg-danger-bg" title="Delete" aria-label={`Delete ${branch.name}`} onclick={() => requestBranchDelete(branch)}><Icon name="close" size={11} /></button>{/if}
                 {/if}
               </div>
             {/each}
@@ -579,36 +613,64 @@
           </div>
         </div>
 
-        <section class="flex flex-col gap-1">
+        <section class="flex flex-col gap-1 rounded-xl bg-black/20 p-2.5 ring-1 ring-white/6">
           <div class="flex items-center justify-between gap-2 text-[12px] text-studio-text-dim">
             <span class="studio-label">Staged</span>
-            <div class="flex items-center gap-1.5">
-              <span class="tabular-nums">{stagedFiles.length}</span>
-              <button type="button" class="min-h-7 rounded-md px-2.5 py-1 text-[12px] font-medium hover:bg-white/10 disabled:opacity-40" disabled={busy || stagedFiles.length === 0} title="Unstage all" onclick={() => void mutate(() => unstageAllGitFiles(app.activeProject!.path))}>− All</button>
+            <div class="flex items-center gap-0.5">
+              <span class="mr-1 tabular-nums">{stagedFiles.length}</span>
+              <button
+                type="button"
+                class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text disabled:opacity-40"
+                disabled={busy || stagedFiles.length === 0}
+                title="Unstage all"
+                aria-label="Unstage all"
+                onclick={() => void mutate(() => unstageAllGitFiles(app.activeProject!.path))}
+              ><Icon name="circle-minus" size={14} /></button>
             </div>
           </div>
-          {#each stagedFiles as file (file.path)}
-            <div class="flex items-center gap-0.5 rounded-lg {!viewingCommit && selectedPath === file.path ? 'bg-studio-purple/20 ring-1 ring-studio-purple/25' : 'hover:bg-white/[0.05]'}">
-              <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-2 text-left text-[13px]" onclick={() => void loadDiff(file)}><span class="shrink-0 font-mono text-[11px] text-studio-text-dim">{statusCode(file)}</span><span class="truncate text-studio-text">{file.path}</span></button>
-              <button type="button" class="grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text" title="Unstage" aria-label={`Unstage ${file.path}`} onclick={() => void mutate(() => unstageGitFile(app.activeProject!.path, file.path))}>−</button>
-            </div>
-          {/each}
+          <div class="max-h-40 overflow-y-auto">
+            {#each stagedFiles as file (file.path)}
+              <div class="flex items-center gap-0.5 rounded-lg {!viewingCommit && selectedPath === file.path ? 'bg-studio-purple/20 ring-1 ring-studio-purple/25' : 'hover:bg-white/[0.05]'}">
+                <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-2 text-left text-[13px]" title={statusLabel(file)} onclick={() => void loadDiff(file)}><span class="truncate {statusColor(file)}">{file.path}</span></button>
+                <button type="button" class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" title="Unstage" aria-label={`Unstage ${file.path}`} onclick={() => void mutate(() => unstageGitFile(app.activeProject!.path, file.path))}><Icon name="circle-minus" size={14} /></button>
+                <button type="button" class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-danger-bg hover:text-danger" title="Discard" aria-label={`Discard ${file.path}`} disabled={busy} onclick={() => requestDiscard(file)}><Icon name="trash" size={13} /></button>
+              </div>
+            {/each}
+          </div>
         </section>
 
-        <section class="flex flex-col gap-1">
+        <section class="flex flex-col gap-1 rounded-xl bg-black/20 p-2.5 ring-1 ring-white/6">
           <div class="flex items-center justify-between gap-2 text-[12px] text-studio-text-dim">
             <span class="studio-label">Changes</span>
-            <div class="flex items-center gap-1.5">
-              <span class="tabular-nums">{changedFiles.length}</span>
-              <button type="button" class="min-h-7 rounded-md px-2.5 py-1 text-[12px] font-medium hover:bg-white/10 disabled:opacity-40" disabled={busy || changedFiles.length === 0} title="Stage all" onclick={() => void mutate(() => stageAllGitFiles(app.activeProject!.path))}>+ All</button>
+            <div class="flex items-center gap-0.5">
+              <span class="mr-1 tabular-nums">{changedFiles.length}</span>
+              <button
+                type="button"
+                class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text disabled:opacity-40"
+                disabled={busy || changedFiles.length === 0}
+                title="Stage all"
+                aria-label="Stage all"
+                onclick={() => void mutate(() => stageAllGitFiles(app.activeProject!.path))}
+              ><Icon name="circle-plus" size={14} /></button>
+              <button
+                type="button"
+                class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-danger-bg hover:text-danger disabled:opacity-40"
+                disabled={busy || changedFiles.length === 0}
+                title="Discard all"
+                aria-label="Discard all changes"
+                onclick={requestDiscardAll}
+              ><Icon name="trash" size={13} /></button>
             </div>
           </div>
-          {#each changedFiles as file (file.path)}
-            <div class="flex items-center gap-0.5 rounded-lg {!viewingCommit && selectedPath === file.path ? 'bg-studio-purple/20 ring-1 ring-studio-purple/25' : 'hover:bg-white/[0.05]'}">
-              <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-2 text-left text-[13px]" onclick={() => void loadDiff(file)}><span class="shrink-0 font-mono text-[11px] {file.conflicted ? 'text-studio-gold' : 'text-studio-text-dim'}">{statusCode(file)}</span><span class="truncate text-studio-text">{file.path}</span></button>
-              <button type="button" class="grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text" title="Stage" aria-label={`Stage ${file.path}`} onclick={() => void mutate(() => stageGitFile(app.activeProject!.path, file.path))}>+</button>
-            </div>
-          {/each}
+          <div class="max-h-52 overflow-y-auto">
+            {#each changedFiles as file (file.path)}
+              <div class="flex items-center gap-0.5 rounded-lg {!viewingCommit && selectedPath === file.path ? 'bg-studio-purple/20 ring-1 ring-studio-purple/25' : 'hover:bg-white/[0.05]'}">
+                <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-2 text-left text-[13px]" title={statusLabel(file)} onclick={() => void loadDiff(file)}><span class="truncate {statusColor(file)}">{file.path}</span></button>
+                <button type="button" class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" title="Stage" aria-label={`Stage ${file.path}`} onclick={() => void mutate(() => stageGitFile(app.activeProject!.path, file.path))}><Icon name="circle-plus" size={14} /></button>
+                <button type="button" class="grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-danger-bg hover:text-danger" title="Discard" aria-label={`Discard ${file.path}`} disabled={busy} onclick={() => requestDiscard(file)}><Icon name="trash" size={13} /></button>
+              </div>
+            {/each}
+          </div>
         </section>
 
         <section class="flex flex-col gap-1.5">
@@ -627,7 +689,7 @@
               </div>
               <button type="button" class={btnCls} disabled={busy} onclick={() => void applyStash(stash, false)}>Apply</button>
               <button type="button" class={btnCls} disabled={busy} onclick={() => void applyStash(stash, true)}>Pop</button>
-              <button type="button" class={dangerBtn} disabled={busy} aria-label={`Drop ${stash.ref}`} onclick={() => (dropStashTarget = stash)}>×</button>
+              <button type="button" class="{dangerBtn} grid place-items-center" disabled={busy} aria-label={`Drop ${stash.ref}`} onclick={() => (dropStashTarget = stash)}><Icon name="trash" size={12} /></button>
             </div>
           {/each}
         </section>
@@ -658,7 +720,7 @@
                 <strong class="block truncate text-[12px] text-studio-text">{tag.name}</strong>
                 <span class="font-mono text-[10px] text-studio-text-dim">{tag.shortHash} · {tag.subject || 'lightweight tag'}</span>
               </div>
-              <button type="button" class={dangerBtn} disabled={busy} onclick={() => (deleteTagTarget = tag)}>×</button>
+              <button type="button" class="{dangerBtn} grid place-items-center" disabled={busy} onclick={() => (deleteTagTarget = tag)}><Icon name="trash" size={12} /></button>
             </div>
           {/each}
         </section>
@@ -708,10 +770,10 @@
 
 <ConfirmDialog
   open={discardTarget != null}
-  title="Discard perubahan?"
-  message={discardTarget ? `${discardTarget.path} akan dikembalikan dan perubahan tidak bisa dipulihkan.` : ''}
-  cancelLabel="Batal"
-  confirmLabel="Discard"
+  title={t('git.discardTitle')}
+  message={discardTarget ? t('git.discardMsg', { path: discardTarget.path }) : ''}
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('git.discardConfirm')}
   danger
   onCancel={() => (discardTarget = null)}
   onConfirm={() => {
@@ -722,21 +784,32 @@
 />
 
 <ConfirmDialog
+  open={discardAllOpen}
+  title={t('git.discardAllTitle')}
+  message={t('git.discardAllMsg', { count: changedFiles.length })}
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('git.discardAllConfirm')}
+  danger
+  onCancel={() => (discardAllOpen = false)}
+  onConfirm={() => void confirmDiscardAll()}
+/>
+
+<ConfirmDialog
   open={pendingBranchSwitch != null}
-  title="Working tree belum bersih"
-  message={pendingBranchSwitch ? `Simpan perubahan ke stash lalu pindah ke ${pendingBranchSwitch.name}?` : ''}
-  cancelLabel="Batal"
-  confirmLabel="Stash & Switch"
+  title={t('git.stashSwitchTitle')}
+  message={pendingBranchSwitch ? t('git.stashSwitch', { name: pendingBranchSwitch.name }) : ''}
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('git.stashSwitchConfirm')}
   onCancel={() => (pendingBranchSwitch = null)}
   onConfirm={() => void confirmStashAndSwitch()}
 />
 
 <ConfirmDialog
   open={deleteBranchTarget != null}
-  title="Delete branch?"
-  message={deleteBranchTarget ? `${deleteBranchTarget.name} hanya dihapus bila sudah merged.` : ''}
-  cancelLabel="Batal"
-  confirmLabel="Delete"
+  title={t('git.deleteBranchTitle')}
+  message={deleteBranchTarget ? t('git.deleteBranchMsg', { name: deleteBranchTarget.name }) : ''}
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('common.delete')}
   danger
   onCancel={() => (deleteBranchTarget = null)}
   onConfirm={() => void confirmBranchDelete()}
@@ -744,26 +817,28 @@
 
 <ConfirmDialog
   open={resolveTarget != null}
-  title="Resolve conflict?"
+  title={t('git.resolveTitle')}
   message={
     resolveTarget?.resolution === 'mark'
-      ? 'Stage file sebagai resolved tanpa mengganti isi.'
+      ? t('git.resolveMark')
       : resolveTarget
-        ? `Ganti isi dengan ${resolveTarget.resolution === 'ours' ? 'Current' : 'Incoming'} lalu stage file.`
+        ? t('git.resolveReplace', {
+            side: resolveTarget.resolution === 'ours' ? t('git.resolveOurs') : t('git.resolveTheirs'),
+          })
         : ''
   }
-  cancelLabel="Batal"
-  confirmLabel="Lanjutkan"
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('git.continue')}
   onCancel={() => (resolveTarget = null)}
   onConfirm={() => void confirmResolve()}
 />
 
 <ConfirmDialog
   open={dropStashTarget != null}
-  title="Drop stash?"
-  message={dropStashTarget ? `${dropStashTarget.ref} akan dihapus permanen.` : ''}
-  cancelLabel="Batal"
-  confirmLabel="Drop"
+  title={t('git.dropStashTitle')}
+  message={dropStashTarget ? t('git.dropStashMsg', { ref: dropStashTarget.ref }) : ''}
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('git.dropStashConfirm')}
   danger
   onCancel={() => (dropStashTarget = null)}
   onConfirm={() => void confirmStashDrop()}
@@ -771,10 +846,10 @@
 
 <ConfirmDialog
   open={deleteTagTarget != null}
-  title="Delete tag?"
-  message={deleteTagTarget ? `Delete tag ${deleteTagTarget.name}?` : ''}
-  cancelLabel="Batal"
-  confirmLabel="Delete"
+  title={t('git.deleteTagTitle')}
+  message={deleteTagTarget ? t('git.deleteTagMsg', { name: deleteTagTarget.name }) : ''}
+  cancelLabel={t('git.cancel')}
+  confirmLabel={t('common.delete')}
   danger
   onCancel={() => (deleteTagTarget = null)}
   onConfirm={() => void confirmTagDelete()}

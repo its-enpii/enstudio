@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import { tick } from 'svelte'
+  import { Icon } from '../../icons'
 
   type Size = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -81,9 +82,7 @@
             aria-label="Close"
             onclick={close}
           >
-            <svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-            </svg>
+            <Icon name="close" size={16} />
           </button>
         </div>
       {/if}

@@ -1,9 +1,19 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import {
+  defaultGuardrailsConfig,
+  resolveGuardrailsConfig,
+  type GuardrailsConfig,
+  type GuardRule,
+  type GuardStrategy,
+  type PiiType,
+} from './guardrails.js'
+import { mergeAllowRules, parseAllowRules } from './permission-rules.js'
 import { parseToml, stringifyToml, tomlString, tomlStringArray, type TomlTable } from './toml.js'
 
 export type PermissionMode = 'read_only' | 'ask' | 'autopilot_workspace' | 'full'
+export type { GuardrailsConfig, GuardRule }
 
 export interface ProviderConfig {
   baseUrl: string
@@ -16,6 +26,13 @@ export interface ProviderConfig {
   permissionMode: PermissionMode
   /** Extra deny globs merged with built-in sensitive defaults. */
   denyGlobs?: string[]
+  /**
+   * Claude-style allow rules (union of user + project).
+   * e.g. `run_shell(npm *)`, `web_fetch(domain:github.com)`, `git_status`.
+   */
+  allowRules?: string[]
+  /** Deterministic PII/secret filters (optional; defaults applied in loop when absent). */
+  guardrails?: GuardrailsConfig
 }
 
 export type PublicProviderConfig = Omit<ProviderConfig, 'apiKey'> & {
@@ -107,7 +124,57 @@ function partialFromRecord(data: Record<string, unknown>): Partial<ProviderConfi
       : Array.isArray(data.deny_globs)
         ? data.deny_globs.filter((g): g is string => typeof g === 'string' && g.trim().length > 0)
         : undefined,
+    allowRules: parseAllowRules(
+      data.allowRules ??
+        data.allow_rules ??
+        (data.permissions && typeof data.permissions === 'object'
+          ? (data.permissions as Record<string, unknown>).allow
+          : undefined),
+    ),
+    guardrails: parseGuardrails(data.guardrails),
   }
+}
+
+function parseGuardStrategy(v: unknown): GuardStrategy | undefined {
+  return v === 'redact' || v === 'mask' || v === 'block' ? v : undefined
+}
+
+function parsePiiType(v: unknown): PiiType | undefined {
+  return v === 'email' || v === 'credit_card' || v === 'api_key' || v === 'private_key' || v === 'aws_key' || v === 'custom'
+    ? v
+    : undefined
+}
+
+function parseGuardrails(raw: unknown): GuardrailsConfig | undefined {
+  if (raw === false) return { ...defaultGuardrailsConfig(), enabled: false }
+  if (raw === true) return defaultGuardrailsConfig()
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  const rulesRaw = Array.isArray(o.rules) ? o.rules : undefined
+  const rules: GuardRule[] | undefined = rulesRaw
+    ?.map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const row = item as Record<string, unknown>
+      const type = parsePiiType(row.type)
+      const strategy = parseGuardStrategy(row.strategy) ?? 'redact'
+      if (!type) return null
+      const rule: GuardRule = { type, strategy }
+      if (typeof row.pattern === 'string' && row.pattern.trim()) rule.pattern = row.pattern.trim()
+      return rule
+    })
+    .filter((r): r is GuardRule => Boolean(r))
+  return resolveGuardrailsConfig({
+    enabled: o.enabled === false ? false : o.enabled === true ? true : undefined,
+    applyToInput: typeof o.applyToInput === 'boolean' ? o.applyToInput : typeof o.apply_to_input === 'boolean' ? o.apply_to_input : undefined,
+    applyToOutput: typeof o.applyToOutput === 'boolean' ? o.applyToOutput : typeof o.apply_to_output === 'boolean' ? o.apply_to_output : undefined,
+    applyToToolResults:
+      typeof o.applyToToolResults === 'boolean'
+        ? o.applyToToolResults
+        : typeof o.apply_to_tool_results === 'boolean'
+          ? o.apply_to_tool_results
+          : undefined,
+    rules,
+  })
 }
 
 function partialFromToml(table: TomlTable): Partial<ProviderConfig> {
@@ -125,6 +192,22 @@ function partialFromToml(table: TomlTable): Partial<ProviderConfig> {
     dialect: dialectRaw === 'anthropic' || dialectRaw === 'openai' ? dialectRaw : undefined,
     permissionMode: parsePermissionMode(modeRaw),
     denyGlobs: tomlStringArray(table, 'denyGlobs') ?? tomlStringArray(table, 'deny_globs'),
+    allowRules: (() => {
+      const top = tomlStringArray(table, 'allowRules') ?? tomlStringArray(table, 'allow_rules')
+      const perm = table.permissions
+      const fromSection =
+        perm && typeof perm === 'object' && !Array.isArray(perm)
+          ? tomlStringArray(perm as TomlTable, 'allow')
+          : undefined
+      const merged = mergeAllowRules(top, fromSection)
+      return merged
+    })(),
+    guardrails: (() => {
+      const g = table.guardrails
+      if (g === false || g === true) return parseGuardrails(g)
+      if (g && typeof g === 'object' && !Array.isArray(g)) return parseGuardrails(g)
+      return undefined
+    })(),
   }
 }
 
@@ -158,6 +241,11 @@ function mergePartial(...parts: Partial<ProviderConfig>[]): Partial<ProviderConf
     if (p.dialect !== undefined) out.dialect = p.dialect
     if (p.permissionMode !== undefined) out.permissionMode = p.permissionMode
     if (p.denyGlobs !== undefined) out.denyGlobs = p.denyGlobs
+    // allowRules: union layers (user ∪ project), don't replace
+    if (p.allowRules !== undefined) {
+      out.allowRules = mergeAllowRules(out.allowRules, p.allowRules)
+    }
+    if (p.guardrails !== undefined) out.guardrails = p.guardrails
   }
   return out
 }
@@ -190,6 +278,8 @@ export function loadProviderConfig(projectRoot?: string): ProviderConfig {
         : file.dialect || DEFAULTS.dialect,
     permissionMode: file.permissionMode || DEFAULTS.permissionMode,
     denyGlobs: file.denyGlobs,
+    allowRules: file.allowRules,
+    guardrails: file.guardrails,
   }
 }
 
@@ -201,6 +291,8 @@ export function publicConfig(cfg: ProviderConfig): PublicProviderConfig {
     dialect: cfg.dialect,
     permissionMode: cfg.permissionMode,
     denyGlobs: cfg.denyGlobs,
+    allowRules: cfg.allowRules,
+    guardrails: cfg.guardrails,
     hasKey: Boolean(cfg.apiKey?.trim()),
     envOverrides: {
       baseUrl: Boolean(process.env.ENPII_BASE_URL),
@@ -220,6 +312,27 @@ export interface ProviderConfigPatch {
   dialect?: 'openai' | 'anthropic'
   permissionMode?: PermissionMode
   denyGlobs?: string[]
+  /** Replace allow rules list (empty array clears). */
+  allowRules?: string[]
+  /** Replace guardrails config (undefined = leave). */
+  guardrails?: GuardrailsConfig
+}
+
+function guardrailsToToml(g: GuardrailsConfig): TomlTable {
+  const t: TomlTable = {
+    enabled: g.enabled,
+  }
+  if (g.applyToInput !== undefined) t.applyToInput = g.applyToInput
+  if (g.applyToOutput !== undefined) t.applyToOutput = g.applyToOutput
+  if (g.applyToToolResults !== undefined) t.applyToToolResults = g.applyToToolResults
+  if (g.rules?.length) {
+    t.rules = g.rules.map((rule) => {
+      const row: TomlTable = { type: rule.type, strategy: rule.strategy }
+      if (rule.pattern) row.pattern = rule.pattern
+      return row
+    })
+  }
+  return t
 }
 
 function toTomlTable(cfg: ProviderConfig): TomlTable {
@@ -232,6 +345,10 @@ function toTomlTable(cfg: ProviderConfig): TomlTable {
     permissionMode: cfg.permissionMode,
   }
   if (cfg.denyGlobs?.length) t.denyGlobs = cfg.denyGlobs
+  if (cfg.allowRules?.length) {
+    t.permissions = { allow: cfg.allowRules }
+  }
+  if (cfg.guardrails) t.guardrails = guardrailsToToml(cfg.guardrails)
   return t
 }
 
@@ -259,6 +376,9 @@ export function saveProviderConfig(
       patch.denyGlobs !== undefined
         ? patch.denyGlobs.filter((g) => typeof g === 'string' && g.trim())
         : current.denyGlobs,
+    allowRules:
+      patch.allowRules !== undefined ? parseAllowRules(patch.allowRules) : current.allowRules,
+    guardrails: patch.guardrails !== undefined ? resolveGuardrailsConfig(patch.guardrails) : current.guardrails,
   }
 
   if (!next.baseUrl) throw new Error('baseUrl is required')
@@ -278,6 +398,8 @@ export function saveProviderConfig(
       permissionMode: next.permissionMode,
     }
     if (next.denyGlobs?.length) overlay.denyGlobs = next.denyGlobs
+    if (next.allowRules?.length) overlay.permissions = { allow: next.allowRules }
+    if (next.guardrails) overlay.guardrails = guardrailsToToml(next.guardrails)
     // preserve any project apiKey only if already present (discouraged)
     if (existing.apiKey) overlay.apiKey = existing.apiKey
     fs.writeFileSync(p, stringifyToml(overlay), 'utf8')

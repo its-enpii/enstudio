@@ -11,7 +11,7 @@
  *   }
  * }
  */
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -268,7 +268,7 @@ export function listSshTunnels(): {
 
 type LiveTunnel = {
   name: string
-  child: ChildProcessWithoutNullStreams
+  child: ChildProcess
   startedAt: string
   summary: string
   lastError?: string
@@ -332,7 +332,7 @@ export function startTunnel(tunnelName: string): {
     startedAt: new Date().toISOString(),
     summary: `${plan.command} ${args.join(' ')}`,
   }
-  child.stderr.on('data', (buf: Buffer) => {
+  child.stderr?.on('data', (buf: Buffer) => {
     const msg = buf.toString('utf8').trim()
     if (msg) {
       live.lastError = msg.slice(0, 400)

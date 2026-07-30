@@ -60,9 +60,25 @@ test('stopTurn clears pending answers with empty string', async () => {
 test('planMode flag blocks mutating tool names by policy', () => {
   const rt = runtime()
   rt.planMode = true
-  const blocked = ['write_file', 'edit_file', 'run_shell', 'git_commit', 'mcp_call_tool', 'agent', 'send_message']
+  const blocked = [
+    'write_file',
+    'edit_file',
+    'run_shell',
+    'git_commit',
+    'mcp_call_tool',
+    'agent',
+    'send_message',
+    'agent_apply',
+    'agent_discard',
+  ]
   for (const name of blocked) {
-    const shouldBlock = rt.planMode && (isMutatingTool(name) || name === 'agent' || name === 'send_message')
+    const shouldBlock: boolean =
+      Boolean(rt.planMode) &&
+      (isMutatingTool(name) ||
+        name === 'agent' ||
+        name === 'send_message' ||
+        name === 'agent_apply' ||
+        name === 'agent_discard')
     assert.equal(shouldBlock, true, name)
   }
   assert.equal(rt.planMode && isMutatingTool('read_file'), false)

@@ -3,22 +3,24 @@
   import { Terminal } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
-  import { state as app, COMPOSER_MODES, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
-  import { acceptAgentCheckpoint, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshSessionList, respondAllApprovals, respondApproval, respondAsk, rollbackAgentCheckpoint, saveProviderConfig, searchProjectFiles, sendPrompt, stopAgentTurn, undoCompactSession } from '../enpii'
+  import { state as app, COMPOSER_MODES, fontStack, EDITOR_FONT_SIZE, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
+  import { t } from '../i18n/index.svelte'
+  import { acceptAgentCheckpoint, approveDiskPlan, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshDraftPlan, refreshSessionList, refreshTeamSurface, rejectDiskPlan, respondApproval, respondAsk, rollbackAgentCheckpoint, saveProviderConfig, searchProjectFiles, sendPrompt, setSessionPlanMode, stopAgentTurn, undoCompactSession } from '../enpii'
   import { renderMarkdown } from '../markdown'
   import { xtermTheme } from '../theme'
   import SmartSelect from './ui/SmartSelect.svelte'
   import ConfirmDialog from './ui/ConfirmDialog.svelte'
-  import { Button, Dropdown, Modal, TextInput, type DropdownItem } from './ui'
+  import { Button, Dropdown, Modal, type DropdownItem } from './ui'
+  import { Icon } from '../icons'
 
   type AgentPane = 'enpii' | string
-  type VendorKind = 'claude' | 'codex' | 'aider' | 'gemini'
+  type VendorKind = 'claude' | 'codex' | 'opencode' | 'gemini'
   type VendorProvider = { baseUrl?: string; apiKey?: string; model?: string }
   type VendorTab = { id: string; kind: VendorKind; label: string; provider?: VendorProvider }
   const VENDOR_CLIS = [
     { id: 'claude' as const, label: 'Claude', command: 'claude', args: [] as string[] },
     { id: 'codex' as const, label: 'Codex', command: 'codex', args: [] as string[] },
-    { id: 'aider' as const, label: 'Aider', command: 'aider', args: [] as string[] },
+    { id: 'opencode' as const, label: 'OpenCode', command: 'opencode', args: [] as string[] },
     { id: 'gemini' as const, label: 'Gemini', command: 'gemini', args: [] as string[] },
   ]
 
@@ -31,7 +33,7 @@
   let vendorSeq = 0
   let vendorConfigOpen = $state(false)
   let vendorConfigKind = $state<VendorKind | null>(null)
-  let vendorConfig = $state({ baseUrl: '', apiKey: '', model: '' })
+  let vendorConfig = $state({ model: '' })
   const vendorTerms = new Map<string, { ptyId: string; term: Terminal; fit: FitAddon; size: { cols: number; rows: number }; kind: VendorKind }>()
   const vendorMenuItems = $derived<DropdownItem[]>(
     app.activeProject
@@ -135,8 +137,8 @@
         rows: seed.rows,
         cursorBlink: true,
         cursorStyle: 'bar',
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 12,
+        fontFamily: fontStack(app.ui.fontFamily),
+        fontSize: EDITOR_FONT_SIZE,
         lineHeight: 1.25,
         scrollback: 5_000,
         drawBoldTextInBrightColors: false,
@@ -191,11 +193,8 @@
   function openVendorConfig(kind: VendorKind): void {
     if (!app.activeProject) return
     vendorConfigKind = kind
-    const defaultModel = app.provider?.model ?? vendorModelOptions[0]?.value ?? ''
     vendorConfig = {
-      baseUrl: app.provider?.baseUrl ?? '',
-      apiKey: '',
-      model: defaultModel,
+      model: app.provider?.model ?? vendorModelOptions[0]?.value ?? '',
     }
     vendorConfigOpen = true
   }
@@ -210,9 +209,8 @@
     if (!kind) return
     const cli = VENDOR_CLIS.find((c) => c.id === kind)
     if (!cli) return
+    // Base URL + key always from Settings; modal only picks model.
     const provider: VendorProvider = {
-      baseUrl: vendorConfig.baseUrl.trim() || undefined,
-      apiKey: vendorConfig.apiKey.trim() || undefined,
       model: vendorConfig.model.trim() || undefined,
     }
     const id = `${kind}-${++vendorSeq}`
@@ -279,6 +277,17 @@
     return () => vendorResizeObs?.unobserve(host)
   })
 
+  // Live mono family + re-fit after UI zoom.
+  $effect(() => {
+    const family = fontStack(app.ui.fontFamily)
+    void app.ui.uiZoom
+    for (const entry of vendorTerms.values()) {
+      entry.term.options.fontFamily = family
+      entry.term.options.fontSize = EDITOR_FONT_SIZE
+    }
+    fitVendor(true)
+  })
+
   // Drop vendor PTYs when project changes (not on every render).
   $effect(() => {
     const projectId = app.activeProject?.id ?? null
@@ -341,7 +350,36 @@
 
   /** Path / short label for tool row (mock: path after tool:name). */
   function toolLabel(m: ChatMessage): string {
+    const name = m.tool?.name ?? ''
     const s = m.tool?.summary ?? m.tool?.args ?? ''
+    if (name === 'agent' || name === 'send_message') {
+      try {
+        const o = JSON.parse(m.tool?.args || '{}') as {
+          role?: string
+          description?: string
+          name?: string
+          agentId?: string
+        }
+        const role = o.role ? `${o.role} · ` : ''
+        const who = o.description || o.name || o.agentId || ''
+        if (who) return `${role}${who}`.slice(0, 64)
+      } catch {
+        /* fall through */
+      }
+      const spawn = s.match(/Spawned sub-agent\s+(\S+)(?:\s+\(([^)]+)\))?/i)
+      if (spawn) return `sub ${spawn[2] || spawn[1]}`.slice(0, 48)
+    }
+    if (name.startsWith('task_')) {
+      const id = s.match(/\b([a-f0-9]{8})\b/i)
+      const title = s.match(/(?:created|updated|stopped)\s+#?[a-f0-9]{0,8}\s*(.+?)(?:\n|$)/i)
+      if (title?.[1]?.trim()) return title[1]!.trim().slice(0, 48)
+      if (id) return `#${id[1]}`
+    }
+    if (name.startsWith('mailbox_')) {
+      const to = s.match(/\bto[=:\s]+(\S+)/i)
+      if (to) return `→ ${to[1]}`.slice(0, 48)
+      return s.slice(0, 48) || 'mail'
+    }
     // "edit_file path=README.md …" / "write_file README.md (created…)"
     const pathEq = s.match(/\bpath=([^\s]+)/)
     if (pathEq) return pathEq[1]!.replace(/^["']|["']$/g, '')
@@ -351,6 +389,44 @@
     if (named) return named[1]!.replace(/^["']|["']$/g, '')
     return s.slice(0, 48)
   }
+
+  function toolDisplayName(name: string): string {
+    if (name === 'agent') return 'sub-agent'
+    if (name === 'send_message') return 'message'
+    if (name === 'agent_apply') return 'apply'
+    if (name === 'agent_discard') return 'discard'
+    if (name === 'task_create') return 'task+'
+    if (name === 'task_update') return 'task'
+    if (name === 'task_stop') return 'task×'
+    if (name === 'task_list' || name === 'task_get') return 'board'
+    if (name === 'mailbox_send') return 'mail→'
+    if (name === 'mailbox_inbox') return 'mail'
+    if (name === 'mailbox_broadcast') return 'mail※'
+    return name
+  }
+
+  function isTeamTool(name: string): boolean {
+    return (
+      name === 'agent' ||
+      name === 'send_message' ||
+      name === 'agent_apply' ||
+      name === 'agent_discard' ||
+      name.startsWith('task_') ||
+      name.startsWith('mailbox_')
+    )
+  }
+
+  function teamStatusDot(status: string): string {
+    if (status === 'running' || status === 'in_progress') return 'bg-studio-gold'
+    if (status === 'error') return 'bg-studio-error'
+    if (status === 'idle' || status === 'pending') return 'bg-studio-text-dim'
+    if (status === 'completed') return 'bg-studio-success'
+    return 'bg-white/30'
+  }
+
+  const showTeamStrip = $derived(
+    app.teamBoard.length > 0 || app.teamMail.length > 0 || app.teamSubs.length > 0,
+  )
 
   function statusLabel(m: ChatMessage, awaiting: boolean): string {
     if (awaiting) return 'Pending'
@@ -404,6 +480,54 @@
     return 'Allow Edit'
   }
 
+  function prettyApprovalArgs(raw?: string): string {
+    if (!raw?.trim()) return '{\n  \n}'
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2)
+    } catch {
+      return raw
+    }
+  }
+
+  function syncApprovalEditDraft(requestId: string, args?: string): void {
+    if (approvalEditForId === requestId) return
+    approvalEditForId = requestId
+    approvalEditOpen = false
+    approvalDenyOpen = false
+    approvalEditError = ''
+    approvalDenyReason = ''
+    approvalEditText = prettyApprovalArgs(args)
+  }
+
+  function allowSticky(requestId: string, scope: 'once' | 'session' = 'once'): void {
+    approvalEditError = ''
+    if (approvalEditOpen) {
+      const trimmed = approvalEditText.trim()
+      if (!trimmed) {
+        approvalEditError = 'Args required'
+        return
+      }
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          approvalEditError = 'Args must be a JSON object'
+          return
+        }
+      } catch {
+        approvalEditError = 'Invalid JSON'
+        return
+      }
+      void respondApproval('allow', requestId, scope, { editedArgs: trimmed })
+      return
+    }
+    void respondApproval('allow', requestId, scope)
+  }
+
+  function denySticky(requestId: string): void {
+    const reason = approvalDenyReason.trim()
+    void respondApproval('deny', requestId, 'once', reason ? { reason } : undefined)
+  }
+
   function isTerminalTool(name: string): boolean {
     return name === 'run_shell' || name === 'mcp_call_tool'
   }
@@ -423,23 +547,151 @@
   }
 
   async function copyToolOutput(text: string): Promise<void> {
+    const value = text.trimEnd()
+    if (!value) return
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(value)
     } catch {
       /* ignore */
     }
   }
 
+  /** Terminal-style prompt history (↑/↓). Newest last. */
+  const PROMPT_HISTORY_KEY = 'enpiistudio.composerHistory'
+  const PROMPT_HISTORY_MAX = 50
+  let promptHistory = $state<string[]>(loadPromptHistory())
+  /** -1 = live draft; 0..len-1 = browsing history. */
+  let historyIndex = $state(-1)
+  let historyDraft = $state('')
+
+  function loadPromptHistory(): string[] {
+    try {
+      const raw = localStorage.getItem(PROMPT_HISTORY_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as unknown
+      if (!Array.isArray(parsed)) return []
+      return parsed
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim())
+        .slice(-PROMPT_HISTORY_MAX)
+    } catch {
+      return []
+    }
+  }
+
+  function persistPromptHistory(list: string[]): void {
+    try {
+      localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(list.slice(-PROMPT_HISTORY_MAX)))
+    } catch {
+      /* ignore quota */
+    }
+  }
+
+  function ensurePromptHistory(): string[] {
+    if (promptHistory.length) return promptHistory
+    const fromSession = app.messages
+      .filter((m) => m.role === 'user' && m.text?.trim())
+      .map((m) => m.text!.trim())
+    if (!fromSession.length) return promptHistory
+    const next = fromSession.slice(-PROMPT_HISTORY_MAX)
+    promptHistory = next
+    persistPromptHistory(next)
+    return next
+  }
+
+  function pushPromptHistory(text: string): void {
+    const t = text.trim()
+    if (!t) return
+    const next = promptHistory.filter((item) => item !== t)
+    next.push(t)
+    if (next.length > PROMPT_HISTORY_MAX) next.splice(0, next.length - PROMPT_HISTORY_MAX)
+    promptHistory = next
+    persistPromptHistory(next)
+    historyIndex = -1
+    historyDraft = ''
+  }
+
+  function caretLineInfo(el: HTMLTextAreaElement): { line: number; lines: number } {
+    const value = el.value ?? ''
+    const pos = el.selectionStart ?? 0
+    const before = value.slice(0, pos)
+    const line = before.split('\n').length - 1
+    const lines = value.length === 0 ? 1 : value.split('\n').length
+    return { line, lines }
+  }
+
+  /** ↑ on first line / ↓ on last line (or while browsing) — like shell history. */
+  function canBrowseHistory(el: HTMLTextAreaElement, key: 'ArrowUp' | 'ArrowDown'): boolean {
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    if (start !== end) return false
+    if (historyIndex >= 0) return true
+    const value = el.value ?? ''
+    if (!value.trim()) return key === 'ArrowUp' || key === 'ArrowDown'
+    const { line, lines } = caretLineInfo(el)
+    if (key === 'ArrowUp') return line <= 0
+    return line >= lines - 1
+  }
+
+  function applyHistoryEntry(text: string): void {
+    app.composer = text
+    if (composerEl) {
+      composerEl.value = text
+      const pos = text.length
+      composerEl.setSelectionRange(pos, pos)
+      mentionCaret = pos
+    } else {
+      void tick().then(() => {
+        if (!composerEl) return
+        composerEl.focus()
+        const pos = text.length
+        composerEl.setSelectionRange(pos, pos)
+        mentionCaret = pos
+      })
+    }
+  }
+
+  function historyOlder(): void {
+    const list = ensurePromptHistory()
+    if (!list.length) return
+    if (historyIndex < 0) {
+      historyDraft = composerEl?.value ?? app.composer
+      historyIndex = list.length - 1
+    } else if (historyIndex > 0) {
+      historyIndex -= 1
+    } else {
+      return
+    }
+    applyHistoryEntry(list[historyIndex] ?? '')
+  }
+
+  function historyNewer(): void {
+    if (historyIndex < 0) return
+    const list = promptHistory
+    if (historyIndex < list.length - 1) {
+      historyIndex += 1
+      applyHistoryEntry(list[historyIndex] ?? '')
+      return
+    }
+    historyIndex = -1
+    applyHistoryEntry(historyDraft)
+    historyDraft = ''
+  }
+
   function pendingForTool(callId: string) {
-    return app.pendingApprovals.find(
-      (a) => a.toolCallId === callId || a.requestId === callId,
-    ) ?? null
+    // One card at a time: only the head of the queue is interactive.
+    // Other pending tools keep waiting; next head appears after this one settles.
+    const head = app.pendingApprovals[0]
+    if (!head) return null
+    if (head.toolCallId !== callId && head.requestId !== callId) return null
+    return head
   }
 
   function pendingAskForTool(callId: string) {
-    return app.pendingAsks.find(
-      (a) => a.toolCallId === callId || a.requestId === callId,
-    ) ?? null
+    const head = app.pendingAsks[0]
+    if (!head) return null
+    if (head.toolCallId !== callId && head.requestId !== callId) return null
+    return head
   }
 
   let askDrafts = $state<Record<string, string>>({})
@@ -458,7 +710,46 @@
     const next = { ...askDrafts }
     delete next[requestId]
     askDrafts = next
+    askFocusIndex = -1
     void respondAsk(text, requestId)
+  }
+
+  /** Keyboard highlight index on the head ask card (−1 = free-text / none). */
+  let askFocusIndex = $state(-1)
+
+  $effect(() => {
+    // Reset highlight when the head ask changes.
+    void app.ask?.requestId
+    askFocusIndex = -1
+  })
+
+  function onAskCardKeydown(e: KeyboardEvent, requestId: string, options?: { label: string }[]): void {
+    const n = options?.length ?? 0
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!n) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'ArrowDown') {
+        askFocusIndex = askFocusIndex < 0 ? 0 : (askFocusIndex + 1) % n
+      } else {
+        askFocusIndex = askFocusIndex < 0 ? n - 1 : (askFocusIndex - 1 + n) % n
+      }
+      return
+    }
+    if (e.key === 'Enter') {
+      if (askFocusIndex >= 0 && options?.[askFocusIndex]) {
+        e.preventDefault()
+        e.stopPropagation()
+        submitAsk(requestId, options[askFocusIndex]!.label)
+        return
+      }
+      // Free-text Enter handled on the input itself.
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      askFocusIndex = -1
+    }
   }
 
   function diffLineClass(line: string): string {
@@ -495,6 +786,13 @@
   let composerEl: HTMLTextAreaElement | undefined
   let stickBottom = $state(true)
   let checkpointBusy = $state(false)
+  /** Sticky approval: edit tool args / deny reason. */
+  let approvalEditOpen = $state(false)
+  let approvalEditText = $state('')
+  let approvalEditError = $state('')
+  let approvalDenyOpen = $state(false)
+  let approvalDenyReason = $state('')
+  let approvalEditForId = $state<string | null>(null)
   let slashActive = $state(0)
   let attachmentPreviewId = $state<string | null>(null)
   let draggingFiles = $state(false)
@@ -656,7 +954,7 @@
         continue
       }
       if (next.length >= 8) {
-        app.notify('warning', 'Attachment limit', 'Maksimum 8 file.')
+        app.notify('warning', t('agent.attach.limit'), t('agent.attach.maxFiles'))
         break
       }
       next.push({ ...file, id: crypto.randomUUID() })
@@ -668,10 +966,14 @@
       const first = rejected[0]!
       app.notify(
         'warning',
-        'Attachment ditolak',
+        t('agent.attach.rejected'),
         rejected.length === 1
           ? `${first.name}: ${first.error}`
-          : `${rejected.length} file ditolak. Contoh: ${first.name}: ${first.error}`,
+          : t('agent.attach.rejectedCount', {
+              count: rejected.length,
+              name: first.name,
+              error: first.error ?? '',
+            }),
       )
     }
   }
@@ -680,7 +982,7 @@
     try {
       addAttachments(await window.enpiistudio.dialog.openFiles())
     } catch (err) {
-      app.notify('error', 'Attachment failed', err instanceof Error ? err.message : String(err))
+      app.notify('error', t('agent.attach.failed'), err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -690,7 +992,7 @@
       addAttachments(await window.enpiistudio.dialog.parseFiles(paths))
       void tick().then(focusComposer)
     } catch (err) {
-      app.notify('error', 'Attachment failed', err instanceof Error ? err.message : String(err))
+      app.notify('error', t('agent.attach.failed'), err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -989,7 +1291,7 @@
     return (
       COMPOSER_MODES.find((m) => m.value === raw) ??
       COMPOSER_MODES.find((m) => m.value.replace(/_/g, '') === compact) ??
-      COMPOSER_MODES.find((m) => m.label.toLowerCase().replace(/[-_\s]/g, '') === compact) ??
+      COMPOSER_MODES.find((m) => m.value.toLowerCase().replace(/[-_\s]/g, '') === compact) ??
       null
     )
   }
@@ -1003,34 +1305,126 @@
     app.composerMode = selected.value as ComposerMode
     try {
       await saveProviderConfig({ permissionMode: selected.permission as PermissionMode })
-      addSystem(`Composer mode: ${selected.value}. Permission: ${selected.permission}.`)
+      // Composer Plan = runtime planMode (mutations blocked until approve + exit).
+      const wantPlan = selected.value === 'plan'
+      if (wantPlan !== app.planMode) await setSessionPlanMode(wantPlan)
+      app.notify(
+        'info',
+        t(selected.labelKey),
+        wantPlan ? `${selected.permission} · plan mode ON` : selected.permission,
+      )
     } catch (err) {
-      addSystem(`Mode gagal diubah: ${err instanceof Error ? err.message : String(err)}`)
+      app.notify('error', 'Mode gagal', err instanceof Error ? err.message : String(err))
     }
   }
 
-  const slashCommands: SlashCommand[] = [
-    { name: '/help', usage: '/help', description: 'Tampilkan semua slash command.', run: () => addSystem(slashCommands.map((command) => `${command.usage} — ${command.description}`).join('\n')) },
-    { name: '/session', usage: '/session [new|list|ID]', description: 'Buat, lihat, atau buka session project.', run: async (args) => {
-      const value = args.trim()
-      if (value === 'new') return newSession()
-      await refreshSessionList()
-      if (value && value !== 'list') {
-        const target = app.sessionList.find((session) => session.id === value || session.id.startsWith(value))
-        if (target) return openSession(target.id)
-      }
-      addSystem(app.sessionList.length ? app.sessionList.map((session) => `${session.id.slice(0, 8)}… · ${session.title} · ${session.messageCount ?? 0} messages`).join('\n') : 'Belum ada session tersimpan.')
-    } },
-    { name: '/compact', usage: '/compact', description: 'Ringkas dan ganti context session agar lebih kecil.', run: async () => { const result = await compactSession(); addSystem(`Context compacted: ${result.originalMessageCount} messages → 1 summary. Undo: /undo-compact`) } },
-    { name: '/undo-compact', usage: '/undo-compact', description: 'Pulihkan transcript sebelum compact terakhir (memory only).', run: async () => { const result = await undoCompactSession(); addSystem(`Compact undone · restored ${result.messageCount} messages`) } },
-    { name: '/export', usage: '/export', description: 'Export transcript session aktif ke Markdown.', run: async () => { const result = await exportSessionMarkdown(); addSystem(`Exported ${result.messageCount} messages.`) } },
-    { name: '/plan', usage: '/plan [tujuan]', description: 'Aktifkan Plan mode; perubahan file tetap diblokir.', run: async (args) => { await changeComposerMode('plan'); if (args.trim()) await sendPrompt(`Buat rencana implementasi untuk: ${args.trim()}. Jangan mengubah file.`) } },
-    { name: '/mode', usage: '/mode <manual|accept-edits|plan|full-auto>', description: 'Ubah permission dan mode composer.', run: (args) => changeComposerMode(args) },
-    { name: '/review', usage: '/review', description: 'Review perubahan workspace saat ini.', run: () => sendPrompt('Review perubahan workspace saat ini. Jangan mengubah file. Laporkan risiko dan masalah penting.') },
-    { name: '/test', usage: '/test', description: 'Deteksi dan jalankan test/check yang relevan.', run: () => sendPrompt('Deteksi lalu jalankan test atau check paling relevan untuk perubahan saat ini.') },
-    { name: '/commit', usage: '/commit [pesan]', description: 'Siapkan commit; minta approval sebelum Git write.', run: (args) => sendPrompt(args.trim() ? `Siapkan commit dengan pesan: ${args.trim()}` : 'Review perubahan, stage yang relevan, lalu siapkan commit message. Minta approval sebelum Git write.') },
-    { name: '/clear', usage: '/clear', description: 'Bersihkan chat lokal session aktif.', run: () => { app.messages = []; app.resetRun(); app.diffs = [] } },
-  ]
+  const slashCommands = $derived.by((): SlashCommand[] => {
+    const list: SlashCommand[] = [
+      {
+        name: '/help',
+        usage: '/help',
+        description: t('agent.slash.help.desc'),
+        run: () => addSystem(list.map((command) => `${command.usage} - ${command.description}`).join('\n')),
+      },
+      {
+        name: '/session',
+        usage: '/session [new|list|ID]',
+        description: t('agent.slash.session.desc'),
+        run: async (args) => {
+          const value = args.trim()
+          if (value === 'new') return newSession()
+          await refreshSessionList()
+          if (value && value !== 'list') {
+            const target = app.sessionList.find((session) => session.id === value || session.id.startsWith(value))
+            if (target) return openSession(target.id)
+          }
+          addSystem(
+            app.sessionList.length
+              ? app.sessionList
+                  .map((session) => `${session.id.slice(0, 8)}… · ${session.title} · ${session.messageCount ?? 0} messages`)
+                  .join('\n')
+              : t('agent.slash.session.empty'),
+          )
+        },
+      },
+      {
+        name: '/compact',
+        usage: '/compact',
+        description: t('agent.slash.compact.desc'),
+        run: async () => {
+          const result = await compactSession()
+          addSystem(`Context compacted: ${result.originalMessageCount} messages → 1 summary. Undo: /undo-compact`)
+        },
+      },
+      {
+        name: '/undo-compact',
+        usage: '/undo-compact',
+        description: t('agent.slash.undoCompact.desc'),
+        run: async () => {
+          const result = await undoCompactSession()
+          addSystem(`Compact undone · restored ${result.messageCount} messages`)
+        },
+      },
+      {
+        name: '/export',
+        usage: '/export',
+        description: t('agent.slash.export.desc'),
+        run: async () => {
+          const result = await exportSessionMarkdown()
+          addSystem(`Exported ${result.messageCount} messages.`)
+        },
+      },
+      {
+        name: '/plan',
+        usage: '/plan [goal]',
+        description: t('agent.slash.plan.desc'),
+        run: async (args) => {
+          await changeComposerMode('plan')
+          if (args.trim()) await sendPrompt(t('agent.slash.plan.prompt', { goal: args.trim() }))
+        },
+      },
+      {
+        name: '/mode',
+        usage: '/mode <manual|accept-edits|plan|full-auto>',
+        description: t('agent.slash.mode.desc'),
+        run: (args) => changeComposerMode(args),
+      },
+      {
+        name: '/review',
+        usage: '/review',
+        description: t('agent.slash.review.desc'),
+        run: () => sendPrompt(t('agent.slash.review.prompt')),
+      },
+      {
+        name: '/test',
+        usage: '/test',
+        description: t('agent.slash.test.desc'),
+        run: () => sendPrompt(t('agent.slash.test.prompt')),
+      },
+      {
+        name: '/commit',
+        usage: '/commit [message]',
+        description: t('agent.slash.commit.desc'),
+        run: (args) =>
+          sendPrompt(
+            args.trim()
+              ? t('agent.slash.commit.promptMsg', { message: args.trim() })
+              : t('agent.slash.commit.prompt'),
+          ),
+      },
+      {
+        name: '/clear',
+        usage: '/clear',
+        description: t('agent.slash.clear.desc'),
+        run: () => {
+          app.messages = []
+          app.resetRun()
+          app.diffs = []
+        },
+      },
+    ]
+    return list
+  })
 
   const slashContext = $derived(app.composer.match(/^\/([^\s]*)/))
   const slashSuggestions = $derived(slashContext ? slashCommands.filter((command) => command.name.slice(1).startsWith(slashContext[1]!.toLowerCase())) : [])
@@ -1109,6 +1503,12 @@
     if (!stageEl) return
     if (!force && !stickBottom) return
     stageEl.scrollTop = stageEl.scrollHeight
+    stickBottom = true
+  }
+
+  function jumpToBottom(): void {
+    stickBottom = true
+    void scrollToBottom(true)
   }
 
   function otherTextFieldFocused(): boolean {
@@ -1121,11 +1521,31 @@
     )
   }
 
-  function focusComposer() {
+  /** True when user is drag-selecting chat/inspector text (not in composer). */
+  function hasExternalTextSelection(): boolean {
+    const sel = document.getSelection()
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false
+    const node = sel.anchorNode
+    if (!node) return false
+    const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
+    if (!el) return false
+    if (composerEl && (el === composerEl || composerEl.contains(el))) return false
+    return true
+  }
+
+  /** Set while pointer is down outside composer — blur must not steal focus mid-select. */
+  let selectingOutsideComposer = $state(false)
+
+  function focusComposer(force = false) {
     if (agentPane !== 'enpii') return
     if (!composerEl || composerEl.disabled) return
     if (!app.activeProject) return
-    if (otherTextFieldFocused()) return
+    if (!force) {
+      if (otherTextFieldFocused()) return
+      if (selectingOutsideComposer) return
+      if (hasExternalTextSelection()) return
+      if (document.querySelector('[role="dialog"]')) return
+    }
     if (document.activeElement === composerEl) return
     composerEl.focus({ preventScroll: true })
   }
@@ -1134,12 +1554,24 @@
     return Boolean(composerEl?.closest('.composer-inner')?.contains(document.activeElement))
   }
 
-  function onComposerBlur(): void {
-    if (agentPane !== 'enpii' || !app.activeProject || app.busy) return
+  function onStagePointerDown(event: PointerEvent): void {
+    const t = event.target
+    if (!(t instanceof Node)) return
+    if (composerEl && (t === composerEl || composerEl.contains(t))) {
+      selectingOutsideComposer = false
+      return
+    }
+    if (t instanceof Element && t.closest?.('.composer-inner')) {
+      selectingOutsideComposer = false
+      return
+    }
+    selectingOutsideComposer = true
+  }
+
+  function onStagePointerUp(): void {
+    // Keep flag until selection settles; clear on next tick if no selection.
     requestAnimationFrame(() => {
-      if (agentPane !== 'enpii') return
-      if (composerControlFocused() || document.querySelector('[role="dialog"]')) return
-      focusComposer()
+      if (!hasExternalTextSelection()) selectingOutsideComposer = false
     })
   }
 
@@ -1149,17 +1581,73 @@
     void changeComposerMode(next)
   }
 
+  function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false
+    if (target.isContentEditable) return true
+    const tag = target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+    return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+  }
+
+  /** Type-to-composer: printable keys land in composer without permanent autofocus. */
   function onWindowKeydown(event: KeyboardEvent): void {
-    if (app.mode !== 'agent' || agentPane !== 'enpii' || !app.activeProject || app.busy) return
+    if (app.mode !== 'agent' || agentPane !== 'enpii' || !app.activeProject) return
+
     if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'Tab') {
+      if (app.busy) return
       event.preventDefault()
       cycleComposerMode()
+      return
     }
+
+    // Already in composer / other field / shortcut / dialog → leave alone.
+    if (event.defaultPrevented) return
+    if (event.ctrlKey || event.metaKey || event.altKey) return
+    if (event.isComposing) return
+    if (app.busy) return
+    if (!composerEl || composerEl.disabled) return
+    if (document.activeElement === composerEl) return
+    if (isEditableTarget(event.target)) return
+    if (document.querySelector('[role="dialog"]')) return
+    // Approval hotkeys (y/n/s) live on window — don't steal them.
+    if (app.pendingApprovals.length) {
+      const k = event.key.toLowerCase()
+      if (k === 'y' || k === 'n' || k === 's') return
+    }
+
+    // Printable only (letters, digits, punctuation, space). Not Enter/arrows/F-keys.
+    if (event.key.length !== 1) return
+
+    event.preventDefault()
+    selectingOutsideComposer = false
+    // Drop chat selection so key goes to composer cleanly.
+    document.getSelection()?.removeAllRanges()
+    focusComposer(true)
+
+    const ch = event.key
+    const start = composerEl.selectionStart ?? app.composer.length
+    const end = composerEl.selectionEnd ?? start
+    const base = composerEl.value ?? app.composer
+    const next = `${base.slice(0, start)}${ch}${base.slice(end)}`
+    app.composer = next
+    composerEl.value = next
+    const pos = start + ch.length
+    composerEl.setSelectionRange(pos, pos)
+    mentionCaret = pos
+    onComposerInput()
   }
 
   $effect(() => {
     void app.activeProject?.id
     void loadCheckpoints()
+    void refreshDraftPlan()
+    void refreshTeamSurface()
+  })
+
+  $effect(() => {
+    void app.session?.id
+    void refreshDraftPlan()
+    void refreshTeamSurface()
   })
 
   $effect(() => {
@@ -1171,24 +1659,48 @@
     void scrollToBottom()
   })
 
-  // keep composer focused for project/session when idle (enpii pane only)
+  // Focus composer when switching project/session/pane — never while user is selecting text.
   $effect(() => {
     void app.activeProject?.id
     void app.session?.id
-    void app.busy
-    void app.pendingApprovals.length
-    void app.pendingAsks.length
     void agentPane
     if (agentPane === 'enpii' && app.activeProject && !app.busy && !app.pendingAsks.length) {
-      void tick().then(focusComposer)
+      void tick().then(() => focusComposer(false))
     }
   })
+
+  function formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms}ms`
+    const s = ms / 1000
+    if (s < 60) return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
+    const m = Math.floor(s / 60)
+    const rem = Math.round(s % 60)
+    return `${m}m ${rem.toString().padStart(2, '0')}s`
+  }
+
+  /** Live tick while turn runs — re-renders elapsed label. */
+  let nowTick = $state(Date.now())
+  $effect(() => {
+    if (!app.busy || !app.turnStartedAt) return
+    const id = window.setInterval(() => {
+      nowTick = Date.now()
+    }, 500)
+    return () => clearInterval(id)
+  })
+  const liveElapsed = $derived(
+    app.busy && app.turnStartedAt ? formatDuration(Math.max(0, nowTick - app.turnStartedAt)) : '',
+  )
 
   async function onSend() {
     const text = app.composer.trim()
     const chips = attachmentChips()
-    if ((!text && !chips.length) || app.busy) return
+    if (!text && !chips.length) return
+    // Busy → still accept: sendPrompt queues FIFO (composer stays usable).
     if (text.startsWith('/')) {
+      if (app.busy) {
+        addSystem('Wait until the agent finishes before slash commands.')
+        return
+      }
       try {
         await executeSlash()
       } catch (err) {
@@ -1204,16 +1716,19 @@
     }
     mentionResults = []
     const displayText = withFileTags(text)
+    pushPromptHistory(displayText || text)
     app.composer = ''
     stickBottom = true
     void scrollToBottom(true)
     try {
       const withRefs = await refsPrompt(text || displayText)
       const prompt = attachmentPrompt(withRefs)
+      const imgs = attachmentImages()
+      const chipCopy = chips.length ? chips : undefined
       await sendPrompt(prompt, {
         displayText,
-        images: attachmentImages(),
-        attachments: chips.length ? chips : undefined,
+        images: imgs,
+        attachments: chipCopy,
       })
       app.attachments = []
       attachmentPreviewId = null
@@ -1306,6 +1821,26 @@
       }
     }
 
+    // Prompt history (terminal-style). Skip when slash/mention menus own arrows.
+    if (
+      !mentionsOpen &&
+      slashSuggestions.length === 0 &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+    ) {
+      const el = (e.currentTarget instanceof HTMLTextAreaElement ? e.currentTarget : composerEl) ?? null
+      const key = e.key as 'ArrowUp' | 'ArrowDown'
+      if (el && canBrowseHistory(el, key)) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (key === 'ArrowUp') historyOlder()
+        else historyNewer()
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void onSend()
@@ -1374,7 +1909,7 @@
               e.stopPropagation()
               void closeVendor(tab.id)
             }}
-          >×</button>
+          ><Icon name="close" size={12} /></button>
         </div>
       {/if}
     {/each}
@@ -1391,7 +1926,7 @@
         {#snippet trigger({ open, toggle })}
           <button
             type="button"
-            class="h-[26px] cursor-pointer rounded-lg border border-white/12 bg-white/5 px-2.5 text-sm font-semibold leading-none text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
+            class="grid h-[26px] w-[30px] place-items-center rounded-lg border border-white/12 bg-white/5 text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
             aria-label="Add vendor agent"
             aria-haspopup="menu"
             aria-expanded={open}
@@ -1400,7 +1935,7 @@
               e.stopPropagation()
               toggle()
             }}
-          >+</button>
+          ><Icon name="plus" size={14} /></button>
         {/snippet}
       </Dropdown>
     </div>
@@ -1414,12 +1949,14 @@
     {/if}
     <div class="min-h-0 flex-1 p-2" bind:this={vendorHost}></div>
   </div>
+<div class="relative row-start-2 min-h-0 overflow-hidden {agentPane !== 'enpii' ? 'hidden' : ''}">
 <div
-  class="row-start-2 flex min-h-0 flex-col gap-8 overflow-y-auto p-6 {agentPane !== 'enpii'
-    ? 'hidden'
-    : ''}"
+  class="flex h-full min-h-0 flex-col gap-8 overflow-y-auto p-6 select-text"
   bind:this={stageEl}
   onscroll={onStageScroll}
+  onpointerdown={onStagePointerDown}
+  onpointerup={onStagePointerUp}
+  onpointercancel={onStagePointerUp}
 >
   {#if !app.activeProject}
     <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
@@ -1435,7 +1972,7 @@
         <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">e</div>
         <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
         <div class="mx-auto max-w-md text-[13px] leading-relaxed">
-          Ask anything about <strong class="text-white">{app.activeProject.name}</strong>.
+          Ask anything about <strong class="text-white">{app.projectLabel(app.activeProject)}</strong>.
           <br />
           Tools: list_dir · read_file · glob · grep · write_file · edit_file
         </div>
@@ -1451,8 +1988,77 @@
         <span>Writes, shell, git, MCP, and sub-agents blocked until exit_plan_mode</span>
       </div>
     {/if}
+    {#if showTeamStrip}
+      <div class="mb-3 flex flex-col gap-1.5" role="status" aria-label="Team activity">
+        {#if app.teamBoard.length}
+          <details class="rounded-md border border-border-subtle bg-studio-card/80 open:bg-studio-card" open>
+            <summary class="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim select-none [&::-webkit-details-marker]:hidden">
+              <span class="text-studio-gold">Board</span>
+              <span class="font-mono normal-case tracking-normal text-white/40">{app.teamBoard.length} open</span>
+            </summary>
+            <ul class="flex flex-col gap-0.5 px-2 pb-2">
+              {#each app.teamBoard as t (t.id)}
+                <li class="flex items-start gap-2 rounded px-1.5 py-1 text-[11px] text-studio-text">
+                  <span class="mt-1 size-1.5 shrink-0 rounded-full {teamStatusDot(t.status)}"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate font-medium">{t.title}</div>
+                    <div class="truncate font-mono text-[9px] text-white/35">
+                      #{t.id.slice(0, 8)} · {t.status}{#if t.blockedBy.length} · blocked by {t.blockedBy.map((id) => id.slice(0, 6)).join(', ')}{/if}{#if t.progress != null} · {t.progress}%{/if}
+                    </div>
+                    {#if t.note}<div class="truncate text-[10px] text-studio-text-dim">{t.note}</div>{/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          </details>
+        {/if}
+        {#if app.teamSubs.length}
+          <details class="rounded-md border border-border-subtle bg-studio-card/80" open>
+            <summary class="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim select-none [&::-webkit-details-marker]:hidden">
+              <span class="text-studio-lavender">Subs</span>
+              <span class="font-mono normal-case tracking-normal text-white/40">{app.teamSubs.length}</span>
+            </summary>
+            <ul class="flex flex-col gap-0.5 px-2 pb-2">
+              {#each app.teamSubs as s (s.id)}
+                <li class="flex items-start gap-2 rounded px-1.5 py-1 text-[11px] text-studio-text">
+                  <span class="mt-1 size-1.5 shrink-0 rounded-full {teamStatusDot(s.status)}"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate font-medium">{s.name || s.id} <span class="font-normal text-studio-text-dim">· {s.status}</span></div>
+                    <div class="truncate text-[10px] text-studio-text-dim">{s.description}</div>
+                    {#if s.worktreeBranch}<div class="truncate font-mono text-[9px] text-white/35">{s.worktreeBranch}</div>{/if}
+                    {#if s.lastSummary}<div class="truncate text-[10px] text-white/45">{s.lastSummary.slice(0, 120)}</div>{/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          </details>
+        {/if}
+        {#if app.teamMail.length}
+          <details class="rounded-md border border-border-subtle bg-studio-card/80">
+            <summary class="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim select-none [&::-webkit-details-marker]:hidden">
+              <span class="text-studio-success-bright">Mail</span>
+              <span class="font-mono normal-case tracking-normal text-white/40">{app.teamMail.length}</span>
+            </summary>
+            <ul class="flex flex-col gap-0.5 px-2 pb-2">
+              {#each app.teamMail as m (m.id)}
+                <li class="rounded px-1.5 py-1 text-[11px] text-studio-text">
+                  <div class="truncate font-mono text-[9px] text-white/40">{m.from} → {m.to}</div>
+                  <div class="line-clamp-2 text-studio-text-dim">{m.content}</div>
+                </li>
+              {/each}
+            </ul>
+          </details>
+        {/if}
+      </div>
+    {/if}
     {#if app.ask && !app.messages.some((m) => m.tool?.callId === app.ask?.toolCallId || m.tool?.callId === app.ask?.requestId)}
-      <div class="mb-3 overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card">
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
+      <div
+        class="mb-3 overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card outline-none"
+        role="group"
+        tabindex="0"
+        onkeydown={(e) => onAskCardKeydown(e, app.ask!.requestId, app.ask!.options)}
+      >
         <div class="flex items-center justify-between gap-3 border-b border-studio-lavender/20 bg-studio-lavender/10 px-4 py-2">
           <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-studio-lavender">
             <span>Question</span>
@@ -1460,14 +2066,34 @@
               <span class="text-[9px] opacity-75">{app.pendingAsks.length} pending</span>
             {/if}
           </div>
-          <span class="text-[10px] font-medium text-studio-text-dim">ask_user</span>
+          <span class="text-[10px] font-medium text-studio-text-dim">↑↓ Enter · Esc</span>
         </div>
-        <div class="p-5">
-          <p class="mb-4 text-xs leading-relaxed text-studio-text">{app.ask.question}</p>
+        <div class="p-4">
+          <p class="mb-3 text-[13px] leading-relaxed text-studio-text">{app.ask.question}</p>
           {#if app.ask.options?.length}
-            <div class="mb-3 flex flex-wrap gap-2">
-              {#each app.ask.options as opt (opt)}
-                <button type="button" class="min-w-[120px] flex-1 rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95" onclick={() => submitAsk(app.ask!.requestId, opt)}>{opt}</button>
+            <div class="mb-3 flex flex-col gap-1" role="listbox" aria-label="Choices">
+              {#each app.ask.options as opt, oi (opt.label + oi)}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={askFocusIndex === oi}
+                  class="flex w-full flex-col items-start gap-0.5 rounded-md border px-3 py-2.5 text-left transition-colors {askFocusIndex === oi
+                    ? 'border-studio-gold/50 bg-studio-gold/15'
+                    : 'border-border-subtle bg-studio-dark/60 hover:border-studio-lavender/35 hover:bg-white/[0.04]'}"
+                  onclick={() => submitAsk(app.ask!.requestId, opt.label)}
+                  onmouseenter={() => (askFocusIndex = oi)}
+                >
+                  <div class="flex w-full items-center gap-2">
+                    <span class="font-mono text-[10px] text-studio-text-dim">{oi + 1}.</span>
+                    <span class="min-w-0 flex-1 text-[12px] font-semibold text-studio-text">{opt.label}</span>
+                    {#if opt.recommended}
+                      <span class="shrink-0 rounded bg-studio-gold/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-studio-gold">Recommended</span>
+                    {/if}
+                  </div>
+                  {#if opt.description}
+                    <p class="m-0 pl-5 text-[11px] leading-snug text-studio-text-dim">{opt.description}</p>
+                  {/if}
+                </button>
               {/each}
             </div>
           {/if}
@@ -1475,123 +2101,55 @@
             <input
               type="text"
               class="min-h-[42px] w-full rounded-lg border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-studio-lavender/55"
-              placeholder="Type an answer…"
+              placeholder="Type something…"
               value={askDraft(app.ask.requestId)}
-              oninput={(e) => setAskDraft(app.ask!.requestId, (e.currentTarget as HTMLInputElement).value)}
+              oninput={(e) => {
+                askFocusIndex = -1
+                setAskDraft(app.ask!.requestId, (e.currentTarget as HTMLInputElement).value)
+              }}
               onkeydown={(e) => {
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  onAskCardKeydown(e, app.ask!.requestId, app.ask!.options)
+                  return
+                }
                 if (e.key === 'Enter') {
                   e.preventDefault()
-                  submitAsk(app.ask!.requestId)
+                  if (askFocusIndex >= 0 && app.ask?.options?.[askFocusIndex]) {
+                    submitAsk(app.ask.requestId, app.ask.options[askFocusIndex]!.label)
+                  } else {
+                    submitAsk(app.ask!.requestId)
+                  }
                 }
               }}
             />
             <button
               type="button"
               class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
-              disabled={!askDraft(app.ask.requestId).trim()}
-              onclick={() => submitAsk(app.ask!.requestId)}
+              disabled={!askDraft(app.ask.requestId).trim() && askFocusIndex < 0}
+              onclick={() => {
+                if (askFocusIndex >= 0 && app.ask?.options?.[askFocusIndex]) {
+                  submitAsk(app.ask.requestId, app.ask.options[askFocusIndex]!.label)
+                } else {
+                  submitAsk(app.ask!.requestId)
+                }
+              }}
             >Submit</button>
           </div>
         </div>
       </div>
     {/if}
-    {#if app.run}
-      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-lg border border-white/7 bg-studio-panel/95 p-2">
-        <div class="flex items-center justify-between px-1 pb-1.5 pt-0.5">
-          <div class="flex items-center gap-1.5">
-            <strong class="text-[10px] text-studio-text">Task</strong>
-            <span class="text-[9px] capitalize text-studio-text-dim">{app.run.status}</span>
-            <span class="text-[9px] text-studio-text-dim">{app.run.tasks.filter((task) => task.status === 'completed').length}/{app.run.tasks.length} steps · {app.run.toolCount ?? 0} tools</span>
-          </div>
-          <div class="flex items-center gap-1.5">
-            {#if app.busy}
-              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-error-soft hover:bg-white/10" onclick={() => void stopAgentTurn()}>Stop</button>
-            {:else}
-              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text disabled:opacity-45" disabled={!lastUserPrompt()} onclick={() => void retryRun()}>Retry</button>
-              <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text" onclick={() => void continueRun()}>Continue</button>
-            {/if}
-          </div>
-        </div>
-        {#if app.run.lastEvent}
-          <div class="truncate border-t border-white/5 px-1 py-1.5 font-mono text-[8px] text-white/35">{app.run.lastEvent}</div>
-        {/if}
-        <div class="grid gap-0.5">
-          {#each app.run.tasks as task (task.id)}
-            <div class="flex min-h-[25px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] {task.status === 'running' ? 'bg-studio-violet/10 text-studio-text' : task.status === 'completed' ? 'text-white/34' : 'text-white/50'}">
-              <span class="size-1.5 shrink-0 rounded-full {task.status === 'running' ? 'bg-studio-gold studio-signal' : task.status === 'completed' ? 'bg-studio-success' : 'bg-white/20'}"></span>
-              <div class="flex min-w-0 flex-col">
-                <span class="truncate">{task.title}</span>
-                {#if task.detail}<small class="truncate text-[8px] text-white/32 normal-case opacity-55">{task.detail}</small>{/if}
-              </div>
-              {#if task.toolCount}<small class="opacity-55">{task.toolCount} tools</small>{/if}
-              <small class="capitalize opacity-55">{task.status}</small>
-            </div>
-          {/each}
-        </div>
-        {#if app.approvals.length > 0}
-          <details class="mt-1.5 border-t border-white/5 pt-1">
-            <summary class="cursor-pointer px-1 py-1 text-[9px] text-white/38">Approval history · {app.approvals.length}</summary>
-            {#each app.approvals.slice(0, 8) as approval (`${approval.ts}-${approval.name}`)}
-              <details class="border-t border-white/[0.035]">
-                <summary class="flex min-h-[23px] cursor-pointer list-none items-center gap-1.5 px-1.5 py-0.5 text-[8px] text-white/44 [&::-webkit-details-marker]:hidden">
-                  <span class="rounded px-1 py-0.5 uppercase {approval.decision === 'allow' ? 'text-studio-success-text' : 'text-studio-error-soft'}">{approval.decision}</span>
-                  <span class="min-w-0 flex-1 truncate">{approval.summary}</span>
-                  <time class="ml-auto opacity-45">{new Date(approval.ts).toLocaleTimeString()}</time>
-                </summary>
-                {#if approval.preview}<pre class="mx-1.5 mb-1.5 max-h-[100px] overflow-auto bg-black/22 p-1.5 font-mono text-[8px] text-white/46 whitespace-pre-wrap break-words">{approval.preview}</pre>{/if}
-                {#if approval.args}<code class="mx-1.5 mb-1.5 block max-h-[100px] overflow-auto bg-black/22 p-1.5 font-mono text-[8px] text-white/46 whitespace-pre-wrap break-words">{approval.args}</code>{/if}
-              </details>
-            {/each}
-          </details>
-        {/if}
-      </section>
-    {/if}
-    {#if app.checkpoints.length > 0}
-      <section class="mx-auto mt-3 w-[calc(100%-32px)] max-w-[760px] self-center rounded-lg border border-white/7 bg-studio-panel/90 p-2">
-        <div class="flex items-center justify-between px-1 pb-1.5 pt-0.5 text-[10px] text-studio-text-dim">
-          <strong>Agent Checkpoints</strong>
-          <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void loadCheckpoints()}>Refresh</button>
-        </div>
-        {#each app.checkpoints as checkpoint (checkpoint.id)}
-          <details class="border-t border-white/5">
-            <summary class="flex cursor-pointer items-center justify-between px-1 py-1.5 text-[9px] text-white/45">
-              <span>{new Date(checkpoint.createdAt).toLocaleTimeString()}</span>
-              <span>{checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'}</span>
-            </summary>
-            <div class="grid gap-1 px-1 pb-1.5">
-              {#each checkpoint.files as file (file.path)}
-                <div class="flex items-center justify-between gap-2 rounded bg-white/[0.025] px-2 py-1 font-mono text-[9px] text-studio-text-dim">
-                  <span class="min-w-0 truncate">{file.path}</span>
-                  <span class="flex shrink-0 gap-1">
-                    <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void acceptCheckpoint(checkpoint.id, file.path)}>Accept</button>
-                    <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id, file.path)}>Revert</button>
-                  </span>
-                </div>
-              {/each}
-              <div class="flex flex-wrap items-center justify-end gap-1">
-                <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy} onclick={() => void acceptCheckpoint(checkpoint.id)}>Accept turn</button>
-                {#if checkpoint.prompt}
-                  <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-text-dim disabled:opacity-45" disabled={checkpointBusy || app.busy} onclick={() => requestRetryCheckpoint(checkpoint.id, checkpoint.prompt)}>Retry</button>
-                {/if}
-                <button type="button" class="rounded bg-white/6 px-1.5 py-1 text-[9px] text-studio-error-soft disabled:opacity-45" disabled={checkpointBusy} onclick={() => requestRollbackCheckpoint(checkpoint.id)}>Revert turn</button>
-              </div>
-            </div>
-          </details>
-        {/each}
-      </section>
-    {/if}
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-8">
+    <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 select-text" data-selectable>
       {#each groups as g, gi (g.kind === 'turn' ? `t-${gi}-${g.items[0]?.id}` : g.m.id)}
         {#if g.kind === 'user'}
           <div class="flex justify-end">
             <div
-              class="flex max-w-[70%] flex-col gap-2 break-words rounded-lg border border-border-subtle bg-studio-card px-3 py-2.5 text-[13px] leading-relaxed"
+              class="flex max-w-[70%] flex-col gap-1.5 break-words rounded-lg border border-border-subtle bg-studio-card px-3 py-2.5 text-[13px] leading-relaxed select-text"
             >
-              {#if g.m.text}<div class="whitespace-pre-wrap">{g.m.text}</div>{/if}
+              {#if g.m.text}<div class="whitespace-pre-wrap select-text">{g.m.text}</div>{/if}
             </div>
           </div>
         {:else if g.kind === 'system'}
-          <div class="rounded-lg border border-dashed border-border-subtle p-3 text-center text-xs text-studio-text-dim">
+          <div class="rounded-lg border border-dashed border-border-subtle p-3 text-center text-xs text-studio-text-dim select-text">
             {g.m.text}
           </div>
         {:else}
@@ -1605,7 +2163,7 @@
               {#each g.items as m (m.id)}
                 {#if m.role === 'assistant'}
                   {#if m.text}
-                    <div class="break-words text-sm leading-relaxed text-studio-text-dim [&_strong]:font-semibold [&_strong]:text-white">
+                    <div class="break-words text-sm leading-relaxed text-studio-text-body select-text">
                       {@html renderMarkdown(m.text)}
                     </div>
                   {/if}
@@ -1613,7 +2171,13 @@
                   {@const pending = pendingForTool(m.tool.callId)}
                   {@const askPending = pendingAskForTool(m.tool.callId)}
                   {#if askPending}
-                    <div class="overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card">
+                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
+                    <div
+                      class="overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card outline-none"
+                      role="group"
+                      tabindex="0"
+                      onkeydown={(e) => onAskCardKeydown(e, askPending.requestId, askPending.options)}
+                    >
                       <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
                         <div class="flex items-center gap-2 text-[11px] font-semibold text-studio-lavender">
                           <span>Question</span>
@@ -1621,14 +2185,34 @@
                             <span class="text-[10px] text-studio-text-dim">{app.pendingAsks.length} pending</span>
                           {/if}
                         </div>
-                        <span class="text-[10px] font-medium text-studio-text-dim">ask_user</span>
+                        <span class="text-[10px] font-medium text-studio-text-dim">↑↓ Enter · Esc</span>
                       </div>
                       <div class="p-3">
                         <p class="mb-3 text-[13px] leading-relaxed text-studio-text">{askPending.question}</p>
                         {#if askPending.options?.length}
-                          <div class="mb-2.5 flex flex-wrap gap-1.5">
-                            {#each askPending.options as opt (opt)}
-                              <button type="button" class="min-w-[100px] flex-1 rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => submitAsk(askPending.requestId, opt)}>{opt}</button>
+                          <div class="mb-2.5 flex flex-col gap-1" role="listbox" aria-label="Choices">
+                            {#each askPending.options as opt, oi (opt.label + oi)}
+                              <button
+                                type="button"
+                                role="option"
+                                aria-selected={askFocusIndex === oi}
+                                class="flex w-full flex-col items-start gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors {askFocusIndex === oi
+                                  ? 'border-studio-gold/50 bg-studio-gold/15'
+                                  : 'border-border-subtle bg-studio-dark/60 hover:border-studio-lavender/35 hover:bg-white/[0.04]'}"
+                                onclick={() => submitAsk(askPending.requestId, opt.label)}
+                                onmouseenter={() => (askFocusIndex = oi)}
+                              >
+                                <div class="flex w-full items-center gap-2">
+                                  <span class="font-mono text-[10px] text-studio-text-dim">{oi + 1}.</span>
+                                  <span class="min-w-0 flex-1 text-[12px] font-semibold text-studio-text">{opt.label}</span>
+                                  {#if opt.recommended}
+                                    <span class="shrink-0 rounded bg-studio-gold/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-studio-gold">Recommended</span>
+                                  {/if}
+                                </div>
+                                {#if opt.description}
+                                  <p class="m-0 pl-5 text-[11px] leading-snug text-studio-text-dim">{opt.description}</p>
+                                {/if}
+                              </button>
                             {/each}
                           </div>
                         {/if}
@@ -1636,68 +2220,46 @@
                           <input
                             type="text"
                             class="min-h-9 w-full rounded-md border border-border-subtle bg-studio-dark px-2.5 py-2 text-[12px] text-studio-text outline-none focus:border-studio-purple/60"
-                            placeholder="Type an answer…"
+                            placeholder="Type something…"
                             value={askDraft(askPending.requestId)}
-                            oninput={(e) => setAskDraft(askPending.requestId, (e.currentTarget as HTMLInputElement).value)}
+                            oninput={(e) => {
+                              askFocusIndex = -1
+                              setAskDraft(askPending.requestId, (e.currentTarget as HTMLInputElement).value)
+                            }}
                             onkeydown={(e) => {
+                              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                onAskCardKeydown(e, askPending.requestId, askPending.options)
+                                return
+                              }
                               if (e.key === 'Enter') {
                                 e.preventDefault()
-                                submitAsk(askPending.requestId)
+                                if (askFocusIndex >= 0 && askPending.options?.[askFocusIndex]) {
+                                  submitAsk(askPending.requestId, askPending.options[askFocusIndex]!.label)
+                                } else {
+                                  submitAsk(askPending.requestId)
+                                }
                               }
                             }}
                           />
                           <button
                             type="button"
                             class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105 disabled:opacity-40"
-                            disabled={!askDraft(askPending.requestId).trim()}
-                            onclick={() => submitAsk(askPending.requestId)}
+                            disabled={!askDraft(askPending.requestId).trim() && askFocusIndex < 0}
+                            onclick={() => {
+                              if (askFocusIndex >= 0 && askPending.options?.[askFocusIndex]) {
+                                submitAsk(askPending.requestId, askPending.options[askFocusIndex]!.label)
+                              } else {
+                                submitAsk(askPending.requestId)
+                              }
+                            }}
                           >Submit</button>
                         </div>
                       </div>
                     </div>
                   {:else if pending}
-                    <div class="overflow-hidden rounded-lg border border-studio-gold/35 bg-studio-card">
-                      <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
-                        <div class="flex items-center gap-2 text-[11px] font-semibold text-studio-gold">
-                          <svg class="size-4 shrink-0 text-studio-gold" width="16" height="16" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                          </svg>
-                          <span>Action Required</span>
-                          {#if app.pendingApprovals.length > 1}
-                            <span class="text-[9px] text-studio-gold/75">{app.pendingApprovals.length} pending</span>
-                          {/if}
-                        </div>
-                        <span class="text-[10px] font-medium text-studio-text-dim">{approvalKind(pending.name)}</span>
-                      </div>
-                      <div class="p-3">
-                        <p class="mb-3 text-[13px] leading-relaxed text-studio-text">
-                          <span class="font-semibold text-studio-lavender">enpii</span> wants to {approvalVerb(pending.name)}
-                          <code class="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-studio-text">{approvalPath(pending)}</code>
-                        </p>
-                        {#if pending.preview}
-                          {#if isUnifiedDiff(pending.preview)}
-                            <div class="mb-3 max-h-52 overflow-auto rounded-md border border-border-subtle bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug">
-                              {#each pending.preview.split('\n') as line, li (`d-${li}`)}
-                                <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-2.5 {diffLineClass(line)}">{line || ' '}</div>
-                              {/each}
-                            </div>
-                          {:else}
-                            <pre class="mb-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-studio-dark p-2.5 font-mono text-[11px] text-studio-text-dim">{pending.preview}</pre>
-                          {/if}
-                        {/if}
-                        <div class="grid grid-cols-2 gap-2">
-                          <button type="button" class="rounded-md border border-border-subtle px-3 py-2 text-[12px] font-medium text-studio-text hover:bg-white/[0.04]" onclick={() => void respondApproval('deny', pending.requestId)}>Deny</button>
-                          <button type="button" class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => void respondApproval('allow', pending.requestId)}>{approvalButton(pending.name)}</button>
-                          <button type="button" class="col-span-2 rounded-md border border-studio-gold/30 bg-studio-gold/10 px-3 py-2 text-[12px] font-semibold text-studio-gold hover:bg-studio-gold/15" title="Auto-allow this action kind for the rest of the session" onclick={() => void respondApproval('allow', pending.requestId, 'session')}>Allow for session</button>
-                        </div>
-                        {#if app.pendingApprovals.length > 1 && app.pendingApprovals[0]?.requestId === pending.requestId}
-                          <div class="mt-2.5 grid grid-cols-2 gap-2 border-t border-border-subtle pt-2.5">
-                            <button type="button" class="rounded-md border border-border-subtle px-3 py-2 text-[12px] font-medium text-studio-text hover:bg-white/[0.04]" onclick={() => void respondAllApprovals('deny')}>Deny all ({app.pendingApprovals.length})</button>
-                            <button type="button" class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => void respondAllApprovals('allow')}>Allow all ({app.pendingApprovals.length})</button>
-                            <button type="button" class="col-span-2 rounded-md border border-studio-gold/30 bg-studio-gold/10 px-3 py-2 text-[12px] font-semibold text-studio-gold hover:bg-studio-gold/15" title="Allow these kinds for the rest of the session" onclick={() => void respondAllApprovals('allow', 'session')}>Allow all for session</button>
-                          </div>
-                        {/if}
-                      </div>
+                    <!-- Inline placeholder only — real card is sticky above composer (no scroll to approve). -->
+                    <div class="rounded-md border border-dashed border-studio-gold/25 bg-studio-gold/5 px-3 py-2 font-mono text-[11px] text-studio-gold/80">
+                      Action required · see card above composer
                     </div>
                   {:else if isTerminalTool(m.tool.name)}
                     <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}">
@@ -1705,19 +2267,21 @@
                         <div class="flex min-w-0 items-center gap-2">
                           <span class="size-1.5 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
                           <span class="shrink-0 font-semibold text-studio-success-bright">tool:{m.tool.name}</span>
-                          <span class="truncate font-mono text-studio-text-dim">{shellCommand(m)}</span>
+                          <span class="truncate font-mono text-studio-text-dim select-text">{shellCommand(m)}</span>
                         </div>
                         <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
                       <div class="flex items-center gap-2 px-3 pb-2 font-mono text-[11px]">
                         <span class="shrink-0 text-studio-success-bright">$</span>
-                        <code class="min-w-0 flex-1 truncate text-studio-text/90">{shellCommand(m)}</code>
+                        <code class="min-w-0 flex-1 truncate text-studio-text/90 select-text">{shellCommand(m)}</code>
                         {#if m.tool.preview && m.tool.status !== 'running'}
                           <button
                             type="button"
                             class="shrink-0 rounded border border-white/12 bg-white/4 px-2 py-0.5 text-[10px] text-studio-text-dim hover:border-white/28 hover:text-white"
+                            title="Copy output"
                             onclick={(e) => {
                               e.preventDefault()
+                              e.stopPropagation()
                               void copyToolOutput(m.tool?.preview ?? '')
                             }}
                           >
@@ -1726,7 +2290,7 @@
                         {/if}
                       </div>
                       {#if m.tool.preview && m.tool.status !== 'running'}
-                        <pre class="mx-2 mb-2.5 max-h-70 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-success-out">{m.tool.preview}</pre>
+                        <pre class="mx-2 mb-2.5 max-h-70 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-success-out select-text">{m.tool.preview}</pre>
                       {:else if m.tool.status === 'running'}
                         <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
@@ -1734,17 +2298,27 @@
                       {/if}
                     </details>
                   {:else}
-                    <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}">
+                    <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}" open={Boolean(m.tool.preview && isUnifiedDiff(m.tool.preview))}>
                       <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 select-none [&::-webkit-details-marker]:hidden">
                         <div class="flex min-w-0 items-center gap-2">
                           <span class="size-1.5 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
-                          <span class="shrink-0 font-semibold {toolAccent(m.tool.status)}">tool:{m.tool.name}</span>
-                          <span class="truncate text-studio-text-dim">{toolLabel(m)}</span>
+                          <span class="shrink-0 font-semibold {toolAccent(m.tool.status)}">
+                            {isTeamTool(m.tool.name) ? toolDisplayName(m.tool.name) : `tool:${m.tool.name}`}
+                          </span>
+                          <span class="truncate text-studio-text-dim select-text">{toolLabel(m)}</span>
                         </div>
                         <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, false)}</span>
                       </summary>
                       {#if m.tool.preview && m.tool.status !== 'running'}
-                        <pre class="m-0 max-h-40 overflow-auto px-3 pb-2.5 text-[11px] whitespace-pre-wrap break-words text-studio-text/75">{m.tool.preview}</pre>
+                        {#if isUnifiedDiff(m.tool.preview)}
+                          <div class="mx-2 mb-2.5 max-h-70 overflow-auto rounded-md border border-border-subtle bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug select-text">
+                            {#each m.tool.preview.split('\n') as line, li (`td-${m.id}-${li}`)}
+                              <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-2.5 {diffLineClass(line)}">{line || ' '}</div>
+                            {/each}
+                          </div>
+                        {:else}
+                          <pre class="m-0 max-h-40 overflow-auto px-3 pb-2.5 text-[11px] whitespace-pre-wrap break-words text-studio-text/75 select-text">{m.tool.preview}</pre>
+                        {/if}
                       {:else if m.tool.status === 'running'}
                         <div class="px-3 pb-2.5 text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
@@ -1759,41 +2333,200 @@
         {/if}
       {/each}
     </div>
+    {#if app.run && !app.busy && (app.run.status === 'failed' || app.run.status === 'cancelled')}
+      <div class="mx-auto mt-2 flex w-[calc(100%-32px)] max-w-3xl items-center justify-end gap-2 self-center">
+        <button type="button" class="rounded-md bg-white/6 px-2.5 py-1 text-[11px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text disabled:opacity-45" disabled={!lastUserPrompt()} onclick={() => void retryRun()}>Retry</button>
+        <button type="button" class="rounded-md bg-white/6 px-2.5 py-1 text-[11px] text-studio-text-dim hover:bg-white/10 hover:text-studio-text" onclick={() => void continueRun()}>Continue</button>
+      </div>
+    {/if}
+  {/if}
+</div>
+  {#if !stickBottom && app.messages.length > 0}
+    <button
+      type="button"
+      class="absolute bottom-4 left-1/2 z-[5] grid size-8 -translate-x-1/2 place-items-center rounded-full border border-white/12 bg-studio-panel text-studio-text shadow-md hover:border-studio-gold/50 hover:bg-studio-card hover:text-studio-gold"
+      title="Scroll to bottom"
+      aria-label="Scroll to bottom"
+      onclick={jumpToBottom}
+    >
+      <Icon name="arrow-down" size={14} class="text-current" />
+    </button>
   {/if}
 </div>
 
 <footer class="row-start-3 shrink-0 px-4 pb-4 pt-1 {agentPane !== 'enpii' ? 'hidden' : ''}">
+  {#if app.approval}
+    {@const sticky = app.approval}
+    {@const _sync = (syncApprovalEditDraft(sticky.requestId, sticky.args), 0)}
+    <div class="mx-auto mb-2 w-full max-w-3xl overflow-hidden rounded-lg border border-studio-gold/40 bg-studio-card shadow-[0_-8px_24px_rgba(0,0,0,0.35)]">
+      <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
+        <div class="flex items-center gap-2 text-[11px] font-semibold text-studio-gold">
+          <Icon name="alert" size={16} class="shrink-0 text-studio-gold" />
+          <span>Action Required</span>
+          {#if app.pendingApprovals.length > 1}
+            <span class="rounded bg-studio-gold/15 px-1.5 py-0.5 font-mono text-[10px] text-studio-gold/90">{app.pendingApprovals.length}</span>
+          {/if}
+        </div>
+        <span class="text-[10px] font-medium text-studio-text-dim">{approvalKind(sticky.name)}</span>
+      </div>
+      <div class="p-3">
+        <p class="mb-2 text-[13px] leading-relaxed text-studio-text">
+          <span class="font-semibold text-studio-lavender">enpii</span> wants to {approvalVerb(sticky.name)}
+          <code class="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-studio-text">{approvalPath(sticky)}</code>
+        </p>
+        {#if sticky.preview && !approvalEditOpen}
+          {#if isUnifiedDiff(sticky.preview)}
+            <div class="mb-2 max-h-36 overflow-auto rounded-md border border-border-subtle bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug">
+              {#each sticky.preview.split('\n').slice(0, 80) as line, li (`sd-${li}`)}
+                <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-2.5 {diffLineClass(line)}">{line || ' '}</div>
+              {/each}
+            </div>
+          {:else}
+            <pre class="mb-2 max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-studio-dark p-2.5 font-mono text-[11px] text-studio-text-dim">{sticky.preview}</pre>
+          {/if}
+        {/if}
+        {#if approvalEditOpen}
+          <label class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim" for="approval-edit-args">Tool args (JSON)</label>
+          <textarea
+            id="approval-edit-args"
+            class="mb-1 max-h-40 min-h-[5.5rem] w-full resize-y rounded-md border border-border-subtle bg-studio-dark p-2.5 font-mono text-[11px] leading-snug text-studio-text outline-none focus:border-studio-gold/50"
+            bind:value={approvalEditText}
+            spellcheck="false"
+          ></textarea>
+          {#if approvalEditError}
+            <p class="mb-2 text-[11px] text-red-400">{approvalEditError}</p>
+          {/if}
+        {/if}
+        {#if approvalDenyOpen}
+          <label class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim" for="approval-deny-reason">Deny reason (optional)</label>
+          <input
+            id="approval-deny-reason"
+            class="mb-2 w-full rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] text-studio-text outline-none focus:border-studio-gold/50"
+            bind:value={approvalDenyReason}
+            placeholder="Shown to the model"
+          />
+        {/if}
+        <div class="mb-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/[0.04] hover:text-studio-text {approvalEditOpen ? 'border-studio-gold/40 text-studio-gold' : ''}"
+            onclick={() => {
+              approvalEditOpen = !approvalEditOpen
+              approvalEditError = ''
+              if (approvalEditOpen && !approvalEditText.trim()) approvalEditText = prettyApprovalArgs(sticky.args)
+            }}
+          >{approvalEditOpen ? 'Hide args' : 'Edit args'}</button>
+          <button
+            type="button"
+            class="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/[0.04] hover:text-studio-text {approvalDenyOpen ? 'border-studio-gold/40 text-studio-gold' : ''}"
+            onclick={() => { approvalDenyOpen = !approvalDenyOpen }}
+          >{approvalDenyOpen ? 'Hide reason' : 'Deny reason'}</button>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" class="rounded-md border border-border-subtle px-3 py-2 text-[12px] font-medium text-studio-text hover:bg-white/[0.04]" onclick={() => denySticky(sticky.requestId)}>Deny</button>
+          <button type="button" class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => allowSticky(sticky.requestId)}>{approvalEditOpen ? 'Allow with edits' : approvalButton(sticky.name)}</button>
+          <button type="button" class="col-span-2 rounded-md border border-studio-gold/30 bg-studio-gold/10 px-3 py-2 text-[12px] font-semibold text-studio-gold hover:bg-studio-gold/15" title="Auto-allow this action kind for the rest of the session (siblings keep original args)" onclick={() => allowSticky(sticky.requestId, 'session')}>Allow for session</button>
+        </div>
+      </div>
+    </div>
+  {/if}
   <div
     class="composer-inner relative flex flex-col gap-3 rounded-lg border border-border-subtle bg-studio-dark p-3 transition-colors duration-100 focus-within:border-studio-purple/50"
     role="group"
     aria-label="Message composer"
   >
+    {#if app.draftPlan?.status === 'draft'}
+      <div class="mb-1 rounded-md border border-studio-lavender/30 bg-studio-purple/10 px-2.5 py-2">
+        <div class="mb-1 flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div class="text-[10px] font-semibold uppercase tracking-wide text-studio-lavender">Draft plan</div>
+            <div class="truncate text-[12px] text-studio-text">{app.draftPlan.title}</div>
+            <div class="truncate font-mono text-[9px] text-white/35">{app.draftPlan.relPath}</div>
+          </div>
+          <div class="flex shrink-0 gap-1.5">
+            <button
+              type="button"
+              class="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/5"
+              onclick={() => void rejectDiskPlan(app.draftPlan?.id).catch((e) => app.notify('error', 'Reject failed', e instanceof Error ? e.message : String(e)))}
+            >Reject</button>
+            <button
+              type="button"
+              class="rounded-md bg-studio-gold px-2 py-1 text-[11px] font-semibold text-studio-dark hover:brightness-105"
+              onclick={() => void approveDiskPlan(app.draftPlan?.id).then(() => void sendPrompt('Plan approved. Execute the approved plan steps. Do not re-plan unless blocked.')).catch((e) => app.notify('error', 'Approve failed', e instanceof Error ? e.message : String(e)))}
+            >Approve & run</button>
+          </div>
+        </div>
+        <ol class="m-0 list-decimal space-y-0.5 pl-4 text-[11px] text-studio-text-dim">
+          {#each app.draftPlan.steps as step, si (si)}
+            <li>
+              <span class="text-studio-text">{step.title}</span>
+              {#if step.detail}<span class="text-white/40"> — {step.detail}</span>{/if}
+            </li>
+          {/each}
+        </ol>
+      </div>
+    {/if}
+    {#if app.planMode}
+      <div class="mb-1 flex flex-wrap items-center gap-2 text-[10px]">
+        <span class="rounded-full border border-studio-lavender/40 bg-studio-purple/15 px-2 py-0.5 font-semibold text-studio-lavender">Plan mode · writes blocked</span>
+      </div>
+    {/if}
+    {#if app.promptQueue.length}
+      <div class="mb-1 flex flex-col gap-1 rounded-md border border-dashed border-studio-gold/25 bg-studio-gold/5 px-2.5 py-1.5">
+        <div class="text-[10px] font-semibold text-studio-gold/90">
+          Queue · {app.promptQueue.length} waiting
+        </div>
+        {#each app.promptQueue as q, qi (q.id)}
+          <div class="flex items-start gap-2 text-[11px] text-studio-text-dim">
+            <span class="shrink-0 tabular-nums text-white/35">{qi + 1}.</span>
+            <span class="min-w-0 flex-1 truncate">{q.displayText ?? q.text}</span>
+            <button
+              type="button"
+              class="shrink-0 text-[10px] text-studio-error-soft hover:underline"
+              onclick={() => app.removeQueuedPrompt(q.id)}
+            >Remove</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
     <textarea
       class="min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-studio-text outline-none placeholder:text-studio-text-dim disabled:opacity-45"
       rows="3"
       bind:this={composerEl}
       placeholder={app.activeProject
-        ? 'Message the agent… (Use @ to reference files)'
+        ? app.busy
+          ? 'Agent busy — send queues until done…'
+          : 'Message the agent… (Use @ to reference files)'
         : 'Open a project first'}
       bind:value={app.composer}
       onkeydown={onKeydown}
-      oninput={onComposerInput}
+      oninput={() => {
+        // Typing while browsing history exits browse mode (keep text).
+        if (historyIndex >= 0) {
+          historyIndex = -1
+          historyDraft = ''
+        }
+        onComposerInput()
+      }}
       onclick={syncMentionCaret}
       onkeyup={syncMentionCaret}
       onselect={syncMentionCaret}
       onpaste={onPaste}
-      onblur={onComposerBlur}
-      disabled={!app.activeProject || app.busy}
+      disabled={!app.activeProject}
+      title="↑/↓ recall previous prompts"
     ></textarea>
     <div class="flex items-center justify-between gap-3">
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3 text-studio-text-dim">
         <SmartSelect
           value={app.composerMode}
-          options={[...COMPOSER_MODES]}
+          options={COMPOSER_MODES.map((m) => ({
+            value: m.value,
+            label: t(m.labelKey),
+            description: t(m.descriptionKey),
+          }))}
           ariaLabel="Composer mode"
           title="Shift+Tab: cycle composer mode"
           class="min-w-0 w-auto [&>button]:min-h-7 [&>button]:w-auto [&>button]:rounded-lg [&>button]:border-studio-purple/30 [&>button]:bg-studio-purple/15 [&>button]:px-2.5 [&>button]:py-1 [&>button]:text-[11px] [&>button]:text-studio-lavender-muted"
-          disabled={app.busy}
           onChange={(value) => void changeComposerMode(value)}
         />
         <button
@@ -1803,14 +2536,7 @@
           aria-label="Attach files"
           onclick={() => void attachFiles()}
         >
-          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-            ></path>
-          </svg>
+          <Icon name="paperclip" size={20} />
         </button>
         {#if app.attachments.length}
           <span
@@ -1820,21 +2546,20 @@
             {app.attachments.length} file{app.attachments.length === 1 ? '' : 's'} · ~{attachmentTokens().toLocaleString()} tok
           </span>
         {/if}
+        {#if app.busy && liveElapsed}
+          <span class="tabular-nums text-[10px] text-studio-gold/75" title="Elapsed this turn">{liveElapsed}</span>
+        {/if}
       </div>
       <button
         type="button"
         class="flex items-center gap-1.5 rounded-md bg-studio-gold px-3 py-1.5 text-[12px] font-semibold text-studio-dark hover:brightness-105 disabled:opacity-40 {app.busy
           ? 'studio-signal'
           : ''}"
-        onclick={onSend}
-        disabled={!app.activeProject || app.busy}
+        onclick={() => (app.busy ? void stopAgentTurn() : void onSend())}
+        disabled={!app.activeProject || (!app.busy && !app.composer.trim() && !app.attachments.length)}
       >
-        {app.busy ? 'Running…' : 'Send'}
-        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-          <path
-            d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z"
-          ></path>
-        </svg>
+        {app.busy ? 'Stop' : app.promptQueue.length ? 'Queue' : 'Send'}
+        <Icon name={app.busy ? 'stop' : 'send'} size={14} />
       </button>
     </div>
     {#if activeMention && (mentionResults.length > 0 || mentionLoading)}
@@ -1907,7 +2632,7 @@
               type="button"
               class="px-0.5 text-sm text-studio-text-dim hover:text-studio-text"
               aria-label="Close attachment preview"
-              onclick={() => (attachmentPreviewId = null)}>×</button
+              onclick={() => (attachmentPreviewId = null)}><Icon name="close" size={12} /></button
             >
           </header>
           {#if preview.error}
@@ -1930,17 +2655,17 @@
 <ConfirmDialog
   open={checkpointConfirm != null}
   title={checkpointConfirm?.kind === 'retry'
-    ? 'Retry turn?'
+    ? t('agent.checkpoint.retryTitle')
     : checkpointConfirm?.path
-      ? `Revert ${checkpointConfirm.path}?`
-      : 'Revert turn?'}
+      ? t('agent.checkpoint.revertFile', { path: checkpointConfirm.path })
+      : t('agent.checkpoint.revertTurn')}
   message={checkpointConfirm?.kind === 'retry'
-    ? 'Revert turn lalu jalankan ulang prompt?'
+    ? t('agent.checkpoint.revertRetry')
     : checkpointConfirm?.path
-      ? 'File dikembalikan ke state sebelum turn.'
-      : 'Semua file dari turn ini akan di-revert.'}
-  cancelLabel="Batal"
-  confirmLabel={checkpointConfirm?.kind === 'retry' ? 'Retry' : 'Revert'}
+      ? t('agent.checkpoint.revertFileMsg')
+      : t('agent.checkpoint.revertTurnMsg')}
+  cancelLabel={t('common.cancel')}
+  confirmLabel={checkpointConfirm?.kind === 'retry' ? t('common.retry') : t('agent.checkpoint.revert')}
   danger
   onCancel={() => (checkpointConfirm = null)}
   onConfirm={() => void confirmCheckpointAction()}
@@ -1955,14 +2680,6 @@
   onClose={closeVendorConfig}
 >
   <div class="flex flex-col gap-3">
-    <TextInput label="Base URL" bind:value={vendorConfig.baseUrl} placeholder="https://…" autocomplete="off" />
-    <TextInput
-      label="API key"
-      type="password"
-      bind:value={vendorConfig.apiKey}
-      placeholder={app.provider?.hasKey ? 'Leave blank to use Settings key' : 'sk-…'}
-      autocomplete="off"
-    />
     <SmartSelect
       label="Model"
       bind:value={vendorConfig.model}
@@ -1972,7 +2689,7 @@
   </div>
   {#snippet footer()}
     <div class="flex justify-end gap-2">
-      <Button variant="ghost" size="sm" onclick={closeVendorConfig}>Cancel</Button>
+      <Button variant="ghost" size="sm" onclick={closeVendorConfig}>{t('common.cancel')}</Button>
       <Button variant="primary" size="sm" loading={vendorBusy} onclick={() => void confirmVendorConfig()}>Launch</Button>
     </div>
   {/snippet}

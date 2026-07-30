@@ -197,15 +197,20 @@ export function taskUpdate(
     note?: string
     progress?: number
     addBlockedBy?: string[]
+    /** Remove specific blocking task ids (handoff unblock). */
+    removeBlockedBy?: string[]
+    /** Drop all blockers. */
+    clearBlockedBy?: boolean
     activeForm?: string
   },
-): { ok: true; task: BoardTask; content: string } | { ok: false; content: string } {
+): { ok: true; task: BoardTask; content: string; unblocked?: string[] } | { ok: false; content: string } {
   const id = (input.taskId ?? input.id ?? '').trim()
   if (!id) return { ok: false, content: 'task_update requires taskId' }
   const board = ensureBoard(projectRoot)
   const idx = board.tasks.findIndex((t) => t.id === id)
   if (idx < 0) return { ok: false, content: `No task found with ID: ${id}` }
-  const task = { ...board.tasks[idx] }
+  const prev = board.tasks[idx]!
+  const task = { ...prev }
   if (input.title != null || input.subject != null) {
     const title = (input.title ?? input.subject ?? '').trim().slice(0, MAX_TITLE)
     if (title) task.title = title
@@ -235,16 +240,46 @@ export function taskUpdate(
       ...new Set([...task.blockedBy, ...input.addBlockedBy.map(String).filter(Boolean)]),
     ].slice(0, 20)
   }
+  if (Array.isArray(input.removeBlockedBy) && input.removeBlockedBy.length) {
+    const drop = new Set(input.removeBlockedBy.map(String).filter(Boolean))
+    task.blockedBy = task.blockedBy.filter((bid) => !drop.has(bid))
+  }
+  if (input.clearBlockedBy === true) {
+    task.blockedBy = []
+  }
   if (input.activeForm != null) {
     task.activeForm = String(input.activeForm).trim().slice(0, 120) || undefined
   }
   task.updatedAt = now()
   board.tasks[idx] = task
+
+  // Terminal status → drop this id from every other task's blockedBy (soft handoff).
+  const becameTerminal =
+    (task.status === 'completed' || task.status === 'cancelled') &&
+    prev.status !== task.status
+  const unblocked: string[] = []
+  if (becameTerminal) {
+    const ts = now()
+    for (let i = 0; i < board.tasks.length; i++) {
+      if (i === idx) continue
+      const other = board.tasks[i]!
+      if (!other.blockedBy.includes(id)) continue
+      const nextBlocked = other.blockedBy.filter((bid) => bid !== id)
+      board.tasks[i] = { ...other, blockedBy: nextBlocked, updatedAt: ts }
+      unblocked.push(other.id)
+    }
+  }
+
   saveBoard(projectRoot, board)
+  const extra =
+    unblocked.length > 0
+      ? `\nAuto-unblocked ${unblocked.length} task(s): ${unblocked.map((u) => `#${u}`).join(', ')}`
+      : ''
   return {
     ok: true,
     task,
-    content: `Updated ${formatTask(task)}\n\n${taskListBody(board)}`,
+    unblocked: unblocked.length ? unblocked : undefined,
+    content: `Updated ${formatTask(task)}${extra}\n\n${taskListBody(board)}`,
   }
 }
 
@@ -252,7 +287,7 @@ export function taskUpdate(
 export function taskStop(
   projectRoot: string,
   taskId: string,
-): { ok: true; task: BoardTask; content: string } | { ok: false; content: string } {
+): { ok: true; task: BoardTask; content: string; unblocked?: string[] } | { ok: false; content: string } {
   return taskUpdate(projectRoot, { taskId, status: 'cancelled', note: 'stopped' })
 }
 

@@ -122,20 +122,28 @@ Shipped early (beyond original Later list; still personal-scale):
 
 ### v1 agent surface (from `reference/` — see `docs/progress.md`)
 
-Target = OpenHarness-class **tool surface** on enpii’s own contract, not a CLI clone:
+Target = OpenHarness-class **tool surface** on enpii’s own contract, not a CLI clone.
+
+**Product ceiling (2026-07-29):** solo **team-for-one through target C** — one human lead + harness that covers plan/delegate/track/verify/unattended. Not multi-tenant; not ClawTeam multi-CLI org (target D = out of scope).
+
+| Target | Outcome |
+|---|---|
+| **A Tim terasa** | Board + mailbox UI; post–plan-approve workspace autopilot; sub status; role presets |
+| **B Tim kuat** | Limited async subs; apply/discard worktree from sub results |
+| **C Tim autonom** | Cron UI + fire/notify/resume/budget *(ceiling)* |
 
 | Priority | Capability | Primary reference |
 |---|---|---|
 | P0 | `web_fetch` + `web_search` | OpenHarness web tools |
-| P1 | In-loop task board (`task_*`) | OpenHarness task tools |
-| P1 | In-loop sub-agent + messaging | OH `agent` / ClawTeam spawn |
-| P2 | Formal plan mode + ask-user | OH plan + ask_user |
+| P1 | In-loop task board (`task_*`) + **operator UI** | OpenHarness task tools |
+| P1 | In-loop sub-agent + messaging + **visible status** | OH `agent` / ClawTeam isolation (not spawn fleet) |
+| P2 | Formal plan mode + ask-user + durable plan approve | OH plan + ask_user |
 | P2 | Parallel read-only tool exec | OH engine parallel tools |
 | P2 | MCP resources (+ OAuth if needed) | OH MCP resources/auth |
-| P3 | Schedule / cron durable fires | OH cron + loop-engineering automations |
-| P3 | Swarm mailbox / templates | ClawTeam team layer |
+| P3 | Schedule / cron durable fires + **UI** (target C) | OH cron + loop-engineering |
+| P3 | Mailbox visible (not full swarm org) | ClawTeam mailbox pattern |
 
-Non-goals remain: marketplace, multi-tenant, mobile, full Warp redesign.
+Non-goals remain: marketplace, multi-tenant, mobile, full Warp redesign, ClawTeam multi-CLI team protocol.
 
 ---
 
@@ -154,7 +162,7 @@ Non-goals remain: marketplace, multi-tenant, mobile, full Warp redesign.
 | **M8** Loop ops | plan/ask polish, parallel tools, cron optional | Unattended-friendly loops without leaving local-first model |
 
 v0 product = **M5 complete** (2026-07).  
-v1 agent = **M6–M8** guided by `reference/OpenHarness`, `reference/ClawTeam`, `reference/loop-engineering`.
+v1 agent = **M6–M8** guided by `reference/` **and** product targets **A→B→C** (see `docs/progress.md` north star). Ceiling = **C**; not D.
 
 ---
 
@@ -253,7 +261,7 @@ Assumptions:
 Constraints:
 - Stack locked: **Electron** + **Svelte + Vite** UI + TypeScript agent-core + **stdio JSON-RPC**  
 - License of borrowed code (e.g. MIT patterns from OpenHarness) must be respected if copied  
-- v0 English UI strings OK; i18n later  
+- Desktop UI: EN + ID via `apps/desktop/src/lib/i18n` (locale in UiPrefs)  
 
 ---
 

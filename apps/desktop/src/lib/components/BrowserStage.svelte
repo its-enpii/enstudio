@@ -3,7 +3,9 @@
   import { state as app } from '../store.svelte'
   import { color } from '../theme'
   import type { BrowserDownload } from '../../../electron/preload'
+  import { t } from '../i18n/index.svelte'
   import { ConfirmDialog, Dropdown } from './ui'
+  import { Icon } from '../icons'
 
   type BrowserElement = HTMLElement & {
     canGoBack: () => boolean
@@ -141,7 +143,7 @@
     if (!raw) return ''
     const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`
     const url = new URL(candidate)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Browser hanya mendukung URL http/https')
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(t('browser.httpOnly'))
     return url.toString()
   }
 
@@ -509,16 +511,16 @@
           <span class="size-1.5 rounded-lg {tab.loading ? 'animate-pulse bg-studio-gold' : 'bg-studio-success'}"></span>
           <span class="max-w-[140px] truncate">{tab.title}</span>
         </button>
-        <button type="button" class="mx-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label={`Close ${tab.title}`} onclick={() => closeTab(tab.id)}>×</button>
+        <button type="button" class="mx-1 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label={`Close ${tab.title}`} onclick={() => closeTab(tab.id)}><Icon name="close" size={12} /></button>
       </div>
     {/each}
-    <button type="button" class="ml-1.5 rounded px-1.5 py-1 text-base text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label="New browser tab" onclick={addTab}>+</button>
+    <button type="button" class="ml-1.5 grid size-7 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label="New browser tab" onclick={addTab}><Icon name="plus" size={14} /></button>
   </div>
 
   <div class="flex items-center gap-1 border-b border-border-subtle bg-studio-panel/80 px-2 py-1">
-    <button type="button" class={toolBtn} title="Back" aria-label="Back" disabled={!activeTab?.canBack} onclick={goBack}>‹</button>
-    <button type="button" class={toolBtn} title="Forward" aria-label="Forward" disabled={!activeTab?.canForward} onclick={goForward}>›</button>
-    <button type="button" class={toolBtn} title="Reload" aria-label="Reload" onclick={reload}>{loading ? '×' : '↻'}</button>
+    <button type="button" class={toolBtn} title="Back" aria-label="Back" disabled={!activeTab?.canBack} onclick={goBack}><Icon name="arrow-left" size={14} /></button>
+    <button type="button" class={toolBtn} title="Forward" aria-label="Forward" disabled={!activeTab?.canForward} onclick={goForward}><Icon name="arrow-right" size={14} /></button>
+    <button type="button" class={toolBtn} title="Reload" aria-label="Reload" onclick={reload}><Icon name={loading ? 'close' : 'reload'} size={14} /></button>
     <form
       class="mx-1 flex min-w-0 flex-1 items-center rounded-full border border-border-subtle bg-studio-dark px-3 py-1 focus-within:border-studio-purple/45"
       onsubmit={(e) => {
@@ -536,7 +538,7 @@
         spellcheck={false}
       />
     </form>
-    <button type="button" class="{toolBtn} {activeBookmark ? toolBtnActive : ''}" title={activeBookmark ? 'Remove bookmark' : 'Bookmark'} aria-label={activeBookmark ? 'Remove bookmark' : 'Bookmark'} disabled={!activeTab?.url} onclick={toggleBookmark}>{activeBookmark ? '★' : '☆'}</button>
+    <button type="button" class="{toolBtn} {activeBookmark ? toolBtnActive : ''}" title={activeBookmark ? 'Remove bookmark' : 'Bookmark'} aria-label={activeBookmark ? 'Remove bookmark' : 'Bookmark'} disabled={!activeTab?.url} onclick={toggleBookmark}><Icon name={activeBookmark ? 'star-fill' : 'star-outline'} size={14} /></button>
     <Dropdown
       items={[
         { id: 'bookmarks', label: 'Bookmarks' },
@@ -588,14 +590,14 @@
             e.stopPropagation()
             toggle()
           }}
-        >⋮</button>
+        ><Icon name="more-vertical" size={14} /></button>
       {/snippet}
     </Dropdown>
     {#if findOpen}
       <div class="flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-1.5 py-0.5">
         <input class="w-28 bg-transparent px-1 text-xs text-studio-text outline-none" bind:this={findInput} bind:value={findQuery} aria-label="Find in page" placeholder="Find" oninput={searchPage} onkeydown={(event) => event.key === 'Escape' && closeFind()} />
         <span class="text-[10px] text-studio-text-dim">{findMatches ? `${findActive}/${findMatches}` : '—'}</span>
-        <button type="button" class="px-1 text-studio-text-dim hover:text-studio-text" aria-label="Close find" onclick={closeFind}>×</button>
+        <button type="button" class="grid size-6 place-items-center text-studio-text-dim hover:text-studio-text" aria-label="Close find" onclick={closeFind}><Icon name="close" size={12} /></button>
       </div>
     {/if}
   </div>
@@ -615,7 +617,7 @@
                 <span class="block truncate text-[10px] text-studio-text-dim">{bookmark.url}</span>
               </button>
               <button type="button" class="shrink-0 px-1 text-[10px] text-studio-text-dim hover:text-studio-text" aria-label={`Rename ${bookmark.title}`} onclick={() => startBookmarkRename(bookmark)}>Rename</button>
-              <button type="button" class="shrink-0 px-1 text-[11px] text-danger" aria-label={`Remove ${bookmark.title}`} onclick={() => removeBookmark(bookmark.id)}>×</button>
+              <button type="button" class="grid size-6 shrink-0 place-items-center text-danger" aria-label={`Remove ${bookmark.title}`} onclick={() => removeBookmark(bookmark.id)}><Icon name="close" size={11} /></button>
             {/if}
           </div>
         {:else}
@@ -715,10 +717,10 @@
 
 <ConfirmDialog
   open={clearHistoryOpen}
-  title="Clear browser history?"
-  message="Semua riwayat browser project ini akan dihapus."
-  cancelLabel="Batal"
-  confirmLabel="Clear"
+  title={t('browser.clearHistoryTitle')}
+  message={t('browser.clearHistoryMsg')}
+  cancelLabel={t('browser.cancel')}
+  confirmLabel={t('browser.clearHistoryConfirm')}
   danger
   onCancel={() => (clearHistoryOpen = false)}
   onConfirm={clearHistory}

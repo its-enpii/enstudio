@@ -1,16 +1,18 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
   import { onDestroy, onMount } from 'svelte'
-  import { EditorState } from '@codemirror/state'
+  import { Compartment, EditorState } from '@codemirror/state'
   import { HighlightStyle, StreamLanguage, syntaxHighlighting, type StringStream } from '@codemirror/language'
   import { tags } from '@lezer/highlight'
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
   import { openSearchPanel, search, searchKeymap } from '@codemirror/search'
   import { EditorView, drawSelection, keymap, lineNumbers } from '@codemirror/view'
-  import { state as app } from '../store.svelte'
+  import { state as app, fontStack, EDITOR_FONT_SIZE } from '../store.svelte'
   import { createProjectEntry, editProjectFileExact, formatProjectFile, getProjectDiagnostics, listProjectDir, readProjectFile, searchProjectFiles, type ProjectDiagnostic } from '../enpii'
   import { color } from '../theme'
+  import { t } from '../i18n/index.svelte'
   import { ConfirmDialog } from './ui'
+  import { Icon } from '../icons'
 
   type Entry = { kind: 'd' | 'f'; name: string; path: string; depth: number }
   type CodeTab = { path: string; content: string; originalContent: string; preview?: boolean }
@@ -167,22 +169,38 @@
     return []
   }
 
-  const enpiiEditorTheme = EditorView.theme({
-    '&': {
-      backgroundColor: 'transparent',
-      color: color.text,
-      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-      fontSize: '13px',
-      lineHeight: '1.55',
-    },
-    '&.cm-focused': { outline: 'none' },
-    '.cm-content': { caretColor: color.gold, padding: '8px 12px 8px 4px' },
-    '.cm-cursor, .cm-dropCursor': { borderLeftColor: color.gold, borderLeftWidth: '2px' },
-    '.cm-activeLine': { backgroundColor: 'transparent' },
-    '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(86, 132, 255, 0.38)' },
-    '.cm-gutters': { backgroundColor: 'transparent', borderRight: '1px solid rgba(255, 255, 255, 0.06)', color: 'rgba(255, 255, 255, 0.32)', paddingLeft: '4px' },
-    '.cm-lineNumbers .cm-gutterElement': { minWidth: '32px', padding: '0 8px 0 4px', textAlign: 'right', fontSize: '12px' },
-  }, { dark: true })
+  const themeCompartment = new Compartment()
+
+  function buildEditorTheme(fontFamily: string) {
+    return EditorView.theme({
+      '&': {
+        backgroundColor: 'transparent',
+        color: color.text,
+        fontFamily,
+        fontSize: `${EDITOR_FONT_SIZE}px`,
+        lineHeight: '1.55',
+      },
+      '&.cm-focused': { outline: 'none' },
+      '.cm-content': { caretColor: color.gold, padding: '8px 12px 8px 4px' },
+      '.cm-cursor, .cm-dropCursor': { borderLeftColor: color.gold, borderLeftWidth: '2px' },
+      '.cm-activeLine': { backgroundColor: 'transparent' },
+      '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(86, 132, 255, 0.38)' },
+      '.cm-gutters': { backgroundColor: 'transparent', borderRight: '1px solid rgba(255, 255, 255, 0.06)', color: 'rgba(255, 255, 255, 0.32)', paddingLeft: '4px' },
+      '.cm-lineNumbers .cm-gutterElement': {
+        minWidth: '32px',
+        padding: '0 8px 0 4px',
+        textAlign: 'right',
+        fontSize: `${EDITOR_FONT_SIZE - 1}px`,
+      },
+    }, { dark: true })
+  }
+
+  // Family change only — size comes from whole-UI zoom.
+  $effect(() => {
+    const theme = buildEditorTheme(fontStack(app.ui.fontFamily))
+    void app.ui.uiZoom
+    editorView?.dispatch({ effects: themeCompartment.reconfigure(theme) })
+  })
 
   const enpiiHighlightStyle = HighlightStyle.define([
     { tag: tags.comment, color: color.comment, fontStyle: 'italic' },
@@ -348,7 +366,7 @@
           lineNumbers(),
           history(),
           drawSelection(),
-          enpiiEditorTheme,
+          themeCompartment.of(buildEditorTheme(fontStack(app.ui.fontFamily))),
           syntaxHighlighting(enpiiHighlightStyle),
           language,
           search(),
@@ -628,9 +646,9 @@
           </div>
           <details class="relative" bind:this={toolsMenu} bind:open={toolsOpen}>
             <summary
-              class="cursor-pointer list-none rounded-md px-2 py-1 text-studio-text-dim hover:bg-white/5 hover:text-studio-text [&::-webkit-details-marker]:hidden"
+              class="grid size-7 cursor-pointer place-items-center list-none rounded-md text-studio-text-dim hover:bg-white/5 hover:text-studio-text [&::-webkit-details-marker]:hidden"
               title="File actions"
-              aria-label="File actions">•••</summary
+              aria-label="File actions"><Icon name="more-vertical" size={14} /></summary
             >
             <div class="absolute right-0 z-20 mt-1 grid min-w-[140px] gap-0.5 rounded-lg border border-border-subtle bg-studio-card p-1 shadow-xl">
               <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('file') }}>New File</button>
@@ -641,17 +659,19 @@
         <button
           type="button"
           class="mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs {activeDir === '.'
-            ? 'bg-studio-card text-studio-text'
-            : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+            ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
+            : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
           onclick={toggleRoot}
         >
-          <span class="w-3 text-[10px]">{expanded['.'] ? '⌄' : '›'}</span>
-          <span class="text-studio-text-dim">▰</span>
-          <span class="truncate">{app.activeProject.name}</span>
+          <span class="grid w-3 place-items-center text-studio-text-dim"
+            ><Icon name={expanded['.'] ? 'chevron-down' : 'chevron-right'} size={10} /></span
+          >
+          <Icon name="folder" size={12} class="shrink-0 text-studio-text-dim" />
+          <span class="truncate">{app.projectLabel(app.activeProject)}</span>
         </button>
         {#if creating}
           <form class="mb-1 flex items-center gap-1.5 px-2" onsubmit={(event) => { event.preventDefault(); void submitCreate() }}>
-            <span class="text-studio-text-dim">{creating === 'file' ? '◻' : '▰'}</span>
+            <Icon name={creating === 'file' ? 'file' : 'folder'} size={12} class="shrink-0 text-studio-text-dim" />
             <input
               class="min-w-0 flex-1 rounded border border-studio-purple/50 bg-studio-dark px-1.5 py-0.5 text-xs text-studio-text outline-none"
               bind:this={createInput}
@@ -672,11 +692,11 @@
               <button
                 type="button"
                 class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs {selectedPath === file
-                  ? 'bg-studio-card text-studio-text'
-                  : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+                  ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
+                  : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
                 onclick={() => void revealPath(file)}
               >
-                <span>◻</span><span class="truncate">{file}</span>
+                <Icon name="file" size={12} class="shrink-0" /><span class="truncate">{file}</span>
               </button>
             {/each}
           {/if}
@@ -688,15 +708,19 @@
             <button
               type="button"
               class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-xs {selectedPath === entry.path || activeDir === entry.path
-                ? 'bg-studio-card text-studio-text'
-                : 'text-studio-text-dim hover:bg-studio-card hover:text-studio-text'}"
+                ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
+                : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
               style={`padding-left:${10 + entry.depth * 16}px`}
               onclick={() => void openEntry(entry)}
               ondblclick={() => void pinEntry(entry)}
               title={entry.kind === 'f' ? 'Click preview · double-click pin' : undefined}
             >
-              <span class="w-3 text-[10px]">{entry.kind === 'd' ? (expanded[entry.path] ? '⌄' : '›') : ''}</span>
-              <span>{entry.kind === 'd' ? '▰' : '◻'}</span>
+              <span class="grid w-3 place-items-center text-studio-text-dim">
+                {#if entry.kind === 'd'}
+                  <Icon name={expanded[entry.path] ? 'chevron-down' : 'chevron-right'} size={10} />
+                {/if}
+              </span>
+              <Icon name={entry.kind === 'd' ? 'folder' : 'file'} size={12} class="shrink-0" />
               <span class="min-w-0 truncate">{entry.name}</span>
               {#if loadingDirs[entry.path]}<span class="ml-auto text-studio-text-dim">···</span>{/if}
             </button>
@@ -737,9 +761,9 @@
                 </button>
                 <button
                   type="button"
-                  class="mr-1.5 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+                  class="mr-1.5 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
                   aria-label={`Close ${tab.path}`}
-                  onclick={() => requestCloseTab(tab.path)}>×</button
+                  onclick={() => requestCloseTab(tab.path)}><Icon name="close" size={12} /></button
                 >
               </div>
             {/each}
@@ -783,7 +807,7 @@
               </header>
               <div class="max-h-36 overflow-auto p-4">
                 {#if dirty}
-                  <div class="pb-2 text-[10px] text-studio-gold">File belum disimpan. Badge diperbarui otomatis setelah save.</div>
+                  <div class="pb-2 text-[10px] text-studio-gold">{t('code.unsavedBadge')}</div>
                 {/if}
                 {#if diagnosticsLoaded && diagnostics.length === 0}
                   <div class="py-4 text-center text-xs text-studio-text-dim">No problems found.</div>
@@ -833,10 +857,10 @@
 
 <ConfirmDialog
   open={pendingClosePath != null}
-  title="File belum disimpan"
-  message={pendingClosePath ? `Tutup ${pendingClosePath} tanpa menyimpan perubahan?` : ''}
-  cancelLabel="Batal"
-  confirmLabel="Tutup tanpa simpan"
+  title={t('code.unsavedTitle')}
+  message={pendingClosePath ? t('code.unsavedMessage', { path: pendingClosePath }) : ''}
+  cancelLabel={t('code.cancel')}
+  confirmLabel={t('code.closeNoSave')}
   danger
   onCancel={() => resolveClose(false)}
   onConfirm={() => resolveClose(true)}

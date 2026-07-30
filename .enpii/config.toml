@@ -3,3 +3,13 @@
 # dialect = "openai"
 # permissionMode = "ask"
 # denyGlobs = [".env", "**/*secret*"]
+
+# Skip approval when a rule matches (union with user ~/.enpiistudio config).
+# Aliases: PowerShell/Bash → run_shell, WebFetch → web_fetch, WebSearch → web_search.
+# [permissions]
+# allow = [
+#   "run_shell(npm *)",
+#   "run_shell(git *)",
+#   "web_fetch(domain:github.com)",
+#   "web_search",
+# ]

@@ -210,7 +210,12 @@ export class SessionStore {
   /** Add provider usage into session totals and persist. */
   addUsage(
     sessionId: string,
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number },
+    usage?: {
+      prompt_tokens?: number
+      completion_tokens?: number
+      total_tokens?: number
+      cached_tokens?: number
+    },
   ): SessionMeta['usage'] | undefined {
     if (!usage) return this.sessions.get(sessionId)?.usage
     const s = this.sessions.get(sessionId) ?? this.get(sessionId)
@@ -219,14 +224,24 @@ export class SessionStore {
       prompt: usage.prompt_tokens ?? 0,
       completion: usage.completion_tokens ?? 0,
       total: usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+      cached: usage.cached_tokens ?? 0,
     }
+    const cachedSum = s.usage
+      ? (s.usage.cached ?? 0) + add.cached
+      : add.cached
     s.usage = s.usage
       ? {
           prompt: s.usage.prompt + add.prompt,
           completion: s.usage.completion + add.completion,
           total: s.usage.total + add.total,
+          cached: cachedSum > 0 ? cachedSum : undefined,
         }
-      : add
+      : {
+          prompt: add.prompt,
+          completion: add.completion,
+          total: add.total,
+          cached: add.cached > 0 ? add.cached : undefined,
+        }
     s.updatedAt = new Date().toISOString()
     this.sessions.set(sessionId, s)
     this.persist(sessionId)

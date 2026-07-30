@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { Icon } from '../../icons'
+  import { layoutRect, layoutViewport } from '../../domZoom'
+
   export type SelectOption = {
     value: string
     label: string
@@ -62,9 +65,9 @@
 
   function placeMenu(): void {
     if (!triggerEl) return
-    const r = triggerEl.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    // CSS zoom on <html> → convert visual rect to layout coords for position:fixed.
+    const r = layoutRect(triggerEl)
+    const { width: vw, height: vh } = layoutViewport()
     const gap = 4
     const searchH = showSearch ? 40 : 0
     const estH = Math.min(320, filtered.length * 44 + 8 + searchH)
@@ -196,24 +199,11 @@
     <span class="truncate {selected ? '' : 'text-studio-text-dim/55'}">
       {selected?.label ?? placeholder}
     </span>
-    <svg
-      class="size-3.5 shrink-0 text-studio-text-dim transition-transform duration-150 {open
-        ? 'rotate-180'
-        : ''}"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M6 9l6 6 6-6"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
+    <Icon
+      name="chevron-down"
+      size={14}
+      class="shrink-0 text-studio-text-dim transition-transform duration-150 {open ? 'rotate-180' : ''}"
+    />
   </button>
 
   {#if open}

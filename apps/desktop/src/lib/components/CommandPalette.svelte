@@ -6,6 +6,7 @@
     MODES,
     type KeybindingAction,
   } from '../store.svelte'
+  import { t } from '../i18n/index.svelte'
 
   type Action = { id: string; label: string; binding?: KeybindingAction; run: () => void }
   let open = $state(false)
@@ -13,16 +14,16 @@
   let active = $state(0)
   let input = $state<HTMLInputElement>()
 
-  const actions: Action[] = [
+  const actions = $derived.by((): Action[] => [
     ...MODES.map((m) => ({
       id: `mode.${m.id}`,
-      label: m.openLabel,
+      label: t(m.openKey),
       binding: `mode.${m.id}` as KeybindingAction,
       run: () => app.setMode(m.id),
     })),
     {
       id: 'settings',
-      label: 'Open Settings',
+      label: t('palette.settings'),
       binding: 'settings' as KeybindingAction,
       run: () => {
         app.settingsOpen = true
@@ -30,38 +31,38 @@
     },
     {
       id: 'notifications',
-      label: 'Open Notifications',
+      label: t('palette.notifications'),
       binding: 'notifications' as KeybindingAction,
       run: () => app.toggleNotifications(),
     },
     {
       id: 'export',
-      label: 'Export Transcript (Markdown)',
+      label: t('palette.export'),
       run: () => {
         void import('../enpii').then((m) => m.exportSessionMarkdown()).catch((err) => {
-          app.notify('error', 'Export failed', err instanceof Error ? err.message : String(err))
+          app.notify('error', t('palette.exportFailed'), err instanceof Error ? err.message : String(err))
         })
       },
     },
     {
       id: 'compact',
-      label: 'Compact Session Context',
+      label: t('palette.compact'),
       run: () => {
         void import('../enpii').then((m) => m.compactSession()).catch((err) => {
-          app.notify('error', 'Compact failed', err instanceof Error ? err.message : String(err))
+          app.notify('error', t('palette.compactFailed'), err instanceof Error ? err.message : String(err))
         })
       },
     },
     {
       id: 'undo-compact',
-      label: 'Undo Last Compact',
+      label: t('palette.undoCompact'),
       run: () => {
         void import('../enpii').then((m) => m.undoCompactSession()).catch((err) => {
-          app.notify('error', 'Undo compact failed', err instanceof Error ? err.message : String(err))
+          app.notify('error', t('palette.undoCompactFailed'), err instanceof Error ? err.message : String(err))
         })
       },
     },
-  ]
+  ])
 
   const filtered = $derived(
     actions.filter((action) => action.label.toLowerCase().includes(query.trim().toLowerCase())),
@@ -101,6 +102,16 @@
       return
     }
     if (!open) {
+      if (matchesKeybinding(event, app.keybindings['font.larger'])) {
+        event.preventDefault()
+        app.bumpUiZoom(1)
+        return
+      }
+      if (matchesKeybinding(event, app.keybindings['font.smaller'])) {
+        event.preventDefault()
+        app.bumpUiZoom(-1)
+        return
+      }
       if (isTypingTarget(event)) return
       const action = actions.find((item) => item.binding && matchesKeybinding(event, app.keybindings[item.binding]))
       if (action) {
@@ -157,18 +168,18 @@
       class="studio-glass w-full max-w-lg overflow-hidden rounded-2xl bg-studio-panel/95"
       role="dialog"
       aria-modal="true"
-      aria-label="Command Palette"
+      aria-label={t('action.palette')}
     >
       <input
         class="w-full border-b border-border-subtle bg-transparent px-4 py-3 text-sm text-studio-text outline-none placeholder:text-studio-text-dim"
         bind:this={input}
         bind:value={query}
-        placeholder="Search commands…"
-        aria-label="Search commands"
+        placeholder={t('palette.placeholder')}
+        aria-label={t('palette.placeholder')}
       />
       <div class="max-h-72 overflow-y-auto p-4">
         {#if filtered.length === 0}
-          <div class="p-4 text-center text-xs text-studio-text-dim">No matching command.</div>
+          <div class="p-4 text-center text-xs text-studio-text-dim">{t('palette.empty')}</div>
         {/if}
         {#each filtered as action, index (action.id)}
           <button
@@ -180,14 +191,16 @@
             onmouseenter={() => (active = index)}
           >
             <span>{action.label}</span>
-            <small class="font-mono text-[10px] text-studio-text-dim">{app.keybindings[action.id]}</small>
+            {#if action.binding}
+              <small class="font-mono text-[10px] text-studio-text-dim">{app.keybindings[action.binding]}</small>
+            {/if}
           </button>
         {/each}
       </div>
       <footer
         class="flex gap-4 border-t border-border-subtle p-4 text-[10px] text-studio-text-dim"
       >
-        <span>↑↓ Navigate</span><span>Enter Run</span><span>Esc Close</span>
+        <span>↑↓ {t('palette.nav')}</span><span>Enter {t('palette.run')}</span><span>Esc {t('palette.esc')}</span>
       </footer>
     </div>
   </div>

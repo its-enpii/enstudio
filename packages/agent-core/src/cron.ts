@@ -24,6 +24,40 @@ export type CronJob = {
   runCount: number
   lastError?: string
   lastSessionId?: string
+  /** Consecutive failures; auto-disable at FAIL_STREAK_DISABLE. */
+  failStreak?: number
+}
+
+/** Overnight safety: disable job after this many consecutive failures. */
+export const FAIL_STREAK_DISABLE = 3
+/** Cap fires across all projects in a rolling hour (sidecar process). */
+export const MAX_FIRES_PER_HOUR = 12
+/** Default max runtime for a cron agent_turn (ms). */
+export const CRON_MAX_RUNTIME_MS = 10 * 60_000
+
+/** In-memory fire timestamps for hourly budget (process lifetime). */
+const recentFires: number[] = []
+
+export function cronFiresInLastHour(now = Date.now()): number {
+  const cut = now - 60 * 60_000
+  while (recentFires.length && recentFires[0]! < cut) recentFires.shift()
+  return recentFires.length
+}
+
+export function recordCronFire(now = Date.now()): void {
+  recentFires.push(now)
+  cronFiresInLastHour(now)
+}
+
+export function canFireCron(now = Date.now()): { ok: true } | { ok: false; reason: string } {
+  const n = cronFiresInLastHour(now)
+  if (n >= MAX_FIRES_PER_HOUR) {
+    return {
+      ok: false,
+      reason: `hourly cron budget hit (${MAX_FIRES_PER_HOUR}/h) — wait or disable jobs`,
+    }
+  }
+  return { ok: true }
 }
 
 type CronFile = {
@@ -282,26 +316,39 @@ export type DueCronJob = {
   job: CronJob
 }
 
-/** Mark job just fired; advance nextRunAt past this minute. */
+/** Mark job just fired; advance nextRunAt past this minute. Auto-disable on fail streak. */
 export function cronMarkRan(
   projectRoot: string,
   jobId: string,
   result: { ok: boolean; sessionId?: string; error?: string },
-): void {
+): { disabled?: boolean } {
   const data = ensureFile(projectRoot)
   const job = data.jobs.find((j) => j.id === jobId)
-  if (!job) return
+  if (!job) return {}
   const ts = nowIso()
   job.lastRunAt = ts
   job.runCount += 1
   job.updatedAt = ts
   job.lastSessionId = result.sessionId
-  job.lastError = result.ok ? undefined : (result.error ?? 'failed').slice(0, 500)
+  let disabled = false
+  if (result.ok) {
+    job.lastError = undefined
+    job.failStreak = 0
+  } else {
+    job.lastError = (result.error ?? 'failed').slice(0, 500)
+    job.failStreak = (job.failStreak ?? 0) + 1
+    if (job.failStreak >= FAIL_STREAK_DISABLE && job.enabled) {
+      job.enabled = false
+      disabled = true
+      job.lastError = `${job.lastError} · auto-disabled after ${job.failStreak} failures`
+    }
+  }
   // skip current minute so we don't double-fire in same tick window
   const after = new Date()
   after.setSeconds(0, 0)
   job.nextRunAt = job.enabled ? nextCronFire(job.schedule, after)?.toISOString() : undefined
   saveFile(projectRoot, data)
+  return { disabled }
 }
 
 /** Scan known project cron files under ENPII_HOME/projects/<hash>/cron.json */
@@ -327,6 +374,8 @@ export function collectDueCronJobs(at: Date = new Date()): DueCronJob[] {
   const due: DueCronJob[] = []
   const minute = new Date(at.getTime())
   minute.setSeconds(0, 0)
+  const budget = canFireCron(minute.getTime())
+  // Still refresh nextRunAt even if budget blocked — just don't enqueue fires.
   for (const projectRoot of listAllCronProjectRoots()) {
     const data = ensureFile(projectRoot)
     let dirty = false
@@ -347,7 +396,7 @@ export function collectDueCronJobs(at: Date = new Date()): DueCronJob[] {
         }
       }
       if (cronMatches(job.schedule, minute)) {
-        due.push({ projectRoot, job: { ...job } })
+        if (budget.ok) due.push({ projectRoot, job: { ...job } })
       } else if (!job.nextRunAt) {
         job.nextRunAt = nextCronFire(job.schedule, minute)?.toISOString()
         dirty = true
@@ -355,7 +404,12 @@ export function collectDueCronJobs(at: Date = new Date()): DueCronJob[] {
     }
     if (dirty) saveFile(projectRoot, data)
   }
-  return due
+  // Respect remaining hourly slots (due may exceed budget if many match same minute).
+  if (budget.ok) {
+    const room = Math.max(0, MAX_FIRES_PER_HOUR - cronFiresInLastHour(minute.getTime()))
+    return due.slice(0, room)
+  }
+  return []
 }
 
 export type CronFireHandler = (due: DueCronJob) => Promise<void>
