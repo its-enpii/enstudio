@@ -3,7 +3,7 @@
   import { t } from '../i18n/index.svelte'
   import { hydrateProjectSession } from '../enpii'
   import { Icon } from '../icons'
-  import { Dropdown, type DropdownItem } from './ui'
+  import { Dropdown, TextInput, type DropdownItem } from './ui'
   import logoUrl from '../image/logo.png'
 
   let opening = $state(false)
@@ -225,7 +225,7 @@
 </script>
 
 <aside class="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden bg-transparent">
-  <div class="flex items-center gap-2.5 px-3 pt-3 pb-2">
+  <div class="flex items-center gap-2.5 px-3 py-4">
     <img
       src={logoUrl}
       alt=""
@@ -235,24 +235,17 @@
       draggable="false"
     />
     <div class="min-w-0">
-      <h1 class="m-0 truncate text-[13px] font-semibold tracking-tight text-studio-text">enpii</h1>
-      <p class="m-0 text-[11px] text-studio-text-dim">studio</p>
+      <h1 class="m-0 truncate text-[13px] font-semibold tracking-tight text-studio-text">EnStudio</h1>
     </div>
   </div>
 
   <div class="flex items-center gap-1.5 px-2 pb-2">
-    <div class="relative min-w-0 flex-1">
-      <span class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-studio-text-dim">
-        <Icon name="search" size={12} />
-      </span>
-      <input
-        class="w-full rounded-lg border-0 bg-black/25 py-1.5 pl-8 pr-2 text-[12px] text-studio-text outline-none ring-1 ring-white/8 placeholder:text-studio-text-dim/60 focus:ring-studio-purple/45"
-        type="text"
-        placeholder={t('sidebar.search')}
-        bind:value={filter}
-        aria-label={t('sidebar.searchProjects')}
-      />
-    </div>
+    <TextInput
+      class="min-w-0 flex-1"
+      placeholder={t('sidebar.search')}
+      bind:value={filter}
+      aria-label={t('sidebar.searchProjects')}
+    />
     <button
       type="button"
       class="grid size-[30px] shrink-0 place-items-center rounded-lg bg-black/25 text-studio-text-dim ring-1 ring-white/8 hover:bg-white/8 hover:text-studio-text disabled:opacity-45"
@@ -282,6 +275,7 @@
           <div class="mb-0.5">
             <div
               class="group flex items-center gap-1 rounded-lg px-1.5 py-1 text-studio-text-dim hover:bg-white/[0.04]"
+              role="group"
               ondragover={(e) => {
                 e.preventDefault()
                 if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
@@ -369,7 +363,7 @@
   {@const projectBusy = app.isProjectBusy(project.id)}
   {@const dropping = dropTargetId === project.id && dragId && dragId !== project.id}
   <div
-    class="group relative cursor-pointer rounded-lg py-2 pl-2.5 pr-7 transition-colors {active
+    class="group relative cursor-pointer rounded-lg py-2 pl-2.5 pr-8 transition-colors {active
       ? 'bg-studio-purple/25 ring-1 ring-studio-purple/30'
       : 'hover:bg-white/[0.05]'} {dragId === project.id ? 'opacity-50' : ''} {dropping && dropPlace === 'before'
       ? 'ring-1 ring-inset ring-t-studio-gold/60 shadow-[inset_0_2px_0_0_rgba(234,179,8,0.7)]'
@@ -391,32 +385,32 @@
       }
     }}
   >
-    <div class="flex items-start gap-2">
-      <div class="min-w-0 flex-1">
-        {#if renamingId === project.id}
-          <input
-            class="w-full rounded border border-studio-purple/50 bg-black/30 px-1.5 py-0.5 text-[12px] font-medium text-studio-text outline-none"
-            bind:this={renameInput}
-            bind:value={renameDraft}
-            aria-label={t('sidebar.projectName')}
-            onclick={(e) => e.stopPropagation()}
-            onblur={commitRename}
-            onkeydown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') commitRename()
-              if (e.key === 'Escape') cancelRename()
-            }}
-          />
-        {:else}
-          <div class="flex items-center gap-1.5 truncate text-[12px] font-medium text-studio-text">
-            {#if project.pinned}
-              <Icon name="star-fill" size={10} class="shrink-0 text-studio-gold" />
-            {/if}
-            <span class="truncate">{app.projectLabel(project)}</span>
-          </div>
-        {/if}
-        <div class="truncate font-mono text-[10px] text-studio-text-dim">{project.path}</div>
-      </div>
+    <div class="min-w-0 pr-1">
+      {#if renamingId === project.id}
+        <input
+          class="w-full rounded border border-studio-purple/50 bg-black/30 px-1.5 py-0.5 text-[12px] font-medium text-studio-text outline-none"
+          bind:this={renameInput}
+          bind:value={renameDraft}
+          aria-label={t('sidebar.projectName')}
+          onclick={(e) => e.stopPropagation()}
+          onblur={commitRename}
+          onkeydown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') commitRename()
+            if (e.key === 'Escape') cancelRename()
+          }}
+        />
+      {:else}
+        <div class="flex items-center gap-1.5 truncate text-[12px] font-medium text-studio-text">
+          {#if project.pinned}
+            <Icon name="star-fill" size={10} class="shrink-0 text-studio-gold" />
+          {/if}
+          <span class="truncate">{app.projectLabel(project)}</span>
+        </div>
+      {/if}
+      <div class="truncate font-mono text-[10px] text-studio-text-dim">{project.path}</div>
+    </div>
+    <div class="absolute right-1 top-1.5">
       <Dropdown
         items={projectMenuItems(project)}
         label="Project"
@@ -426,8 +420,8 @@
         {#snippet trigger({ open, toggle })}
           <button
             type="button"
-            class="grid size-5 shrink-0 place-items-center rounded text-studio-text-dim opacity-0 group-hover:opacity-100 hover:bg-white/8 hover:text-studio-text {open
-              ? 'opacity-100 bg-white/8 text-studio-text'
+            class="grid size-6 place-items-center rounded text-studio-text-dim opacity-0 group-hover:opacity-100 hover:bg-white/8 hover:text-studio-text {open
+              ? 'bg-white/8 text-studio-text opacity-100'
               : ''}"
             title={t('sidebar.projectActions')}
             aria-label={t('sidebar.projectActions')}
@@ -445,7 +439,7 @@
     </div>
     {#if projectBusy}
       <span
-        class="studio-signal pointer-events-none absolute right-2 top-1/2 size-1.5 -translate-y-1/2 rounded-full"
+        class="studio-signal pointer-events-none absolute bottom-2 right-2 size-1.5 rounded-full"
         title="Agent running"
       ></span>
     {/if}

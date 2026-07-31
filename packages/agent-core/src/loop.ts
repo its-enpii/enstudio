@@ -3,7 +3,7 @@ import { type ChatContentPart, type ChatMessage, type ToolCall } from './provide
 import { checkpointSnapshot, newCheckpointId } from './checkpoint.js'
 import { repairChatMessages, toolSafeCutIndex } from './chat-repair.js'
 import type { ProviderConfig } from './config.js'
-import { applyGuardrails, resolveGuardrailsConfig, type GuardrailsConfig } from './guardrails.js'
+import { applyGuardrails, resolveGuardrailsConfig } from './guardrails.js'
 import type { RunTask, SessionMeta } from './types.js'
 import { discoverProjectContext, ensureEnpiiDir, projectContextPrompt } from './context.js'
 import { DEFAULT_DENY_GLOBS } from './tools/run.js'
@@ -1529,11 +1529,12 @@ async function execOneTool(opts: {
     result.content = guarded.text
   }
 
-  // Write tools: show unified diff on the tool card (same as approval), not "edited path".
-  const writeDiff =
+  // Write tools: unified diff on tool card (previewWriteTool and/or tool content).
+  const isFileWrite =
     WRITE_TOOL_NAMES.has(name) && name !== 'memory_write' && name !== 'memory_delete' && name !== 'memory_store'
-      ? (mutationPreview?.preview || '').slice(0, 12_000)
-      : ''
+  const writeDiff = isFileWrite
+    ? (mutationPreview?.preview || result.content || '').slice(0, 12_000)
+    : ''
   emit({
     type: 'tool_result',
     sessionId,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "CI/CD DevOps"
+  short_description: "Bangun pipeline delivery yang aman dan dapat diulang"
+  default_prompt: "Gunakan $ci-cd untuk merancang atau memperbaiki pipeline CI/CD, deployment, observability, dan rollback."

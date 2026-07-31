@@ -6,7 +6,30 @@ import {
   type ProviderDialect,
 } from './store.svelte'
 
-let hydrateInFlight: Promise<void> | null = null
+const hydrateInFlight = new Map<string, Promise<void>>()
+
+/** Background Browser UI edit sessions — hidden from Agent session list. */
+const browserUiSessionIds = new Set<string>()
+
+export function isBrowserUiSession(sessionId: string | null | undefined): boolean {
+  return Boolean(sessionId && browserUiSessionIds.has(sessionId))
+}
+
+/** Approvals visible for the current UI surface (Agent chat vs Browser). */
+export function visibleApprovals(): import('./store.svelte').ApprovalRequest[] {
+  const all = state.pendingApprovals
+  if (state.mode === 'browser') {
+    return all.filter((a) => isBrowserUiSession(a.sessionId))
+  }
+  if (state.mode === 'agent') {
+    const sid = state.session?.id
+    if (!sid) return []
+    // Never show Browser UI edit approvals on the Agent chat.
+    return all.filter((a) => a.sessionId === sid && !isBrowserUiSession(a.sessionId))
+  }
+  // Other modes: only non-browser-ui, or all non-hidden
+  return all.filter((a) => !isBrowserUiSession(a.sessionId))
+}
 
 function approvalMutationKind(name: string): 'write' | 'shell' | 'git' | 'mcp' {
   if (name === 'run_shell') return 'shell'
@@ -743,6 +766,25 @@ export async function createProjectEntry(projectRoot: string, dir: string, name:
   })) as { path: string }
 }
 
+export async function renameProjectEntry(
+  projectRoot: string,
+  path: string,
+  newName: string,
+): Promise<{ path: string; from: string }> {
+  return (await window.enpiistudio.enpii.request('project.rename_entry', {
+    projectRoot,
+    path,
+    newName,
+  })) as { path: string; from: string }
+}
+
+export async function deleteProjectEntry(projectRoot: string, path: string): Promise<{ path: string }> {
+  return (await window.enpiistudio.enpii.request('project.delete_entry', {
+    projectRoot,
+    path,
+  })) as { path: string }
+}
+
 export type ProjectDiagnostic = {
   path: string
   line: number
@@ -1008,17 +1050,12 @@ export async function acceptAgentCheckpoint(projectRoot: string, checkpointId: s
 export async function editProjectFileExact(path: string, expectedContent: string, content: string): Promise<void> {
   const sessionId = await ensureSession()
   if (!sessionId) throw new Error('Open a project first')
-  state.busy = true
-  try {
-    await window.enpiistudio.enpii.request('session.edit_file', {
-      sessionId,
-      path,
-      expectedContent,
-      content,
-    })
-  } finally {
-    state.busy = false
-  }
+  await window.enpiistudio.enpii.request('session.edit_file', {
+    sessionId,
+    path,
+    expectedContent,
+    content,
+  })
 }
 
 function mapDiskMessages(
@@ -1094,30 +1131,32 @@ export async function refreshSessionList(): Promise<void> {
       worktree?: boolean
       usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
     }[]
-    const mapped = list.map((s) => ({
-      id: s.id,
-      title: s.title,
-      status: s.status,
-      model: s.model,
-      projectRoot: s.projectRoot,
-      baseProjectRoot: s.baseProjectRoot,
-      worktreeBranch: s.worktreeBranch,
-      messageCount: s.messageCount,
-      sizeBytes: s.sizeBytes,
-      busy: s.busy,
-      worktree: s.worktree,
-      usage: s.usage
-        ? {
-            prompt: s.usage.prompt ?? 0,
-            completion: s.usage.completion ?? 0,
-            total: s.usage.total ?? 0,
-            cached: s.usage.cached ?? 0,
-          }
-        : undefined,
-    }))
+    const mapped = list
+      .filter((s) => !isBrowserUiSession(s.id) && !/^Browser UI\b/i.test(s.title ?? ''))
+      .map((s) => ({
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        model: s.model,
+        projectRoot: s.projectRoot,
+        baseProjectRoot: s.baseProjectRoot,
+        worktreeBranch: s.worktreeBranch,
+        messageCount: s.messageCount,
+        sizeBytes: s.sizeBytes,
+        busy: s.busy,
+        worktree: s.worktree,
+        usage: s.usage
+          ? {
+              prompt: s.usage.prompt ?? 0,
+              completion: s.usage.completion ?? 0,
+              total: s.usage.total ?? 0,
+              cached: s.usage.cached ?? 0,
+            }
+          : undefined,
+      }))
     state.sessionList = mapped
   } catch {
-    state.sessionList = state.session ? [state.session] : []
+    state.sessionList = state.session && !isBrowserUiSession(state.session.id) ? [state.session] : []
   }
 }
 
@@ -1131,10 +1170,12 @@ export async function hydrateProjectSession(): Promise<void> {
     return
   }
 
-  if (hydrateInFlight) return hydrateInFlight
-  hydrateInFlight = (async () => {
+  const pending = hydrateInFlight.get(project.id)
+  if (pending) return pending
+  const promise = (async () => {
     try {
-      await newSession()
+      await newSession(project.id)
+      if (state.activeProjectId !== project.id) return
       const fresh = state.session as { id: string } | null
       if (fresh) state.pushLog(`[session] fresh app session ${fresh.id.slice(0, 8)}…`)
     } catch (err) {
@@ -1142,10 +1183,11 @@ export async function hydrateProjectSession(): Promise<void> {
         `[session] hydrate failed: ${err instanceof Error ? err.message : String(err)}`,
       )
     } finally {
-      hydrateInFlight = null
+      hydrateInFlight.delete(project.id)
     }
   })()
-  return hydrateInFlight
+  hydrateInFlight.set(project.id, promise)
+  return promise
 }
 
 export async function ensureSession(): Promise<string | null> {
@@ -1160,12 +1202,77 @@ export async function ensureSession(): Promise<string | null> {
   return s?.id ?? null
 }
 
+/**
+ * Browser UI edit — dedicated background session.
+ * Does NOT switch Agent chat / push messages into the open Agent transcript.
+ */
+export async function runBrowserUiEdit(
+  text: string,
+  opts?: { model?: string },
+): Promise<{ sessionId: string }> {
+  const project = state.activeProject
+  if (!project) throw new Error('Open a project first')
+  const model = opts?.model?.trim() || state.provider?.model || 'enpii'
+  const dialect = state.provider?.dialect === 'anthropic' ? 'anthropic' : 'openai'
+
+  const meta = (await window.enpiistudio.enpii.request('session.upsert', {
+    projectRoot: project.path,
+    title: `Browser UI · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+    model,
+    dialect,
+    fresh: true,
+  })) as { id: string }
+
+  browserUiSessionIds.add(meta.id)
+  state.bindSessionProject(meta.id, project.id)
+  // Seed live map without activating this session in Agent UI.
+  const live = state.getLive(meta.id)
+  live.busy = true
+  live.status = 'running'
+  live.turnStartedAt = Date.now()
+  state.liveSessions.set(meta.id, live)
+  state.setSessionBusy(meta.id, true)
+  state.pushLog(`[browser-ui] start ${meta.id.slice(0, 8)}… model=${model}`)
+
+  try {
+    await window.enpiistudio.enpii.request('session.prompt', {
+      sessionId: meta.id,
+      text,
+      goal: {
+        goal: text,
+        maxRounds: Math.min(state.ui.maxTurns ?? 24, 16),
+      },
+    })
+    state.pushLog(`[browser-ui] done ${meta.id.slice(0, 8)}…`)
+    return { sessionId: meta.id }
+  } catch (err) {
+    state.pushLog(
+      `[browser-ui] failed ${meta.id.slice(0, 8)}… ${err instanceof Error ? err.message : String(err)}`,
+    )
+    throw err
+  } finally {
+    state.setSessionBusy(meta.id, false)
+    const l = state.liveSessions.get(meta.id)
+    if (l) {
+      l.busy = false
+      l.status = 'idle'
+      l.turnStartedAt = null
+      l.pendingApprovals = []
+      state.liveSessions.set(meta.id, l)
+    }
+    // Drop any leftover Browser UI approvals from the global queue.
+    state.pendingApprovals = state.pendingApprovals.filter((a) => a.sessionId !== meta.id)
+    if (!state.pendingApprovals.length) state.clearApprovalNotif()
+  }
+}
+
 export async function stopAgentTurn(opts?: { clearQueue?: boolean }): Promise<void> {
   if (!state.session) return
   const sessionId = state.session.id
   await window.enpiistudio.enpii.request('session.stop', { sessionId })
   state.setSessionBusy(sessionId, false)
   state.clearApproval()
+  state.clearAsk()
   state.streamingId = null
   state.turnStartedAt = null
   state.finishTurnTimer(sessionId)
@@ -1335,9 +1442,9 @@ export async function renameSession(title: string, sessionId?: string): Promise<
   state.pushLog(`[session] rename ${meta.id.slice(0, 8)}… → ${meta.title}`)
 }
 
-export async function newSession(): Promise<void> {
+export async function newSession(expectedProjectId?: string): Promise<void> {
   const project = state.activeProject
-  if (!project) return
+  if (!project || (expectedProjectId && project.id !== expectedProjectId)) return
 
   // Keep previous session running in background — do not stop it.
   state.stashLiveSession()
@@ -1359,6 +1466,10 @@ export async function newSession(): Promise<void> {
   }
 
   state.bindSessionProject(meta.id, project.id)
+  if (state.activeProjectId !== project.id) {
+    state.patchLive(meta.id, { status: meta.status, busy: false })
+    return
+  }
   state.session = {
     id: meta.id,
     title: meta.title,
@@ -1375,6 +1486,10 @@ export async function newSession(): Promise<void> {
   state.resetRun()
   state.streamingId = null
   state.clearApproval()
+  state.clearAsk()
+  state.planMode = false
+  state.promptQueue = []
+  state.turnStartedAt = null
   state.approvals = []
   state.diffs = []
   state.checkpoints = []
@@ -1694,6 +1809,11 @@ export async function discardWorktreeSession(opts: { confirmed?: boolean } = {})
 export async function openSession(sessionId: string): Promise<void> {
   if (!sessionId) return
   if (state.session?.id === sessionId) return
+  // Browser UI background jobs are not openable as Agent chats.
+  if (isBrowserUiSession(sessionId)) {
+    state.pushLog(`[session] skip open browser-ui ${sessionId.slice(0, 8)}…`)
+    return
+  }
 
   // Always stash active live state (may still be streaming).
   state.stashLiveSession()
@@ -1805,6 +1925,10 @@ export async function openSession(sessionId: string): Promise<void> {
     state.usage = usage
     state.resetRun()
     state.clearApproval()
+    state.clearAsk()
+    state.planMode = false
+    state.promptQueue = []
+    state.turnStartedAt = null
     state.approvals = []
     state.diffs = []
     state.busy = loaded.meta.status === 'running' || loaded.meta.status === 'awaiting_approval'
@@ -1816,6 +1940,22 @@ export async function openSession(sessionId: string): Promise<void> {
       `[session] open failed: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
+}
+
+/** Default titles look like "enmd · 09:39 AM" / "New session" — first user prompt renames. */
+function isPlaceholderSessionTitle(title: string | undefined, projectName?: string): boolean {
+  const t = (title ?? '').trim()
+  if (!t || /^new session$/i.test(t)) return true
+  if (projectName && t.startsWith(`${projectName} · `)) return true
+  if (/^.+\s·\s\d{1,2}:\d{2}/.test(t)) return true
+  return false
+}
+
+function titleFromPrompt(text: string): string {
+  const one = text.replace(/\s+/g, ' ').trim()
+  if (!one) return ''
+  const cut = one.length > 72 ? `${one.slice(0, 69).trimEnd()}…` : one
+  return cut
 }
 
 export async function sendPrompt(
@@ -1843,9 +1983,28 @@ export async function sendPrompt(
     return
   }
 
+  const display = options?.displayText ?? text
+  // First real user turn → auto-title from prompt (skip if user already renamed).
+  const userTurns = state.messages.filter((m) => m.role === 'user').length
+  const projectName = state.activeProject?.name
+  if (
+    userTurns === 0 &&
+    state.session?.id === sessionId &&
+    isPlaceholderSessionTitle(state.session.title, projectName)
+  ) {
+    const nextTitle = titleFromPrompt(display)
+    if (nextTitle) {
+      try {
+        await renameSession(nextTitle, sessionId)
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
+
   state.pushMessage({
     role: 'user',
-    text: options?.displayText ?? text,
+    text: display,
     attachments: options?.attachments,
   })
   const started = Date.now()
@@ -1863,7 +2022,7 @@ export async function sendPrompt(
     await window.enpiistudio.enpii.request('session.prompt', {
       sessionId,
       text,
-      images: options?.images,
+      images: options?.images?.map(({ name, mime, dataUrl }) => ({ name, mime, dataUrl })),
       goal: {
         goal: text,
         maxRounds: state.ui.maxTurns,
@@ -2032,6 +2191,7 @@ export function bindEnpiiEvents(): () => void {
           prompt_tokens?: number
           completion_tokens?: number
           total_tokens?: number
+          cached_tokens?: number
         }
         run?: Record<string, unknown>
         command?: string
@@ -2056,6 +2216,11 @@ export function bindEnpiiEvents(): () => void {
         question?: string
         options?: string[]
         plan?: unknown
+        subagentId?: string
+        description?: string
+        jobId?: string
+        error?: string
+        disabled?: boolean
       }
     }
     const p = msg.params
@@ -2227,6 +2392,15 @@ export function bindEnpiiEvents(): () => void {
         : (state.liveSessions.get(eventSessionId)?.pendingApprovals.length ?? 0)
       if (active) {
         state.enqueueApproval(approval)
+        // Keep tool card status honest while waiting.
+        if (approval.toolCallId) {
+          state.updateTool(approval.toolCallId, {
+            status: 'running',
+            summary: approval.summary,
+          })
+        }
+        if (state.session) state.session = { ...state.session, status: 'awaiting_approval' }
+        state.busy = true
         state.stashLiveSession(eventSessionId)
       } else {
         applyBackground((live) => {
@@ -2237,11 +2411,16 @@ export function bindEnpiiEvents(): () => void {
           live.busy = true
           live.status = 'awaiting_approval'
         })
+        // Surface on global queue so Browser / other modes can approve (sessionId stays on card).
+        state.enqueueApproval(approval)
       }
       const n = active
         ? state.pendingApprovals.length
         : (state.liveSessions.get(eventSessionId)?.pendingApprovals.length ?? 1)
       const detail = String(p.summary ?? p.name)
+      state.pushLog(
+        `[approval] request ${String(p.name)} id=${String(p.requestId).slice(0, 8)}… active=${active} queue=${n}`,
+      )
       // In-app: single updating toast (no +19 spam).
       state.notifyApprovalQueue(detail, !active)
       // OS: only when queue was empty (first pending), not every tool in the batch.
@@ -2258,25 +2437,24 @@ export function bindEnpiiEvents(): () => void {
     if (p.type === 'ask_user_request' && p.requestId && p.question) {
       const rawOpts = Array.isArray(p.options) ? p.options : undefined
       const options = rawOpts
-        ?.map((item) => {
+        ?.flatMap((item): { label: string; description?: string; recommended?: boolean }[] => {
           if (typeof item === 'string') {
             const label = item.trim()
-            return label ? { label } : null
+            return label ? [{ label }] : []
           }
           if (item && typeof item === 'object') {
             const o = item as Record<string, unknown>
             const label = String(o.label ?? o.title ?? o.value ?? '').trim()
-            if (!label) return null
+            if (!label) return []
             const description = String(o.description ?? o.detail ?? '').trim()
-            return {
+            return [{
               label,
               description: description || undefined,
               recommended: o.recommended === true || undefined,
-            }
+            }]
           }
-          return null
+          return []
         })
-        .filter((x): x is { label: string; description?: string; recommended?: boolean } => Boolean(x))
         .slice(0, 6)
       const ask = {
         requestId: String(p.requestId),
@@ -2494,33 +2672,21 @@ export function bindEnpiiEvents(): () => void {
       }
     }
 
-    // Turn usage: accumulate for live UI. session_usage (below) replaces with disk totals after prompt.
+    // Turn usage belongs to run telemetry. Session totals come from session_usage.
     if (p.type === 'usage' && p.usage) {
-      const applyUsage = (live: {
-        usage: { prompt: number; completion: number; total: number; cached?: number } | null
-      }) => {
-        const next = {
-          prompt: p.usage!.prompt_tokens ?? 0,
-          completion: p.usage!.completion_tokens ?? 0,
-          total: p.usage!.total_tokens ?? (p.usage!.prompt_tokens ?? 0) + (p.usage!.completion_tokens ?? 0),
-          cached: p.usage!.cached_tokens ?? 0,
-        }
-        live.usage = live.usage
-          ? {
-              prompt: live.usage.prompt + next.prompt,
-              completion: live.usage.completion + next.completion,
-              total: live.usage.total + next.total,
-              cached: (live.usage.cached ?? 0) + next.cached || undefined,
-            }
-          : next.cached
-            ? next
-            : { prompt: next.prompt, completion: next.completion, total: next.total }
+      const turnUsage = {
+        prompt: p.usage.prompt_tokens ?? 0,
+        completion: p.usage.completion_tokens ?? 0,
+        total: p.usage.total_tokens ?? (p.usage.prompt_tokens ?? 0) + (p.usage.completion_tokens ?? 0),
+        cached: p.usage.cached_tokens ?? 0,
       }
       if (active) {
-        state.setUsage(p.usage, 'add')
+        state.updateRun({ usage: turnUsage })
         state.stashLiveSession(eventSessionId)
       } else {
-        applyBackground((live) => applyUsage(live))
+        applyBackground((live) => {
+          live.run = live.run ? { ...live.run, usage: turnUsage } : live.run
+        })
       }
     }
 
@@ -2654,6 +2820,29 @@ export function bindEnpiiEvents(): () => void {
     state.enpiiInfo = `exited ${JSON.stringify(info)}`
     state.pushLog(`[exit] ${JSON.stringify(info)}`)
     state.notify('error', 'enpii stopped', state.enpiiInfo)
+
+    for (const [sessionId, live] of state.liveSessions) {
+      state.finishTurnTimer(sessionId)
+      live.busy = false
+      live.status = 'error'
+      live.streamingId = null
+      live.turnStartedAt = null
+      live.pendingApprovals = []
+      live.pendingAsks = []
+      live.promptQueue = []
+      if (live.run) live.run = { ...live.run, status: 'cancelled', lastEvent: 'sidecar stopped' }
+      state.liveSessions.set(sessionId, live)
+    }
+    state.sessionBusy = {}
+    state.busy = false
+    state.streamingId = null
+    state.turnStartedAt = null
+    state.promptQueue = []
+    state.clearApproval()
+    state.clearAsk()
+    state.clearApprovalNotif()
+    if (state.run) state.updateRun({ status: 'cancelled', lastEvent: 'sidecar stopped' })
+    window.setTimeout(() => void pingEnpii(), 750)
   })
 
   return () => {

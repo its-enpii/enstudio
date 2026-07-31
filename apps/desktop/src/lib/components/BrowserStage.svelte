@@ -1,11 +1,23 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte'
   import { state as app } from '../store.svelte'
+  import { runBrowserUiEdit } from '../enpii'
+  import { browserPanel, setBrowserEditJob, syncBrowserPanel } from '../browser-panel.svelte'
   import { color } from '../theme'
   import type { BrowserDownload } from '../../../electron/preload'
   import { t } from '../i18n/index.svelte'
-  import { ConfirmDialog, Dropdown } from './ui'
+  import { ConfirmDialog, Dropdown, TextInput } from './ui'
   import { Icon } from '../icons'
+  import { classifyBrowserUrl, pageOriginLabel, suggestNavigateUrl, type PageOrigin } from '../browserOrigin'
+  import {
+    OUTLINE_CLEAR_JS,
+    OUTLINE_HIGHLIGHT_JS,
+    OUTLINE_PICK_POLL_JS,
+    OUTLINE_PICK_START_JS,
+    OUTLINE_PICK_STOP_JS,
+    OUTLINE_SCRAPE_JS,
+    type OutlineNode,
+  } from '../browserOutline'
 
   type BrowserElement = HTMLElement & {
     canGoBack: () => boolean
@@ -16,6 +28,7 @@
     loadURL: (url: string) => Promise<void>
     insertCSS: (css: string) => Promise<string>
     removeInsertedCSS: (key: string) => Promise<void>
+    executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>
     findInPage: (text: string, options?: { forward?: boolean; findNext?: boolean }) => number
     stopFindInPage: (action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => void
     getURL?: () => string
@@ -48,7 +61,8 @@
   let findMatches = $state(0)
   let findActive = $state(0)
   let error = $state('')
-  let theme = $state<'dark' | 'light'>('dark')
+  /** Follow app theme — soft color-scheme only (no paint override). */
+  const pageTheme = $derived(app.ui.theme === 'light' ? 'light' : 'dark')
   let bookmarks = $state<BrowserBookmark[]>([])
   let bookmarksOpen = $state(false)
   let editingBookmarkId = $state<string | null>(null)
@@ -61,11 +75,14 @@
   let downloads = $state<BrowserDownload[]>([])
   let downloadsOpen = $state(false)
   let currentProjectId: string | null = null
+  let currentProjectPath: string | null = null
   let webviewElements = $state<(BrowserElement | undefined)[]>([])
   let webviews = new Map<string, BrowserElement>()
   let themeKeys = new Map<string, string>()
   let cleanups = new Map<string, () => void>()
   const workspaces = new Map<string, BrowserWorkspace>()
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let loadingWorkspace = false
 
   /** Per-project cookie/storage isolation for webviews. */
   const browserPartition = $derived(
@@ -76,6 +93,42 @@
   const activeBookmark = $derived(bookmarks.find((bookmark) => bookmark.url === activeTab?.url) ?? null)
   const filteredHistory = $derived(history.filter((entry) => `${entry.title} ${entry.url}`.toLowerCase().includes(historyQuery.trim().toLowerCase())))
   const activeDownloads = $derived(downloads.filter((download) => download.status === 'progressing').length)
+  const pageOrigin = $derived(
+    classifyBrowserUrl(activeTab?.url, { projectRoot: app.activeProject?.path }),
+  ) as PageOrigin
+  const originBadge = $derived(pageOriginLabel(pageOrigin))
+
+  function pushPanel(): void {
+    syncBrowserPanel({
+      url: activeTab?.url ?? '',
+      title: activeTab?.title ?? '',
+      bookmarks,
+      history,
+      downloads: downloads.map((d) => ({
+        id: d.id,
+        filename: d.filename,
+        url: d.url,
+        savePath: d.savePath,
+        receivedBytes: d.receivedBytes,
+        totalBytes: d.totalBytes,
+        status: d.status,
+        startedAt: d.startedAt,
+      })),
+      projectRoot: app.activeProject?.path ?? '',
+    })
+  }
+
+  $effect(() => {
+    // Keep rail in sync whenever tab/list state changes.
+    void activeId
+    void activeTab?.url
+    void activeTab?.title
+    void bookmarks
+    void history
+    void downloads
+    void app.activeProject?.path
+    pushPanel()
+  })
 
   const toolBtn =
     'grid size-7 place-items-center rounded-md text-[13px] text-studio-text-dim hover:bg-white/8 hover:text-studio-text disabled:opacity-40'
@@ -133,15 +186,117 @@
     return workspace
   }
 
+  function serializeWorkspace(): BrowserWorkspace {
+    return {
+      tabs: tabs.map((t) => ({
+        id: t.id,
+        title: t.title,
+        url: t.url,
+        ready: false,
+        loading: false,
+        canBack: false,
+        canForward: false,
+      })),
+      activeId,
+      bookmarks: bookmarks.map((b) => ({ ...b })),
+      history: history.slice(0, 200).map((h) => ({ ...h })),
+    }
+  }
+
+  function parseWorkspace(raw: unknown): BrowserWorkspace | null {
+    if (!raw || typeof raw !== 'object') return null
+    const o = raw as Record<string, unknown>
+    const rawTabs = Array.isArray(o.tabs) ? o.tabs : []
+    const tabsIn: BrowserTab[] = []
+    for (const item of rawTabs) {
+      if (!item || typeof item !== 'object') continue
+      const t = item as Record<string, unknown>
+      const id = typeof t.id === 'string' ? t.id : crypto.randomUUID()
+      const url = typeof t.url === 'string' ? t.url : ''
+      const title = typeof t.title === 'string' && t.title.trim() ? t.title : url || 'New Tab'
+      tabsIn.push({
+        id,
+        title,
+        url,
+        ready: false,
+        loading: false,
+        canBack: false,
+        canForward: false,
+      })
+    }
+    if (!tabsIn.length) tabsIn.push(newTab())
+    const active =
+      typeof o.activeId === 'string' && tabsIn.some((t) => t.id === o.activeId)
+        ? o.activeId
+        : tabsIn[0].id
+    const bookmarksIn: BrowserBookmark[] = []
+    if (Array.isArray(o.bookmarks)) {
+      for (const item of o.bookmarks) {
+        if (!item || typeof item !== 'object') continue
+        const b = item as Record<string, unknown>
+        if (typeof b.url !== 'string' || !b.url) continue
+        bookmarksIn.push({
+          id: typeof b.id === 'string' ? b.id : crypto.randomUUID(),
+          title: typeof b.title === 'string' && b.title.trim() ? b.title : b.url,
+          url: b.url,
+        })
+      }
+    }
+    const historyIn: BrowserHistoryEntry[] = []
+    if (Array.isArray(o.history)) {
+      for (const item of o.history) {
+        if (!item || typeof item !== 'object') continue
+        const h = item as Record<string, unknown>
+        if (typeof h.url !== 'string' || !h.url) continue
+        historyIn.push({
+          id: typeof h.id === 'string' ? h.id : crypto.randomUUID(),
+          title: typeof h.title === 'string' && h.title.trim() ? h.title : h.url,
+          url: h.url,
+          visitedAt: typeof h.visitedAt === 'number' ? h.visitedAt : Date.now(),
+        })
+      }
+    }
+    return {
+      tabs: tabsIn,
+      activeId: active,
+      bookmarks: bookmarksIn,
+      history: historyIn.slice(0, 200),
+    }
+  }
+
   function saveWorkspace(): void {
-    if (!currentProjectId) return
-    workspaces.set(currentProjectId, { tabs, activeId, bookmarks, history })
+    if (!currentProjectId || loadingWorkspace) return
+    const snap = serializeWorkspace()
+    workspaces.set(currentProjectId, snap)
+    const root = currentProjectPath
+    if (!root) return
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = setTimeout(() => {
+      persistTimer = null
+      void window.enpiistudio?.browser?.workspace?.save?.(root, snap)
+    }, 250)
+  }
+
+  async function loadWorkspaceFromDisk(projectId: string, projectPath: string): Promise<BrowserWorkspace> {
+    const cached = workspaces.get(projectId)
+    if (cached) return cached
+    try {
+      const raw = await window.enpiistudio?.browser?.workspace?.load?.(projectPath)
+      const parsed = parseWorkspace(raw)
+      if (parsed) {
+        workspaces.set(projectId, parsed)
+        return parsed
+      }
+    } catch {
+      /* fall through */
+    }
+    return workspaceFor(projectId)
   }
 
   function normalizeUrl(value: string): string {
     const raw = value.trim()
     if (!raw) return ''
-    const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`
+    const candidate = suggestNavigateUrl(raw)
     const url = new URL(candidate)
     if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(t('browser.httpOnly'))
     return url.toString()
@@ -161,17 +316,31 @@
       if (id === activeId) address = tab.url
       if (url && url !== 'about:blank') recordHistory(url, tab.title)
       syncNav(tab, source)
+      pushPanel()
     }
     const start = () => (tab.loading = true)
     const stop = () => {
       tab.loading = false
       syncNav(tab, element)
-      void applyTheme(id)
-    }
+      if (pageTheme === 'dark') void applyTheme(id)
+      }
     const ready = () => {
       tab.ready = true
       syncNav(tab, element)
-      if (tab.url) void element.loadURL(tab.url).catch(() => {})
+      // Load pending URL once if webview still blank. Do NOT reload on every dom-ready
+      // (that aborts in-flight navigations → ERR_FAILED / GUEST_VIEW_MANAGER_CALL).
+      try {
+        const cur = element.getURL?.() ?? ''
+        if (tab.url && (!cur || cur === 'about:blank')) {
+          void element.loadURL(tab.url).catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            if (!/ERR_ABORTED|ERR_FAILED/i.test(msg)) error = msg
+          })
+        }
+      } catch {
+        /* ignore */
+      }
+      if (pageTheme === 'dark') void applyTheme(id)
     }
     const title = (event: Event) => {
       const pageTitle = (event as Event & { title?: string }).title?.trim()
@@ -212,15 +381,11 @@
     const previous = themeKeys.get(id)
     if (previous) await element.removeInsertedCSS(previous).catch(() => {})
     themeKeys.delete(id)
-    if (theme === 'light') return
+    if (pageTheme === 'light') return
+    // Soft dark: color-scheme only — avoid !important paint on inputs (breaks login UIs).
     const key = await element.insertCSS(`
-      :root { color-scheme: dark !important; }
-      html, body { background: ${color.browserBg} !important; color: ${color.browserText} !important; }
-      body > * { color-scheme: dark !important; }
-      input, textarea, select, [contenteditable="true"] {
-        background-color: ${color.browserSurface} !important; color: ${color.browserText} !important; border-color: ${color.browserBorder} !important;
-      }
-      a { color: ${color.link} !important; }
+      :root { color-scheme: dark; }
+      html { background: ${color.browserBg}; }
     `)
     themeKeys.set(id, key)
   }
@@ -234,9 +399,19 @@
       tab.url = url
       tab.title = url ? new URL(url).hostname : 'New Tab'
       address = url
-      if (url && tab.ready) {
-        tab.loading = true
+      pushPanel()
+      if (!url) return
+      // Queue until webview ready — ready handler loads about:blank → url once.
+      if (!tab.ready) return
+      tab.loading = true
+      try {
         await webviews.get(tab.id)?.loadURL(url)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        // Aborted loads are normal when user navigates again quickly.
+        if (!/ERR_ABORTED|-3/i.test(msg)) error = msg
+      } finally {
+        tab.loading = false
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
@@ -303,11 +478,6 @@
     safeCall(activeTab ? webviews.get(activeTab.id) : undefined, (v) => v.reload())
   }
 
-  async function toggleTheme(): Promise<void> {
-    theme = theme === 'dark' ? 'light' : 'dark'
-    await Promise.all(tabs.map((tab) => applyTheme(tab.id)))
-  }
-
   async function focusAddress(): Promise<void> {
     await tick()
     input?.focus()
@@ -326,16 +496,16 @@
     return activeTab ? webviews.get(activeTab.id) : undefined
   }
 
-  function searchPage(): void {
+  function searchPage(findNext = false, forward = true): void {
     const view = findActiveTab()
-    findMatches = 0
-    findActive = 0
     if (!findQuery) {
+      findMatches = 0
+      findActive = 0
       safeCall(view, (v) => v.stopFindInPage('clearSelection'))
       return
     }
     safeCall(view, (v) => {
-      v.findInPage(findQuery)
+      v.findInPage(findQuery, { forward, findNext })
     })
   }
 
@@ -445,27 +615,50 @@
   }
 
   $effect(() => {
+    void pageTheme
+    for (const tab of tabs) {
+      if (tab.ready) void applyTheme(tab.id)
+    }
+  })
+
+  $effect(() => {
     const projectId = app.activeProjectId
-    if (!projectId || currentProjectId === projectId) return
-    saveWorkspace()
+    const projectPath = app.activeProject?.path ?? null
+    if (!projectId || !projectPath) return
+    if (currentProjectId === projectId && currentProjectPath === projectPath) return
+    const prevId = currentProjectId
+    const prevPath = currentProjectPath
+    if (prevId && prevPath && prevId !== projectId) {
+      // flush previous project immediately
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
+      }
+      const snap = workspaces.get(prevId)
+      if (snap) void window.enpiistudio?.browser?.workspace?.save?.(prevPath, snap)
+    }
     resetWebviews()
     currentProjectId = projectId
-    const workspace = workspaceFor(projectId)
-    // heal tabs from older workspaces missing nav flags
-    tabs = workspace.tabs.map((t) => ({
-      ...t,
-      ready: false,
-      loading: false,
-      canBack: t.canBack ?? false,
-      canForward: t.canForward ?? false,
-    }))
-    activeId = workspace.activeId
-    bookmarks = workspace.bookmarks
-    history = workspace.history
-    bookmarksOpen = false
-    historyOpen = false
-    downloadsOpen = false
-    address = tabs.find((tab) => tab.id === activeId)?.url ?? ''
+    currentProjectPath = projectPath
+    loadingWorkspace = true
+    void loadWorkspaceFromDisk(projectId, projectPath).then((workspace) => {
+      if (currentProjectId !== projectId) return
+      tabs = workspace.tabs.map((t) => ({
+        ...t,
+        ready: false,
+        loading: false,
+        canBack: false,
+        canForward: false,
+      }))
+      activeId = workspace.activeId
+      bookmarks = workspace.bookmarks
+      history = workspace.history
+      bookmarksOpen = false
+      historyOpen = false
+      downloadsOpen = false
+      address = tabs.find((tab) => tab.id === activeId)?.url ?? ''
+      loadingWorkspace = false
+    })
   })
 
   $effect(() => {
@@ -475,6 +668,181 @@
       tabs.forEach((tab, index) => registerWebview(tab.id, webviewElements[index]))
     })
   })
+
+  function onRailNavigate(ev: Event): void {
+    const url = (ev as CustomEvent<{ url?: string }>).detail?.url
+    if (!url) return
+    address = url
+    void navigate(url)
+  }
+
+  async function scrapeOutline(): Promise<void> {
+    const tab = activeTab
+    const view = tab ? webviews.get(tab.id) : undefined
+    const origin = classifyBrowserUrl(tab?.url, { projectRoot: app.activeProject?.path })
+    if (!tab || !view || origin !== 'project') {
+      syncBrowserPanel({ outline: [], outlineError: origin === 'project' ? 'Webview not ready' : 'Outline only on project pages', outlineBusy: false })
+      return
+    }
+    syncBrowserPanel({ outlineBusy: true, outlineError: '' })
+    try {
+      const raw = await view.executeJavaScript(OUTLINE_SCRAPE_JS, false)
+      const nodes = Array.isArray(raw) ? (raw as OutlineNode[]) : []
+      syncBrowserPanel({ outline: nodes, outlineBusy: false, outlineError: nodes.length ? '' : 'No elements found' })
+    } catch (err) {
+      syncBrowserPanel({
+        outline: [],
+        outlineBusy: false,
+        outlineError: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  async function highlightOutline(path: string, node?: OutlineNode | null): Promise<void> {
+    const tab = activeTab
+    const view = tab ? webviews.get(tab.id) : undefined
+    if (!view || !path) return
+    const fromTree =
+      node ?? browserPanel.outline.find((n) => n.path === path) ?? browserPanel.selectedNode
+    const selected: OutlineNode =
+      fromTree && fromTree.path === path
+        ? fromTree
+        : { id: 'sel', tag: path.split('/').pop()?.split(':')[0]?.toLowerCase() || 'div', label: path, depth: 0, path }
+    syncBrowserPanel({ selectedPath: path, selectedNode: selected })
+    try {
+      await view.executeJavaScript(OUTLINE_HIGHLIGHT_JS(path), false)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function clearOutlineHighlight(): Promise<void> {
+    const tab = activeTab
+    const view = tab ? webviews.get(tab.id) : undefined
+    await stopPickMode()
+    syncBrowserPanel({ selectedPath: '', selectedNode: null })
+    if (!view) return
+    try {
+      await view.executeJavaScript(OUTLINE_CLEAR_JS, false)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  let pickPollTimer: ReturnType<typeof setInterval> | null = null
+
+  async function stopPickMode(): Promise<void> {
+    if (pickPollTimer) {
+      clearInterval(pickPollTimer)
+      pickPollTimer = null
+    }
+    syncBrowserPanel({ pickMode: false })
+    const tab = activeTab
+    const view = tab ? webviews.get(tab.id) : undefined
+    if (!view) return
+    try {
+      await view.executeJavaScript(OUTLINE_PICK_STOP_JS, false)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function startPickMode(): Promise<void> {
+    const tab = activeTab
+    const view = tab ? webviews.get(tab.id) : undefined
+    const origin = classifyBrowserUrl(tab?.url, { projectRoot: app.activeProject?.path })
+    if (!tab || !view || origin !== 'project') {
+      app.notify('warning', 'Pick element', 'Only on Project pages')
+      return
+    }
+    try {
+      await view.executeJavaScript(OUTLINE_PICK_START_JS, false)
+      syncBrowserPanel({ pickMode: true })
+      if (pickPollTimer) clearInterval(pickPollTimer)
+      pickPollTimer = setInterval(() => {
+        void (async () => {
+          try {
+            const raw = await view.executeJavaScript(OUTLINE_PICK_POLL_JS, false)
+            if (!raw || typeof raw !== 'object') return
+            if ((raw as { stopped?: boolean }).stopped) {
+              await stopPickMode()
+              return
+            }
+            const n = raw as OutlineNode
+            if (!n.path) return
+            const node: OutlineNode = {
+              id: n.id || `pick-${Date.now()}`,
+              tag: n.tag || 'div',
+              label: n.label || n.tag || n.path,
+              depth: typeof n.depth === 'number' ? n.depth : 0,
+              path: n.path,
+            }
+            const exists = browserPanel.outline.some((x) => x.path === node.path)
+            syncBrowserPanel({
+              selectedPath: node.path,
+              selectedNode: node,
+              outline: exists ? browserPanel.outline : [node, ...browserPanel.outline].slice(0, 200),
+            })
+          } catch {
+            /* ignore poll errors */
+          }
+        })()
+      }, 200)
+    } catch (err) {
+      syncBrowserPanel({ pickMode: false })
+      app.notify('error', 'Pick failed', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function togglePickMode(on?: boolean): Promise<void> {
+    const want = on !== undefined ? on : !browserPanel.pickMode
+    if (want) await startPickMode()
+    else await stopPickMode()
+  }
+
+  function onOutlineAi(ev: Event): void {
+    const d = (ev as CustomEvent<{
+      path?: string
+      tag?: string
+      label?: string
+      url?: string
+      instruction?: string
+    }>).detail
+    if (!d?.path || !d.instruction?.trim()) return
+    void stopPickMode()
+    const label = (d.label || d.tag || 'element').replace(/\s+/g, ' ').slice(0, 80)
+    const prompt = [
+      `UI edit from Browser (user stays on the preview — do not chat).`,
+      `Page: ${d.url ?? ''}`,
+      `Target: ${label}`,
+      `DOM path (match source only): ${d.path}`,
+      `User wants: ${d.instruction.trim()}`,
+      `Find the source component and apply a minimal edit_file change. No re-pick. Short summary only.`,
+    ].join('\n')
+    // Hidden session — not the open Agent transcript.
+    setBrowserEditJob({ status: 'running', detail: 'Working…', startedAt: Date.now() })
+    void runBrowserUiEdit(prompt, { model: app.provider?.model }).then(
+      () => {
+        setBrowserEditJob({ status: 'done', detail: 'Done — reload preview if needed' })
+        // Soft refresh preview if still on same tab.
+        try {
+          const tab = activeTab
+          const view = tab ? webviews.get(tab.id) : undefined
+          view?.reload()
+        } catch {
+          /* ignore */
+        }
+        window.setTimeout(() => {
+          setBrowserEditJob({ status: 'idle', detail: '' })
+        }, 4000)
+      },
+      (err) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        setBrowserEditJob({ status: 'error', detail: msg.slice(0, 120) })
+        app.notify('error', 'UI edit failed', msg)
+      },
+    )
+  }
 
   onMount(() => {
     void window.enpiistudio.browser.downloads.list().then((items) => (downloads = items.sort((a, b) => b.startedAt - a.startedAt)))
@@ -491,30 +859,62 @@
       else if (shortcut === 'back') goBack()
       else if (shortcut === 'forward') goForward()
     })
+    window.addEventListener('enpiistudio:browser-navigate', onRailNavigate)
+    const onRefresh = () => void scrapeOutline()
+    const onHl = (e: Event) => {
+      const path = (e as CustomEvent<{ path?: string }>).detail?.path
+      if (path) void highlightOutline(path)
+    }
+    const onClear = () => void clearOutlineHighlight()
+    const onPick = (e: Event) => {
+      const on = (e as CustomEvent<{ on?: boolean }>).detail?.on
+      void togglePickMode(on)
+    }
+    window.addEventListener('enpiistudio:browser-outline-refresh', onRefresh)
+    window.addEventListener('enpiistudio:browser-outline-highlight', onHl)
+    window.addEventListener('enpiistudio:browser-outline-clear', onClear)
+    window.addEventListener('enpiistudio:browser-outline-ai', onOutlineAi)
+    window.addEventListener('enpiistudio:browser-outline-pick', onPick)
     return () => {
       offShortcut()
       offDownloads()
+      if (pickPollTimer) clearInterval(pickPollTimer)
+      window.removeEventListener('enpiistudio:browser-navigate', onRailNavigate)
+      window.removeEventListener('enpiistudio:browser-outline-refresh', onRefresh)
+      window.removeEventListener('enpiistudio:browser-outline-highlight', onHl)
+      window.removeEventListener('enpiistudio:browser-outline-clear', onClear)
+      window.removeEventListener('enpiistudio:browser-outline-ai', onOutlineAi)
+      window.removeEventListener('enpiistudio:browser-outline-pick', onPick)
     }
   })
 
   onDestroy(() => {
-    saveWorkspace()
+    if (pickPollTimer) clearInterval(pickPollTimer)
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    if (currentProjectId && currentProjectPath && !loadingWorkspace) {
+      const snap = serializeWorkspace()
+      workspaces.set(currentProjectId, snap)
+      void window.enpiistudio?.browser?.workspace?.save?.(currentProjectPath, snap)
+    }
     for (const cleanup of cleanups.values()) cleanup()
   })
 </script>
 
 <div class="relative flex h-full min-h-0 flex-col bg-transparent">
-  <div class="flex min-h-9 items-stretch overflow-x-auto border-b border-border-subtle bg-studio-panel/95" role="tablist" aria-label="Open browser tabs">
+  <div class="flex h-9 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95" role="tablist" aria-label="Open browser tabs">
     {#each tabs as tab (tab.id)}
-      <div class="flex items-center border-r border-border-subtle {tab.id === activeId ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple' : ''}">
-        <button type="button" class="flex items-center gap-1.5 px-2 py-2 text-[11px] {tab.id === activeId ? 'text-studio-text' : 'text-studio-text-dim hover:text-studio-text'}" role="tab" aria-selected={tab.id === activeId} onclick={() => activateTab(tab.id)}>
+      <div class="flex h-full items-center border-r border-border-subtle {tab.id === activeId ? 'border-b-2 border-b-studio-purple bg-studio-purple/20' : 'border-b-2 border-b-transparent'}">
+        <button type="button" class="flex items-center gap-1.5 px-2 text-[11px] {tab.id === activeId ? 'text-studio-text' : 'text-studio-text-dim hover:text-studio-text'}" role="tab" aria-selected={tab.id === activeId} onclick={() => activateTab(tab.id)}>
           <span class="size-1.5 rounded-lg {tab.loading ? 'animate-pulse bg-studio-gold' : 'bg-studio-success'}"></span>
           <span class="max-w-[140px] truncate">{tab.title}</span>
         </button>
         <button type="button" class="mx-1 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label={`Close ${tab.title}`} onclick={() => closeTab(tab.id)}><Icon name="close" size={12} /></button>
       </div>
     {/each}
-    <button type="button" class="ml-1.5 grid size-7 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label="New browser tab" onclick={addTab}><Icon name="plus" size={14} /></button>
+    <button type="button" class="ml-1.5 grid size-7 shrink-0 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label="New browser tab" onclick={addTab}><Icon name="plus" size={14} /></button>
   </div>
 
   <div class="flex items-center gap-1 border-b border-border-subtle bg-studio-panel/80 px-2 py-1">
@@ -522,12 +922,25 @@
     <button type="button" class={toolBtn} title="Forward" aria-label="Forward" disabled={!activeTab?.canForward} onclick={goForward}><Icon name="arrow-right" size={14} /></button>
     <button type="button" class={toolBtn} title="Reload" aria-label="Reload" onclick={reload}><Icon name={loading ? 'close' : 'reload'} size={14} /></button>
     <form
-      class="mx-1 flex min-w-0 flex-1 items-center rounded-full border border-border-subtle bg-studio-dark px-3 py-1 focus-within:border-studio-purple/45"
+      class="mx-1 flex min-w-0 flex-1 items-center gap-1.5 rounded-full border border-border-subtle bg-studio-dark px-3 py-1 focus-within:border-studio-purple/45"
       onsubmit={(e) => {
         e.preventDefault()
         void navigate()
       }}
     >
+      {#if originBadge}
+        <span
+          class="shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide
+            {pageOrigin === 'project'
+            ? 'border-studio-success/40 bg-studio-success/15 text-studio-success'
+            : pageOrigin === 'local'
+              ? 'border-studio-gold/40 bg-studio-gold/10 text-studio-gold'
+              : pageOrigin === 'public'
+                ? 'border-white/12 bg-white/5 text-studio-text-dim'
+                : 'border-border-subtle text-studio-text-dim'}"
+          title={pageOrigin}
+        >{originBadge}</span>
+      {/if}
       <input
         class="min-w-0 flex-1 bg-transparent text-[12px] text-studio-text outline-none placeholder:text-studio-text-dim"
         bind:this={input}
@@ -548,7 +961,6 @@
           label: activeDownloads ? `Downloads (${activeDownloads})` : 'Downloads',
         },
         { id: 'find', label: 'Find in page' },
-        { id: 'theme', label: theme === 'dark' ? 'Light theme' : 'Dark theme' },
         { id: 'devtools', label: 'DevTools', disabled: !activeTab },
       ]}
       label="More"
@@ -567,7 +979,6 @@
           historyOpen = false
           downloadsOpen = !downloadsOpen
         } else if (id === 'find') void openFind()
-        else if (id === 'theme') void toggleTheme()
         else if (id === 'devtools') {
           const wv = activeTab ? webviews.get(activeTab.id) : undefined
           try {
@@ -593,14 +1004,36 @@
         ><Icon name="more-vertical" size={14} /></button>
       {/snippet}
     </Dropdown>
-    {#if findOpen}
-      <div class="flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-1.5 py-0.5">
-        <input class="w-28 bg-transparent px-1 text-xs text-studio-text outline-none" bind:this={findInput} bind:value={findQuery} aria-label="Find in page" placeholder="Find" oninput={searchPage} onkeydown={(event) => event.key === 'Escape' && closeFind()} />
-        <span class="text-[10px] text-studio-text-dim">{findMatches ? `${findActive}/${findMatches}` : '—'}</span>
-        <button type="button" class="grid size-6 place-items-center text-studio-text-dim hover:text-studio-text" aria-label="Close find" onclick={closeFind}><Icon name="close" size={12} /></button>
-      </div>
-    {/if}
   </div>
+
+  {#if findOpen}
+    <button type="button" class="fixed inset-0 z-[60] cursor-default bg-transparent" aria-label="Close find" onclick={closeFind}></button>
+    <section
+      class="absolute right-3 top-[76px] z-[61] flex w-72 items-center gap-1 rounded-lg border border-border-subtle bg-studio-popover p-1.5 shadow-lg"
+      aria-label="Find in page"
+      role="search"
+    >
+      <input
+        class="min-w-0 flex-1 rounded-md border border-border-subtle bg-studio-dark px-2 py-1.5 text-xs text-studio-text outline-none focus:border-studio-purple/45"
+        bind:this={findInput}
+        bind:value={findQuery}
+        aria-label="Find in page"
+        placeholder="Find in page"
+        oninput={() => searchPage(false)}
+        onkeydown={(event) => {
+          if (event.key === 'Escape') closeFind()
+          else if (event.key === 'Enter') {
+            event.preventDefault()
+            searchPage(true, !event.shiftKey)
+          }
+        }}
+      />
+      <span class="w-10 shrink-0 text-center text-[10px] tabular-nums text-studio-text-dim">{findMatches ? `${findActive}/${findMatches}` : '0/0'}</span>
+      <button type="button" class="grid size-7 shrink-0 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" title="Previous" aria-label="Previous match" onclick={() => searchPage(true, false)}><Icon name="chevron-up" size={14} /></button>
+      <button type="button" class="grid size-7 shrink-0 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" title="Next" aria-label="Next match" onclick={() => searchPage(true, true)}><Icon name="chevron-down" size={14} /></button>
+      <button type="button" class="grid size-7 shrink-0 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text" aria-label="Close find" onclick={closeFind}><Icon name="close" size={12} /></button>
+    </section>
+  {/if}
 
   {#if bookmarksOpen}
     <button type="button" class="fixed inset-0 z-[60] cursor-default bg-black/20" aria-label="Close bookmarks" onclick={() => (bookmarksOpen = false)}></button>
@@ -665,7 +1098,7 @@
         <button type="button" class={toolBtn} disabled={!history.length} onclick={requestClearHistory}>Clear</button>
       </header>
       <div class="border-b border-border-subtle p-2">
-        <input class="w-full rounded-md border border-white/9 bg-black/25 px-2.5 py-1.5 text-xs text-studio-text outline-none focus:border-studio-purple-bright/80" bind:value={historyQuery} placeholder="Search history" aria-label="Search history" />
+        <TextInput bind:value={historyQuery} placeholder="Search history" aria-label="Search history" />
       </div>
       <div class="min-h-0 flex-1 overflow-auto p-1.5">
         {#each filteredHistory as entry (entry.id)}

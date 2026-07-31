@@ -8,7 +8,7 @@
     upsertSshHost,
     type SshHostInfo,
   } from '../enpii'
-  import { Button, TextInput, NumberInput } from './ui'
+  import { Button, ConfirmDialog, TextInput, NumberInput } from './ui'
   import { Icon } from '../icons'
 
   let hosts = $state<SshHostInfo[]>([])
@@ -19,6 +19,7 @@
   let editing = $state<string | null>(null)
   let form = $state({ name: '', host: '', user: '', port: 22 as number | null, identityFile: '' })
   let formError = $state('')
+  let deleteTarget = $state<string | null>(null)
 
   async function hydrate(): Promise<void> {
     error = ''
@@ -97,8 +98,14 @@
     }
   }
 
-  async function removeHost(name: string): Promise<void> {
-    if (!confirm(t('settings.network.sshDeleteConfirm', { name }))) return
+  function requestRemoveHost(name: string): void {
+    deleteTarget = name
+  }
+
+  async function confirmRemoveHost(): Promise<void> {
+    const name = deleteTarget
+    if (!name) return
+    deleteTarget = null
     busy = name
     error = ''
     try {
@@ -130,17 +137,8 @@
   <div class="flex items-center justify-between gap-2">
     <h3 class="studio-label m-0">{t('settings.network.ssh')}</h3>
     <div class="flex flex-wrap gap-1">
-      <button
-        type="button"
-        class="rounded-lg border border-studio-purple/40 bg-studio-purple/15 px-2.5 py-1 text-[11px] font-medium text-studio-text hover:bg-studio-purple/25"
-        onclick={beginAdd}
-      >+ {t('settings.network.sshAdd')}</button>
-      <button
-        type="button"
-        class="rounded-lg border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
-        title={configPath || 'ssh.json'}
-        onclick={openConfig}
-      >ssh.json</button>
+      <Button variant="secondary" size="sm" onclick={beginAdd}>+ {t('settings.network.sshAdd')}</Button>
+      <Button variant="ghost" size="sm" title={configPath || 'ssh.json'} onclick={openConfig}>ssh.json</Button>
       <button
         type="button"
         class="grid size-7 place-items-center rounded-lg border border-border-subtle text-studio-text-dim hover:bg-white/5 hover:text-studio-text"
@@ -205,7 +203,7 @@
             <Button variant="ghost" size="sm" disabled={busy !== null} onclick={() => beginEdit(h)}
               >{t('settings.network.sshEdit')}</Button
             >
-            <Button variant="danger" size="sm" disabled={busy !== null} onclick={() => void removeHost(h.name)}
+            <Button variant="danger" size="sm" disabled={busy !== null} onclick={() => requestRemoveHost(h.name)}
               >{t('settings.network.sshDelete')}</Button
             >
           </div>
@@ -214,3 +212,14 @@
     </ul>
   {/if}
 </section>
+
+<ConfirmDialog
+  open={deleteTarget != null}
+  title={t('settings.network.sshDelete')}
+  message={t('settings.network.sshDeleteConfirm', { name: deleteTarget ?? '' })}
+  cancelLabel={t('common.cancel')}
+  confirmLabel={t('common.delete')}
+  danger
+  onCancel={() => (deleteTarget = null)}
+  onConfirm={() => void confirmRemoveHost()}
+/>

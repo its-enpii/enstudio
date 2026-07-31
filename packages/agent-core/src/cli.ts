@@ -218,6 +218,16 @@ async function main(): Promise<void> {
     for (const rt of runtimes.values()) rt.allowRules = provider.allowRules
   }
 
+  /** Keep session metas + live runtimes on the latest provider permission mode. */
+  function syncPermissionModeToSessions(): void {
+    const mode = provider.permissionMode
+    sessions.setPermissionModeAll(mode)
+    for (const rt of runtimes.values()) {
+      if (rt.meta.permissionMode === mode) continue
+      rt.meta = { ...rt.meta, permissionMode: mode, updatedAt: new Date().toISOString() }
+    }
+  }
+
   rpc.on('health', (): HealthResult => ({
     ok: true,
     name: 'enpii',
@@ -245,6 +255,9 @@ async function main(): Promise<void> {
     // Reload with project overlay when provided
     if (projectRoot) provider = loadProviderConfig(path.resolve(projectRoot))
     syncAllowRulesToRuntimes()
+    // Composer mode / Settings write permissionMode to config only — without this,
+    // live sessions keep the mode they were created with and skip/force approvals wrong.
+    if (patch.permissionMode !== undefined) syncPermissionModeToSessions()
     console.error(
       `[enpii] config updated model=${provider.model} base=${provider.baseUrl} key=${provider.apiKey ? 'yes' : 'no'} mode=${provider.permissionMode} allow=${provider.allowRules?.length ?? 0}`,
     )
@@ -458,17 +471,70 @@ async function main(): Promise<void> {
   rpc.on('project.create_entry', (_method, params) => {
     const p = (params ?? {}) as { projectRoot?: string; dir?: string; name?: string; kind?: 'file' | 'directory' }
     if (!p.projectRoot) throw new Error('projectRoot is required')
-    const name = p.name?.trim() ?? ''
-    if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) throw new Error('invalid entry name')
+    // Nested OK: "admin/dashboard/page.ts" → mkdir parents + file.
+    const raw = (p.name?.trim() ?? '').replace(/\\/g, '/')
+    if (!raw || raw === '.' || raw === '..') throw new Error('invalid entry name')
+    const parts = raw.split('/').filter(Boolean)
+    if (!parts.length || parts.some((seg) => seg === '.' || seg === '..')) {
+      throw new Error('invalid entry name')
+    }
     if (p.kind !== 'file' && p.kind !== 'directory') throw new Error('kind must be file|directory')
     const root = path.resolve(p.projectRoot)
-    const parent = resolveInRoot(root, p.dir ?? '.')
+    const parentRel = p.dir ?? '.'
+    const parent = resolveInRoot(root, parentRel)
     if (!fs.statSync(parent).isDirectory()) throw new Error('parent is not a directory')
-    const target = resolveInRoot(root, path.join(p.dir ?? '.', name))
-    if (fs.existsSync(target)) throw new Error(`already exists: ${name}`)
-    if (p.kind === 'directory') fs.mkdirSync(target)
-    else fs.writeFileSync(target, '', { encoding: 'utf8', flag: 'wx' })
+    // Ensure intermediate dirs for nested path (all but last for file; all for directory).
+    const dirParts = p.kind === 'file' ? parts.slice(0, -1) : parts
+    let cursor = parentRel === '.' ? '' : parentRel.replace(/\\/g, '/')
+    for (const seg of dirParts) {
+      cursor = cursor ? `${cursor}/${seg}` : seg
+      const abs = resolveInRoot(root, cursor)
+      if (!fs.existsSync(abs)) fs.mkdirSync(abs)
+      else if (!fs.statSync(abs).isDirectory()) throw new Error(`not a directory: ${cursor}`)
+    }
+    const rel = parentRel === '.' ? parts.join('/') : `${parentRel.replace(/\\/g, '/')}/${parts.join('/')}`
+    const target = resolveInRoot(root, rel)
+    if (p.kind === 'directory') {
+      if (!fs.existsSync(target)) fs.mkdirSync(target)
+      else if (!fs.statSync(target).isDirectory()) throw new Error(`already exists: ${rel}`)
+    } else {
+      if (fs.existsSync(target)) throw new Error(`already exists: ${rel}`)
+      fs.writeFileSync(target, '', { encoding: 'utf8', flag: 'wx' })
+    }
     return { path: path.relative(root, target).split(path.sep).join('/'), kind: p.kind }
+  })
+
+  rpc.on('project.rename_entry', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; path?: string; newName?: string }
+    if (!p.projectRoot) throw new Error('projectRoot is required')
+    const fromRel = (p.path?.trim() ?? '').replace(/\\/g, '/')
+    const newName = (p.newName?.trim() ?? '').replace(/\\/g, '/')
+    if (!fromRel || fromRel === '.' || fromRel === '..') throw new Error('path is required')
+    if (!newName || newName.includes('/') || newName === '.' || newName === '..') {
+      throw new Error('newName must be a single path segment')
+    }
+    const root = path.resolve(p.projectRoot)
+    const from = resolveInRoot(root, fromRel)
+    if (!fs.existsSync(from)) throw new Error(`missing: ${fromRel}`)
+    const parent = path.dirname(from)
+    const to = path.join(parent, newName)
+    const toRel = path.relative(root, to).split(path.sep).join('/')
+    resolveInRoot(root, toRel) // jail check
+    if (fs.existsSync(to)) throw new Error(`already exists: ${newName}`)
+    fs.renameSync(from, to)
+    return { path: toRel, from: fromRel }
+  })
+
+  rpc.on('project.delete_entry', (_method, params) => {
+    const p = (params ?? {}) as { projectRoot?: string; path?: string }
+    if (!p.projectRoot) throw new Error('projectRoot is required')
+    const rel = (p.path?.trim() ?? '').replace(/\\/g, '/')
+    if (!rel || rel === '.' || rel === '..') throw new Error('path is required')
+    const root = path.resolve(p.projectRoot)
+    const target = resolveInRoot(root, rel)
+    if (!fs.existsSync(target)) throw new Error(`missing: ${rel}`)
+    fs.rmSync(target, { recursive: true, force: false })
+    return { path: rel, ok: true }
   })
 
   rpc.on('project.diagnostics', (_method, params) => {
@@ -1255,7 +1321,19 @@ async function main(): Promise<void> {
             setStatus: (status) => sessions.setStatus(sessionId, status),
           })
           sessions.setMessages(sessionId, runtime.messages)
-          sessions.addUsage(sessionId, result.usage)
+          const sessionUsage = sessions.addUsage(sessionId, result.usage)
+          if (sessionUsage) {
+            rpc.notify('event', {
+              type: 'session_usage',
+              sessionId,
+              usage: {
+                prompt_tokens: sessionUsage.prompt,
+                completion_tokens: sessionUsage.completion,
+                total_tokens: sessionUsage.total,
+                cached_tokens: sessionUsage.cached ?? 0,
+              },
+            })
+          }
           sessions.setStatus(sessionId, 'idle')
           return { sessionId, ok: true as const, content: result.content?.slice(0, 500) }
         } catch (err) {
@@ -1294,8 +1372,15 @@ async function main(): Promise<void> {
     provider = loadProviderConfig(meta.projectRoot)
     assertProviderReady(provider)
 
+    // Config is source of truth for the turn (Composer mode may have changed since create).
+    if (meta.permissionMode !== provider.permissionMode) {
+      sessions.setPermissionMode(meta.id, provider.permissionMode)
+      meta.permissionMode = provider.permissionMode
+    }
+
     const runtime = getRuntime(p.sessionId)!
     runtime.meta = meta
+    runtime.allowRules = provider.allowRules
 
     try {
       sessions.setStatus(p.sessionId, 'running')

@@ -330,10 +330,42 @@
     scheduleGhost(id)
   }
 
+  function copyTerminalSelection(term: Terminal): boolean {
+    if (!term.hasSelection()) return false
+    const text = term.getSelection()
+    if (!text) return false
+    void navigator.clipboard.writeText(text).catch(() => {})
+    return true
+  }
+
   function wireGhost(id: string, terminal: Terminal): void {
     const g = ghostFor(id)
+    // xterm selection copy (Ctrl/Cmd+C when text selected; else let shell get SIGINT via onData).
     terminal.attachCustomKeyEventHandler((ev) => {
       if (ev.type !== 'keydown') return true
+      const mod = ev.ctrlKey || ev.metaKey
+      if (mod && !ev.altKey && (ev.key === 'c' || ev.key === 'C')) {
+        if (copyTerminalSelection(terminal)) {
+          ev.preventDefault()
+          return false
+        }
+        return true
+      }
+      // Shift+Ctrl+C always copy selection (Windows terminal convention)
+      if (ev.ctrlKey && ev.shiftKey && (ev.key === 'c' || ev.key === 'C' || ev.code === 'KeyC')) {
+        if (copyTerminalSelection(terminal)) {
+          ev.preventDefault()
+          return false
+        }
+      }
+      // Ctrl/Cmd+V paste
+      if (mod && !ev.altKey && !ev.shiftKey && (ev.key === 'v' || ev.key === 'V')) {
+        ev.preventDefault()
+        void navigator.clipboard.readText().then((text) => {
+          if (text) void api.write(id, text)
+        }).catch(() => {})
+        return false
+      }
       const hasGhost = Boolean(g.suffix) || g.menuOpen
       if (ev.key === ' ' && ev.ctrlKey && !ev.altKey && !ev.metaKey) {
         ev.preventDefault()
@@ -407,6 +439,12 @@
       // Reset menu on normal typing
       if (g.menuOpen && data.length === 1 && data !== '\t') g.menuOpen = false
       scheduleGhost(id)
+    })
+    // Right-click copy when selection exists
+    terminal.element?.addEventListener('contextmenu', (ev) => {
+      if (!terminal.hasSelection()) return
+      ev.preventDefault()
+      copyTerminalSelection(terminal)
     })
   }
 
@@ -652,22 +690,6 @@
     if (!paneIds[1]) await addTerminal(app.activeProject?.path, currentProjectId, 1)
   }
 
-  async function closeSplit(): Promise<void> {
-    const moved = paneIds[1]
-    if (moved) {
-      paneTabs = [ [...paneTabs[0], moved], paneTabs[1].filter((id) => id !== moved) ]
-    }
-    paneIds[1] = null
-    paneIds = [...paneIds]
-    focusedPane = 0
-    activeId = paneIds[0]
-    syncWorkspace()
-    secondaryHost?.replaceChildren()
-    await tick()
-    await mountPane(0)
-    terminals.get(activeId ?? '')?.focus()
-  }
-
   async function focusPane(pane: 0 | 1): Promise<void> {
     const id = paneIds[pane]
     if (id) await activateTerminal(id, pane)
@@ -859,7 +881,7 @@
       onfocusin={() => void focusPane(0)}
     >
       <div
-        class="flex min-h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
+        class="flex h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
         role="tablist"
         aria-label="Primary terminal pane"
       >
@@ -868,8 +890,8 @@
           {#if tab}
             <div
               class="flex h-full items-center border-r border-white/5 {tab.id === activeId
-                ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
-                : ''}"
+                ? 'border-b-2 border-b-studio-purple bg-studio-purple/20'
+                : 'border-b-2 border-b-transparent'}"
             >
               {#if editingId === tab.id}
                 <input
@@ -886,7 +908,7 @@
               {:else}
                 <button
                   type="button"
-                  class="flex items-center gap-1.5 px-1.5 py-2 pl-2.5 font-mono text-[10px] {tab.id === activeId
+                  class="flex items-center gap-1.5 px-1.5 pl-2.5 font-mono text-[10px] {tab.id === activeId
                     ? 'text-studio-text'
                     : 'text-studio-text-dim hover:text-studio-text'}"
                   role="tab"
@@ -911,7 +933,7 @@
         {/each}
         <button
           type="button"
-          class="ml-1.5 grid size-7 shrink-0 place-items-center self-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          class="ml-1.5 grid size-7 shrink-0 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
           aria-label="New terminal"
           title="New terminal"
           onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}
@@ -971,7 +993,7 @@
       onfocusin={() => void focusPane(1)}
     >
       <div
-        class="flex min-h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
+        class="flex h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
         role="tablist"
         aria-label="Secondary terminal pane"
       >
@@ -980,8 +1002,8 @@
           {#if tab}
             <div
               class="flex h-full items-center border-r border-white/5 {tab.id === activeId
-                ? 'bg-studio-purple/20 border-b-2 border-b-studio-purple'
-                : ''}"
+                ? 'border-b-2 border-b-studio-purple bg-studio-purple/20'
+                : 'border-b-2 border-b-transparent'}"
             >
               {#if editingId === tab.id}
                 <input
@@ -998,7 +1020,7 @@
               {:else}
                 <button
                   type="button"
-                  class="flex items-center gap-1.5 px-1.5 py-2 pl-2.5 font-mono text-[10px] {tab.id === activeId
+                  class="flex items-center gap-1.5 px-1.5 pl-2.5 font-mono text-[10px] {tab.id === activeId
                     ? 'text-studio-text'
                     : 'text-studio-text-dim hover:text-studio-text'}"
                   role="tab"
@@ -1023,7 +1045,7 @@
         {/each}
         <button
           type="button"
-          class="ml-1.5 grid size-7 shrink-0 place-items-center self-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
+          class="ml-1.5 grid size-7 shrink-0 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
           aria-label="New terminal in split pane"
           title="New terminal in split pane"
           onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}

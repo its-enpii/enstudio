@@ -15,16 +15,13 @@
 </script>
 
 <header class="flex h-full w-full items-center justify-between gap-3">
-  <div class="flex min-w-0 items-center gap-2">
-    <span class="truncate text-[13px] font-semibold tracking-tight text-studio-text">
-      {state.activeProject ? state.projectLabel(state.activeProject) : 'enpiistudio'}
-    </span>
-    <!-- Busy pulse lives on the project row in the sidebar (multi-project safe). -->
-  </div>
+  <!-- spacer balances right tools so mode switch stays centered; inherits drag -->
+  <div class="w-[72px] shrink-0" aria-hidden="true"></div>
 
   <!-- macOS segmented control -->
   <div
     class="flex items-center rounded-lg bg-black/25 p-0.5 ring-1 ring-white/8"
+    style="-webkit-app-region: no-drag"
     role="tablist"
     aria-label={t('topnav.modeList')}
   >
@@ -45,7 +42,7 @@
     {/each}
   </div>
 
-  <div class="flex items-center gap-0.5">
+  <div class="flex items-center gap-0.5" style="-webkit-app-region: no-drag">
     <button
       type="button"
       class="relative grid size-8 place-items-center rounded-full text-studio-text-dim transition-colors hover:bg-white/8 hover:text-studio-text {state.notificationsOpen

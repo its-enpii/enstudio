@@ -584,6 +584,10 @@ interface ProjectWorkspace {
   busy?: boolean
   streamingId?: string | null
   pendingApprovals?: ApprovalRequest[]
+  pendingAsks?: AskUserRequest[]
+  planMode?: boolean
+  promptQueue?: QueuedPrompt[]
+  turnStartedAt?: number | null
 }
 
 /** Live UI state for one agent session (supports concurrent background runs). */
@@ -886,6 +890,8 @@ class AppState {
       if (patch.run !== undefined) this.run = patch.run
       if (patch.streamingId !== undefined) this.streamingId = patch.streamingId
       if (patch.pendingApprovals) this.pendingApprovals = patch.pendingApprovals
+      if (patch.pendingAsks) this.pendingAsks = patch.pendingAsks
+      if (patch.planMode !== undefined) this.planMode = patch.planMode
       if (patch.approvals) this.approvals = patch.approvals
       if (patch.diffs) this.diffs = patch.diffs
       if (patch.checkpoints) this.checkpoints = patch.checkpoints
@@ -958,16 +964,17 @@ class AppState {
     }
     const id = crypto.randomUUID()
     this.approvalNotifId = id
+    const notification: AppNotification = {
+      id,
+      type: 'warning',
+      title,
+      detail,
+      ts: Date.now(),
+      read: false,
+      visible: true,
+    }
     this.notifications = [
-      {
-        id,
-        type: 'warning',
-        title,
-        detail,
-        ts: Date.now(),
-        read: false,
-        visible: true,
-      },
+      notification,
       ...this.notifications,
     ].slice(0, 50)
     // Sticky longer while queue open — still auto-hide eventually
@@ -994,6 +1001,8 @@ class AppState {
       this.run = live.run
       this.streamingId = live.streamingId
       this.pendingApprovals = live.pendingApprovals
+      this.pendingAsks = live.pendingAsks ?? []
+      this.planMode = live.planMode ?? false
       this.approvals = live.approvals
       this.diffs = live.diffs
       this.checkpoints = live.checkpoints
@@ -1032,6 +1041,10 @@ class AppState {
       busy: this.busy,
       streamingId: this.streamingId,
       pendingApprovals: this.pendingApprovals,
+      pendingAsks: this.pendingAsks,
+      planMode: this.planMode,
+      promptQueue: this.promptQueue,
+      turnStartedAt: this.turnStartedAt,
     })
   }
 
@@ -1049,6 +1062,10 @@ class AppState {
     this.attachments = ws?.attachments ?? []
     this.streamingId = ws?.streamingId ?? null
     this.pendingApprovals = ws?.pendingApprovals ?? []
+    this.pendingAsks = ws?.pendingAsks ?? []
+    this.planMode = ws?.planMode ?? false
+    this.promptQueue = ws?.promptQueue ?? []
+    this.turnStartedAt = ws?.turnStartedAt ?? null
     this.busy = ws?.busy ?? false
   }
 

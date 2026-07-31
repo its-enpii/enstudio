@@ -8,11 +8,23 @@
   import { openSearchPanel, search, searchKeymap } from '@codemirror/search'
   import { EditorView, drawSelection, keymap, lineNumbers } from '@codemirror/view'
   import { state as app, fontStack, EDITOR_FONT_SIZE } from '../store.svelte'
-  import { createProjectEntry, editProjectFileExact, formatProjectFile, getProjectDiagnostics, listProjectDir, readProjectFile, searchProjectFiles, type ProjectDiagnostic } from '../enpii'
+  import {
+    createProjectEntry,
+    deleteProjectEntry,
+    editProjectFileExact,
+    formatProjectFile,
+    getProjectDiagnostics,
+    listProjectDir,
+    readProjectFile,
+    renameProjectEntry,
+    searchProjectFiles,
+    type ProjectDiagnostic,
+  } from '../enpii'
   import { color } from '../theme'
   import { t } from '../i18n/index.svelte'
-  import { ConfirmDialog } from './ui'
+  import { ConfirmDialog, TextInput } from './ui'
   import { Icon } from '../icons'
+  import { syncCodePanel } from '../code-panel.svelte'
 
   type Entry = { kind: 'd' | 'f'; name: string; path: string; depth: number }
   type CodeTab = { path: string; content: string; originalContent: string; preview?: boolean }
@@ -36,8 +48,15 @@
   let pendingClosePath = $state<string | null>(null)
   let activeDir = $state('.')
   let creating = $state<'file' | 'directory' | null>(null)
+  /** Parent dir for inline create (not always root). */
+  let createParent = $state('.')
   let createName = $state('')
   let createInput = $state<HTMLInputElement>()
+  let renamingPath = $state<string | null>(null)
+  let renameName = $state('')
+  let renameInput = $state<HTMLInputElement>()
+  let pendingDeletePath = $state<string | null>(null)
+  let ctxMenu = $state<null | { x: number; y: number; entry: Entry | { kind: 'd'; name: string; path: '.' } }>(null)
   let searchQuery = $state('')
   let searchResults = $state<string[]>([])
   let searching = $state(false)
@@ -61,6 +80,14 @@
   let switchToken = 0
   const workspaces = new Map<string, CodeWorkspace>()
   const dirty = $derived(selectedPath !== null && content !== originalContent)
+
+  $effect(() => {
+    syncCodePanel({
+      path: selectedPath,
+      content,
+      originalContent,
+    })
+  })
   const rows = $derived.by(() => {
     const result: Entry[] = []
     const visit = (dir: string, depth: number): void => {
@@ -282,7 +309,10 @@
   }
 
   function onWindowKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && toolsOpen) toolsOpen = false
+    if (event.key === 'Escape') {
+      if (toolsOpen) toolsOpen = false
+      if (ctxMenu) ctxMenu = null
+    }
   }
 
   function onAppShortcut(shortcut: string): void {
@@ -293,6 +323,7 @@
 
   function onWindowClick(event: MouseEvent): void {
     if (toolsOpen && !toolsMenu?.contains(event.target as Node)) toolsOpen = false
+    if (ctxMenu) ctxMenu = null
   }
 
   function toggleRoot(): void {
@@ -301,29 +332,173 @@
     activeDir = '.'
   }
 
-  function beginCreate(kind: 'file' | 'directory'): void {
+  function beginCreate(kind: 'file' | 'directory', parentDir?: string): void {
+    const parent = parentDir ?? activeDir ?? '.'
+    createParent = parent
+    activeDir = parent
     creating = kind
     createName = ''
+    renamingPath = null
+    ctxMenu = null
+    // Ensure parent is expanded so the inline field is visible under it.
+    expanded['.'] = true
+    if (parent !== '.') expanded[parent] = true
+    expanded = { ...expanded }
     void tick().then(() => createInput?.focus())
+  }
+
+  async function expandToPath(rel: string): Promise<void> {
+    const clean = rel.replace(/\\/g, '/').replace(/^\.\//, '')
+    const segs = clean.split('/').filter(Boolean)
+    let dir = '.'
+    await loadChildren('.', true)
+    expanded['.'] = true
+    for (let i = 0; i < segs.length - 1; i++) {
+      dir = joinPath(dir, segs[i]!)
+      await loadChildren(dir, true)
+      expanded[dir] = true
+    }
+    expanded = { ...expanded }
   }
 
   async function submitCreate(): Promise<void> {
     const project = app.activeProject
     const kind = creating
-    const name = createName.trim()
+    const name = createName.trim().replace(/\\/g, '/')
+    const parent = createParent || activeDir || '.'
     if (!project || !kind || !name) return
     error = ''
     try {
-      const created = await createProjectEntry(project.path, activeDir, name, kind)
+      const created = await createProjectEntry(project.path, parent, name, kind)
       creating = null
       createName = ''
-      expanded['.'] = true
-      expanded[activeDir] = true
-      expanded = { ...expanded }
-      await loadChildren(activeDir, true)
-      if (kind === 'file') await readPath(created.path, { pin: true })
+      await expandToPath(created.path)
+      // Refresh all ancestors so tree shows new nodes.
+      const parts = created.path.split('/')
+      let d = '.'
+      await loadChildren('.', true)
+      for (let i = 0; i < parts.length - 1; i++) {
+        d = joinPath(d, parts[i]!)
+        await loadChildren(d, true)
+      }
+      if (kind === 'directory') {
+        activeDir = created.path
+        await loadChildren(created.path, true)
+        expanded[created.path] = true
+        expanded = { ...expanded }
+      } else {
+        activeDir = parentPath(created.path)
+        await readPath(created.path, { pin: true })
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  function openCtx(e: MouseEvent, entry: Entry | { kind: 'd'; name: string; path: '.' }): void {
+    e.preventDefault()
+    e.stopPropagation()
+    ctxMenu = {
+      x: Math.min(e.clientX, window.innerWidth - 200),
+      y: Math.min(e.clientY, window.innerHeight - 200),
+      entry,
+    }
+    if (entry.kind === 'd') activeDir = entry.path
+  }
+
+  function beginRename(entry: Entry): void {
+    ctxMenu = null
+    renamingPath = entry.path
+    renameName = entry.name
+    creating = null
+    void tick().then(() => {
+      renameInput?.focus()
+      renameInput?.select()
+    })
+  }
+
+  async function submitRename(): Promise<void> {
+    const project = app.activeProject
+    const from = renamingPath
+    const name = renameName.trim()
+    if (!project || !from || !name || name === from.split('/').pop()) {
+      renamingPath = null
+      return
+    }
+    error = ''
+    try {
+      const res = await renameProjectEntry(project.path, from, name)
+      renamingPath = null
+      const parent = parentPath(from)
+      await loadChildren(parent === '.' ? '.' : parent, true)
+      // Update open tabs
+      tabs = tabs.map((t) =>
+        t.path === from || t.path.startsWith(`${from}/`)
+          ? { ...t, path: t.path === from ? res.path : `${res.path}${t.path.slice(from.length)}` }
+          : t,
+      )
+      if (selectedPath === from) selectedPath = res.path
+      else if (selectedPath?.startsWith(`${from}/`)) {
+        selectedPath = `${res.path}${selectedPath.slice(from.length)}`
+      }
+      if (activeDir === from) activeDir = res.path
+      if (selectedPath === res.path) await readPath(res.path, { pin: true })
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  function requestDelete(entry: Entry): void {
+    ctxMenu = null
+    pendingDeletePath = entry.path
+  }
+
+  async function confirmDelete(): Promise<void> {
+    const project = app.activeProject
+    const path = pendingDeletePath
+    pendingDeletePath = null
+    if (!project || !path) return
+    error = ''
+    try {
+      await deleteProjectEntry(project.path, path)
+      const parent = parentPath(path)
+      // Close tabs under deleted path
+      const doomed = tabs.filter((t) => t.path === path || t.path.startsWith(`${path}/`)).map((t) => t.path)
+      for (const p of doomed) {
+        tabs = tabs.filter((t) => t.path !== p)
+        if (selectedPath === p) {
+          selectedPath = null
+          content = ''
+          originalContent = ''
+          editorView?.destroy()
+          editorView = undefined
+        }
+      }
+      if (activeDir === path || activeDir.startsWith(`${path}/`)) activeDir = parent
+      delete children[path]
+      children = { ...children }
+      await loadChildren(parent, true)
+      if (tabs.length && !selectedPath) await activateTab(tabs[tabs.length - 1]!)
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function copyPath(entry: Entry | { path: string }, relative: boolean): Promise<void> {
+    ctxMenu = null
+    const project = app.activeProject
+    if (!project) return
+    const rel = entry.path === '.' ? '' : entry.path.replace(/\\/g, '/')
+    const text = relative
+      ? rel || '.'
+      : rel
+        ? `${project.path.replace(/[\\/]+$/, '')}/${rel}`.replace(/\//g, project.path.includes('\\') ? '\\' : '/')
+        : project.path
+    try {
+      await navigator.clipboard.writeText(text)
+      app.notify('success', relative ? 'Relative path copied' : 'Path copied', text)
+    } catch {
+      app.notify('error', 'Copy failed', text)
     }
   }
 
@@ -626,24 +801,21 @@
   {#if !app.activeProject}
     <div class="m-4 grid h-[calc(100%-32px)] place-items-center rounded-lg border border-dashed border-border-subtle text-studio-text-dim">
       <div class="text-center">
-        <div class="mb-1.5 font-semibold text-white">Open a project</div>
-        <div class="text-xs">Code mode needs a workspace.</div>
+        <div class="mb-1.5 font-semibold text-white">{t('code.openProject')}</div>
+        <div class="text-xs">{t('code.needsWorkspace')}</div>
       </div>
     </div>
   {:else}
     <div class="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)]">
       <aside class="overflow-auto border-r border-border-subtle p-4">
         <div class="mb-2 flex items-center gap-1">
-          <div class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border-subtle bg-studio-dark px-2 py-1">
-            <span class="text-studio-text-dim">⌕</span>
-            <input
-              class="min-w-0 flex-1 bg-transparent text-xs text-studio-text outline-none placeholder:text-studio-text-dim"
-              value={searchQuery}
-              placeholder="Search files"
-              aria-label="Search project files"
-              oninput={(event) => scheduleSearch(event.currentTarget.value)}
-            />
-          </div>
+          <TextInput
+            class="min-w-0 flex-1"
+            value={searchQuery}
+            placeholder={t('code.searchFiles')}
+            aria-label="Search project files"
+            oninput={(event) => scheduleSearch(event.currentTarget.value)}
+          />
           <details class="relative" bind:this={toolsMenu} bind:open={toolsOpen}>
             <summary
               class="grid size-7 cursor-pointer place-items-center list-none rounded-md text-studio-text-dim hover:bg-white/5 hover:text-studio-text [&::-webkit-details-marker]:hidden"
@@ -651,8 +823,8 @@
               aria-label="File actions"><Icon name="more-vertical" size={14} /></summary
             >
             <div class="absolute right-0 z-20 mt-1 grid min-w-[140px] gap-0.5 rounded-lg border border-border-subtle bg-studio-card p-1 shadow-xl">
-              <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('file') }}>New File</button>
-              <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('directory') }}>New Folder</button>
+              <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('file', activeDir) }}>New File</button>
+              <button type="button" class="rounded px-2.5 py-1.5 text-left text-xs text-studio-text hover:bg-white/5" onclick={() => { toolsOpen = false; beginCreate('directory', activeDir) }}>New Folder</button>
             </div>
           </details>
         </div>
@@ -662,6 +834,7 @@
             ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
             : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
           onclick={toggleRoot}
+          oncontextmenu={(e) => openCtx(e, { kind: 'd', name: app.activeProject ? app.projectLabel(app.activeProject) : 'root', path: '.' })}
         >
           <span class="grid w-3 place-items-center text-studio-text-dim"
             ><Icon name={expanded['.'] ? 'chevron-down' : 'chevron-right'} size={10} /></span
@@ -669,15 +842,15 @@
           <Icon name="folder" size={12} class="shrink-0 text-studio-text-dim" />
           <span class="truncate">{app.projectLabel(app.activeProject)}</span>
         </button>
-        {#if creating}
-          <form class="mb-1 flex items-center gap-1.5 px-2" onsubmit={(event) => { event.preventDefault(); void submitCreate() }}>
+        {#if creating && createParent === '.'}
+          <form class="mb-1 flex items-center gap-1.5 px-2" style="padding-left:26px" onsubmit={(event) => { event.preventDefault(); void submitCreate() }}>
             <Icon name={creating === 'file' ? 'file' : 'folder'} size={12} class="shrink-0 text-studio-text-dim" />
             <input
               class="min-w-0 flex-1 rounded border border-studio-purple/50 bg-studio-dark px-1.5 py-0.5 text-xs text-studio-text outline-none"
               bind:this={createInput}
               bind:value={createName}
-              placeholder={creating === 'file' ? 'filename' : 'folder name'}
-              onblur={() => { creating = null; createName = '' }}
+              placeholder={creating === 'file' ? 'path/to/file.ts' : 'folder or nested/path'}
+              onblur={() => { if (!createName.trim()) { creating = null; createName = '' } }}
               onkeydown={(event) => { if (event.key === 'Escape') { creating = null; createName = '' } }}
             />
           </form>
@@ -705,25 +878,60 @@
             <div class="p-4 text-xs text-studio-text-dim">Loading…</div>
           {/if}
           {#each rows as entry (entry.path)}
-            <button
-              type="button"
-              class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-xs {selectedPath === entry.path || activeDir === entry.path
-                ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
-                : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
-              style={`padding-left:${10 + entry.depth * 16}px`}
-              onclick={() => void openEntry(entry)}
-              ondblclick={() => void pinEntry(entry)}
-              title={entry.kind === 'f' ? 'Click preview · double-click pin' : undefined}
-            >
-              <span class="grid w-3 place-items-center text-studio-text-dim">
-                {#if entry.kind === 'd'}
-                  <Icon name={expanded[entry.path] ? 'chevron-down' : 'chevron-right'} size={10} />
-                {/if}
-              </span>
-              <Icon name={entry.kind === 'd' ? 'folder' : 'file'} size={12} class="shrink-0" />
-              <span class="min-w-0 truncate">{entry.name}</span>
-              {#if loadingDirs[entry.path]}<span class="ml-auto text-studio-text-dim">···</span>{/if}
-            </button>
+            {#if renamingPath === entry.path}
+              <form
+                class="mb-0.5 flex items-center gap-1.5 py-1 pr-2"
+                style={`padding-left:${10 + entry.depth * 16}px`}
+                onsubmit={(event) => { event.preventDefault(); void submitRename() }}
+              >
+                <Icon name={entry.kind === 'd' ? 'folder' : 'file'} size={12} class="shrink-0 text-studio-text-dim" />
+                <input
+                  class="min-w-0 flex-1 rounded border border-studio-purple/50 bg-studio-dark px-1.5 py-0.5 text-xs text-studio-text outline-none"
+                  bind:this={renameInput}
+                  bind:value={renameName}
+                  onblur={() => void submitRename()}
+                  onkeydown={(event) => { if (event.key === 'Escape') { renamingPath = null } }}
+                />
+              </form>
+            {:else}
+              <button
+                type="button"
+                class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-xs {selectedPath === entry.path || activeDir === entry.path
+                  ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
+                  : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
+                style={`padding-left:${10 + entry.depth * 16}px`}
+                onclick={() => void openEntry(entry)}
+                ondblclick={() => void pinEntry(entry)}
+                oncontextmenu={(e) => openCtx(e, entry)}
+                title={entry.kind === 'f' ? 'Click preview · double-click pin · right-click menu' : 'Right-click for actions'}
+              >
+                <span class="grid w-3 place-items-center text-studio-text-dim">
+                  {#if entry.kind === 'd'}
+                    <Icon name={expanded[entry.path] ? 'chevron-down' : 'chevron-right'} size={10} />
+                  {/if}
+                </span>
+                <Icon name={entry.kind === 'd' ? 'folder' : 'file'} size={12} class="shrink-0" />
+                <span class="min-w-0 truncate">{entry.name}</span>
+                {#if loadingDirs[entry.path]}<span class="ml-auto text-studio-text-dim">···</span>{/if}
+              </button>
+            {/if}
+            {#if creating && createParent === entry.path && entry.kind === 'd'}
+              <form
+                class="mb-1 flex items-center gap-1.5 py-0.5 pr-2"
+                style={`padding-left:${10 + (entry.depth + 1) * 16}px`}
+                onsubmit={(event) => { event.preventDefault(); void submitCreate() }}
+              >
+                <Icon name={creating === 'file' ? 'file' : 'folder'} size={12} class="shrink-0 text-studio-text-dim" />
+                <input
+                  class="min-w-0 flex-1 rounded border border-studio-purple/50 bg-studio-dark px-1.5 py-0.5 text-xs text-studio-text outline-none"
+                  bind:this={createInput}
+                  bind:value={createName}
+                  placeholder={creating === 'file' ? 'path/to/file.ts' : 'folder or nested/path'}
+                  onblur={() => { if (!createName.trim()) { creating = null; createName = '' } }}
+                  onkeydown={(event) => { if (event.key === 'Escape') { creating = null; createName = '' } }}
+                />
+              </form>
+            {/if}
           {/each}
         {/if}
       </aside>
@@ -792,7 +1000,7 @@
           </div>
           {#if dirty || formatting}
             <div class="flex items-center justify-end gap-2 border-b border-border-subtle bg-studio-sidebar/40 px-3 py-1 text-[11px] text-studio-text-dim">
-              {#if dirty}<span class="text-studio-gold">Edited · Cmd/Ctrl+S</span>{/if}
+              {#if dirty}<span class="text-studio-gold">{t('code.edited')}</span>{/if}
               {#if formatting}<span>Formatting…</span>{/if}
             </div>
           {/if}
@@ -865,3 +1073,39 @@
   onCancel={() => resolveClose(false)}
   onConfirm={() => resolveClose(true)}
 />
+
+<ConfirmDialog
+  open={pendingDeletePath != null}
+  title="Delete"
+  message={pendingDeletePath ? `Delete “${pendingDeletePath}”? This cannot be undone.` : ''}
+  cancelLabel={t('code.cancel')}
+  confirmLabel="Delete"
+  danger
+  onCancel={() => (pendingDeletePath = null)}
+  onConfirm={() => void confirmDelete()}
+/>
+
+{#if ctxMenu}
+  {@const entry = ctxMenu.entry}
+  <div
+    class="fixed z-[90] min-w-[11.5rem] overflow-hidden rounded-lg border border-border-subtle bg-studio-card py-1 shadow-xl"
+    style="left:{ctxMenu.x}px;top:{ctxMenu.y}px"
+    role="menu"
+    tabindex="-1"
+    onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => e.stopPropagation()}
+  >
+    {#if entry.kind === 'd'}
+      <button type="button" role="menuitem" class="flex w-full px-3 py-1.5 text-left text-[12px] text-studio-text hover:bg-white/8" onclick={() => beginCreate('file', entry.path)}>New file</button>
+      <button type="button" role="menuitem" class="flex w-full px-3 py-1.5 text-left text-[12px] text-studio-text hover:bg-white/8" onclick={() => beginCreate('directory', entry.path)}>New folder</button>
+      <div class="my-1 border-t border-border-subtle"></div>
+    {/if}
+    {#if entry.path !== '.'}
+      <button type="button" role="menuitem" class="flex w-full px-3 py-1.5 text-left text-[12px] text-studio-text hover:bg-white/8" onclick={() => beginRename(entry as Entry)}>Rename</button>
+      <button type="button" role="menuitem" class="flex w-full px-3 py-1.5 text-left text-[12px] text-danger hover:bg-danger-bg" onclick={() => requestDelete(entry as Entry)}>Delete</button>
+      <div class="my-1 border-t border-border-subtle"></div>
+    {/if}
+    <button type="button" role="menuitem" class="flex w-full px-3 py-1.5 text-left text-[12px] text-studio-text hover:bg-white/8" onclick={() => void copyPath(entry, false)}>Copy path</button>
+    <button type="button" role="menuitem" class="flex w-full px-3 py-1.5 text-left text-[12px] text-studio-text hover:bg-white/8" onclick={() => void copyPath(entry, true)}>Copy relative path</button>
+  </div>
+{/if}

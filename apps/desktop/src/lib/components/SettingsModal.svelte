@@ -18,25 +18,21 @@
   } from '../store.svelte'
   import { t } from '../i18n/index.svelte'
   import {
-    createCronJob,
-    deleteCronJob,
     deleteSshHost,
-    listCronJobs,
     listMcpServers,
     listSsh,
     loadProviderConfig,
     saveProviderConfig,
     startSshTunnel,
     stopSshTunnel,
-    toggleCronJob,
     upsertSshHost,
-    type CronJobRow,
     type McpServerInfo,
     type SshHostInfo,
     type SshTunnelInfo,
   } from '../enpii'
   import {
     Button,
+    ConfirmDialog,
     TextInput,
     NumberInput,
     Textarea,
@@ -45,7 +41,7 @@
     type SelectOption,
   } from './ui'
 
-  type Section = 'provider' | 'permissions' | 'network' | 'schedule' | 'appearance' | 'keybindings'
+  type Section = 'provider' | 'permissions' | 'network' | 'appearance' | 'keybindings'
 
   const ENPII_DEFAULTS = {
     baseUrl: 'https://ai.enpiistudio.com/v1',
@@ -87,12 +83,8 @@
   let sshEditing = $state<string | null>(null)
   let sshForm = $state({ name: '', host: '', user: '', port: 22 as number | null, identityFile: '' })
   let sshFormError = $state('')
+  let sshDeleteTarget = $state<string | null>(null)
   let mcpServers = $state<McpServerInfo[]>([])
-  let cronJobs = $state<CronJobRow[]>([])
-  let cronBusy = $state(false)
-  let cronFormOpen = $state(false)
-  let cronForm = $state({ name: '', schedule: '0 9 * * 1-5', prompt: '' })
-  let cronFormError = $state('')
 
   // Agent runtime prefs (local for now — not yet in config.toml)
   let maxTurns = $state<number | null>(app.ui.maxTurns)
@@ -108,7 +100,6 @@
     { id: 'provider', label: t('settings.nav.provider'), blurb: t('settings.nav.provider.blurb') },
     { id: 'permissions', label: t('settings.nav.permissions'), blurb: t('settings.nav.permissions.blurb') },
     { id: 'network', label: t('settings.nav.network'), blurb: t('settings.nav.network.blurb') },
-    { id: 'schedule', label: t('settings.nav.schedule'), blurb: t('settings.nav.schedule.blurb') },
     { id: 'appearance', label: t('settings.nav.appearance'), blurb: t('settings.nav.appearance.blurb') },
     { id: 'keybindings', label: t('settings.nav.keybindings'), blurb: t('settings.nav.keybindings.blurb') },
   ])
@@ -189,8 +180,14 @@
     }
   }
 
-  async function removeSshHost(name: string): Promise<void> {
-    if (!confirm(t('settings.network.sshDeleteConfirm', { name }))) return
+  function requestRemoveSshHost(name: string): void {
+    sshDeleteTarget = name
+  }
+
+  async function confirmRemoveSshHost(): Promise<void> {
+    const name = sshDeleteTarget
+    if (!name) return
+    sshDeleteTarget = null
     sshBusy = name
     error = ''
     try {
@@ -227,9 +224,58 @@
     }
   }
 
-  const keybindingRows = $derived.by((): { id: KeybindingAction; label: string }[] => [
-    ...GLOBAL_ACTIONS.map((a) => ({ id: a.id, label: t(a.labelKey) })),
-    ...MODES.map((m) => ({ id: `mode.${m.id}` as KeybindingAction, label: t(m.openKey) })),
+  type KeyRow =
+    | { kind: 'bind'; id: KeybindingAction; label: string }
+    | { kind: 'fixed'; id: string; label: string; keys: string }
+  type KeyGroup = { id: string; label: string; rows: KeyRow[] }
+
+  const keybindingGroups = $derived.by((): KeyGroup[] => [
+    {
+      id: 'general',
+      label: t('settings.keybindings.group.general'),
+      rows: GLOBAL_ACTIONS.map((a) => ({ kind: 'bind' as const, id: a.id, label: t(a.labelKey) })),
+    },
+    {
+      id: 'modes',
+      label: t('settings.keybindings.group.modes'),
+      rows: MODES.map((m) => ({
+        kind: 'bind' as const,
+        id: `mode.${m.id}` as KeybindingAction,
+        label: t(m.openKey),
+      })),
+    },
+    {
+      id: 'browser',
+      label: t('settings.keybindings.group.browser'),
+      rows: [
+        { kind: 'fixed', id: 'browser.find', label: t('settings.keybindings.browser.find'), keys: 'Mod+F' },
+        { kind: 'fixed', id: 'browser.address', label: t('settings.keybindings.browser.address'), keys: 'Mod+L' },
+        { kind: 'fixed', id: 'browser.newTab', label: t('settings.keybindings.browser.newTab'), keys: 'Mod+T' },
+        { kind: 'fixed', id: 'browser.closeTab', label: t('settings.keybindings.browser.closeTab'), keys: 'Mod+W' },
+        { kind: 'fixed', id: 'browser.reload', label: t('settings.keybindings.browser.reload'), keys: 'Mod+R' },
+        { kind: 'fixed', id: 'browser.nextTab', label: t('settings.keybindings.browser.nextTab'), keys: 'Mod+Tab' },
+        { kind: 'fixed', id: 'browser.prevTab', label: t('settings.keybindings.browser.prevTab'), keys: 'Mod+Shift+Tab' },
+        { kind: 'fixed', id: 'browser.back', label: t('settings.keybindings.browser.back'), keys: 'Alt+←' },
+        { kind: 'fixed', id: 'browser.forward', label: t('settings.keybindings.browser.forward'), keys: 'Alt+→' },
+      ],
+    },
+    {
+      id: 'code',
+      label: t('settings.keybindings.group.code'),
+      rows: [
+        { kind: 'fixed', id: 'code.save', label: t('settings.keybindings.code.save'), keys: 'Mod+S' },
+        { kind: 'fixed', id: 'code.find', label: t('settings.keybindings.code.find'), keys: 'Mod+F' },
+      ],
+    },
+    {
+      id: 'agent',
+      label: t('settings.keybindings.group.agent'),
+      rows: [
+        { kind: 'fixed', id: 'agent.allow', label: t('settings.keybindings.agent.allow'), keys: 'Y' },
+        { kind: 'fixed', id: 'agent.deny', label: t('settings.keybindings.agent.deny'), keys: 'N' },
+        { kind: 'fixed', id: 'agent.session', label: t('settings.keybindings.agent.session'), keys: 'S' },
+      ],
+    },
   ])
 
   const dialectOpts = $derived.by((): SelectOption[] =>
@@ -395,73 +441,7 @@
       void hydrateSsh()
       void hydrateMcp()
     }
-    if (section === 'schedule') void hydrateCron()
   })
-
-  async function hydrateCron(): Promise<void> {
-    if (!app.activeProject) {
-      cronJobs = []
-      return
-    }
-    try {
-      cronJobs = await listCronJobs()
-    } catch (err) {
-      cronJobs = []
-      error = err instanceof Error ? err.message : String(err)
-    }
-  }
-
-  async function saveCronForm(): Promise<void> {
-    cronFormError = ''
-    if (!app.activeProject) {
-      cronFormError = t('settings.schedule.needProject')
-      return
-    }
-    const name = cronForm.name.trim()
-    const schedule = cronForm.schedule.trim()
-    const prompt = cronForm.prompt.trim()
-    if (!name || !schedule || !prompt) {
-      cronFormError = 'name, schedule, prompt required'
-      return
-    }
-    cronBusy = true
-    try {
-      await createCronJob({ name, schedule, prompt, enabled: true })
-      cronForm = { name: '', schedule: '0 9 * * 1-5', prompt: '' }
-      cronFormOpen = false
-      await hydrateCron()
-      note = t('settings.schedule.saved')
-    } catch (err) {
-      cronFormError = err instanceof Error ? err.message : String(err)
-    } finally {
-      cronBusy = false
-    }
-  }
-
-  async function onCronToggle(job: CronJobRow): Promise<void> {
-    cronBusy = true
-    try {
-      await toggleCronJob(job.id, !job.enabled)
-      await hydrateCron()
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    } finally {
-      cronBusy = false
-    }
-  }
-
-  async function onCronDelete(job: CronJobRow): Promise<void> {
-    cronBusy = true
-    try {
-      await deleteCronJob(job.id)
-      await hydrateCron()
-      note = t('settings.schedule.deleted')
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    } finally {
-      cronBusy = false
-    }
-  }
 
   function close(): void {
     if (saving) return
@@ -490,7 +470,9 @@
       return
     }
     recording = null
-    app.notify('success', 'Shortcut updated', `${keybindingRows.find((item) => item.id === action)?.label}: ${binding}`)
+    const label =
+      keybindingGroups.flatMap((g) => g.rows).find((r) => r.kind === 'bind' && r.id === action)?.label ?? action
+    app.notify('success', 'Shortcut updated', `${label}: ${binding}`)
   }
 
   async function save(): Promise<void> {
@@ -616,7 +598,7 @@
     <aside class="flex min-h-0 flex-col gap-2 border-r border-border-subtle bg-studio-sidebar p-4">
       <div class="pb-4">
         <h2 id="settings-title" class="m-0 mb-1 text-base font-semibold text-studio-text">{t('settings.title')}</h2>
-        <p class="m-0 text-[11px] text-studio-text-dim">enpii · enpiistudio</p>
+        <p class="m-0 text-[11px] text-studio-text-dim">EnStudio</p>
       </div>
       <nav class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {#each nav as item}
@@ -900,7 +882,7 @@
                         }}
                       >{t('common.open')}</Button
                       >
-                      <Button variant="danger" size="sm" disabled={sshBusy !== null} onclick={() => void removeSshHost(h.name)}
+                      <Button variant="danger" size="sm" disabled={sshBusy !== null} onclick={() => requestRemoveSshHost(h.name)}
                         >{t('settings.network.sshDelete')}</Button
                       >
                     </div>
@@ -957,63 +939,6 @@
               </ul>
             {/if}
           </div>
-        {:else if section === 'schedule'}
-          <div class="flex flex-col gap-2.5">
-            <p class="m-0 text-[11px] leading-relaxed text-studio-text-dim">{t('settings.schedule.hint')}</p>
-            {#if !app.activeProject}
-              <p class="text-[11px] text-studio-text-dim">{t('settings.schedule.needProject')}</p>
-            {:else}
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="text-xs font-medium text-studio-text">{t('settings.nav.schedule')}</div>
-                <div class="flex flex-wrap gap-1.5">
-                  <Button variant="primary" size="sm" onclick={() => (cronFormOpen = true)}>+ {t('settings.schedule.add')}</Button>
-                  <Button variant="ghost" size="sm" onclick={() => void hydrateCron()}>{t('common.retry')}</Button>
-                </div>
-              </div>
-              {#if cronFormOpen}
-                <div class="grid gap-2 rounded-lg border border-studio-purple/35 bg-studio-purple/10 p-3">
-                  <TextInput label={t('settings.schedule.name')} bind:value={cronForm.name} placeholder="morning-check" disabled={cronBusy} />
-                  <TextInput label={t('settings.schedule.expr')} bind:value={cronForm.schedule} placeholder="0 9 * * 1-5" disabled={cronBusy} />
-                  <Textarea label={t('settings.schedule.prompt')} rows={3} bind:value={cronForm.prompt} disabled={cronBusy} placeholder="Review open PRs and summarize risk." />
-                  {#if cronFormError}<p class="m-0 text-[11px] text-danger">{cronFormError}</p>{/if}
-                  <div class="flex flex-wrap gap-1.5">
-                    <Button variant="primary" size="sm" loading={cronBusy} onclick={() => void saveCronForm()}>{t('common.save')}</Button>
-                    <Button variant="ghost" size="sm" disabled={cronBusy} onclick={() => { cronFormOpen = false; cronFormError = '' }}>{t('common.cancel')}</Button>
-                  </div>
-                </div>
-              {/if}
-              {#if cronJobs.length === 0 && !cronFormOpen}
-                <p class="text-[11px] text-studio-text-dim">{t('settings.schedule.empty')}</p>
-              {:else if cronJobs.length}
-                <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
-                  {#each cronJobs as job (job.id)}
-                    <li class="flex flex-col gap-1 rounded-lg border border-border-subtle p-3">
-                      <div class="flex flex-wrap items-start justify-between gap-2">
-                        <div class="min-w-0">
-                          <strong class="text-sm text-studio-text">{job.name}</strong>
-                          <code class="ml-1.5 font-mono text-[11px] text-studio-lavender">{job.schedule}</code>
-                          <span class="ml-1.5 text-[10px] {job.enabled ? 'text-studio-success-shell' : 'text-studio-text-dim'}">{job.enabled ? t('settings.schedule.enable') : t('settings.schedule.disable')}</span>
-                        </div>
-                        <div class="flex shrink-0 flex-wrap gap-1">
-                          <Button variant="ghost" size="sm" disabled={cronBusy} onclick={() => void onCronToggle(job)}>
-                            {job.enabled ? t('settings.schedule.disable') : t('settings.schedule.enable')}
-                          </Button>
-                          <Button variant="danger" size="sm" disabled={cronBusy} onclick={() => void onCronDelete(job)}>{t('settings.schedule.delete')}</Button>
-                        </div>
-                      </div>
-                      <div class="truncate text-[11px] text-studio-text-dim">{job.prompt}</div>
-                      <div class="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-white/35">
-                        <span>{t('settings.schedule.runs')} {job.runCount}</span>
-                        {#if job.nextRunAt}<span>{t('settings.schedule.next')} {job.nextRunAt}</span>{/if}
-                        {#if job.lastRunAt}<span>{t('settings.schedule.last')} {job.lastRunAt}</span>{/if}
-                        {#if job.lastError}<span class="text-danger">{t('settings.schedule.err')}: {job.lastError}</span>{/if}
-                      </div>
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-            {/if}
-          </div>
         {:else if section === 'appearance'}
           <div class="flex flex-col gap-5">
             <SmartSelect
@@ -1047,19 +972,33 @@
             />
           </div>
         {:else}
-          <div class="flex flex-col gap-1.5">
-            {#each keybindingRows as item (item.id)}
-              <div class="flex items-center justify-between gap-3 rounded-lg border border-border-subtle p-4">
-                <span class="text-sm text-studio-text">{item.label}</span>
-                <button
-                  type="button"
-                  class="rounded-lg border px-3 py-1 font-mono text-[11px] {recording === item.id
-                    ? 'border-studio-gold/50 bg-studio-gold/10 text-studio-gold'
-                    : 'border-border-subtle text-studio-text-dim hover:bg-white/5 hover:text-studio-text'}"
-                  onclick={() => (recording = item.id)}
-                  onkeydown={(event) => recordKeybinding(event, item.id)}
-                >{recording === item.id ? t('settings.keybindings.press') : app.keybindings[item.id]}</button>
-              </div>
+          <div class="flex flex-col gap-5">
+            {#each keybindingGroups as group (group.id)}
+              <section class="flex flex-col gap-1.5" aria-label={group.label}>
+                <h3 class="m-0 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim">{group.label}</h3>
+                {#each group.rows as item (item.id)}
+                  <div class="flex items-center justify-between gap-3 rounded-lg border border-border-subtle p-3.5">
+                    <div class="min-w-0">
+                      <span class="text-sm text-studio-text">{item.label}</span>
+                      {#if item.kind === 'fixed'}
+                        <span class="ml-2 text-[10px] text-studio-text-dim">{t('settings.keybindings.fixed')}</span>
+                      {/if}
+                    </div>
+                    {#if item.kind === 'bind'}
+                      <button
+                        type="button"
+                        class="shrink-0 rounded-lg border px-3 py-1 font-mono text-[11px] {recording === item.id
+                          ? 'border-studio-gold/50 bg-studio-gold/10 text-studio-gold'
+                          : 'border-border-subtle text-studio-text-dim hover:bg-white/5 hover:text-studio-text'}"
+                        onclick={() => (recording = item.id)}
+                        onkeydown={(event) => recordKeybinding(event, item.id)}
+                      >{recording === item.id ? t('settings.keybindings.press') : app.keybindings[item.id]}</button>
+                    {:else}
+                      <span class="shrink-0 rounded-lg border border-border-subtle/70 px-3 py-1 font-mono text-[11px] text-studio-text-dim">{item.keys}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </section>
             {/each}
           </div>
         {/if}
@@ -1073,7 +1012,7 @@
       </div>
 
       <footer class="flex items-center justify-end gap-2 border-t border-border-subtle px-6 py-4">
-        {#if section === 'keybindings' || section === 'network' || section === 'appearance' || section === 'schedule'}
+        {#if section === 'keybindings' || section === 'network' || section === 'appearance'}
           {#if section === 'keybindings'}
             <Button variant="ghost" onclick={() => app.resetKeybindings()}>{t('settings.resetDefaults')}</Button>
           {/if}
@@ -1093,3 +1032,14 @@
     </div>
   </div>
 </div>
+
+<ConfirmDialog
+  open={sshDeleteTarget != null}
+  title={t('settings.network.sshDelete')}
+  message={t('settings.network.sshDeleteConfirm', { name: sshDeleteTarget ?? '' })}
+  cancelLabel={t('common.cancel')}
+  confirmLabel={t('common.delete')}
+  danger
+  onCancel={() => (sshDeleteTarget = null)}
+  onConfirm={() => void confirmRemoveSshHost()}
+/>

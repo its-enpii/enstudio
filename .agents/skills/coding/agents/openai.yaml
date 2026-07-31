@@ -1,0 +1,4 @@
+interface:
+  display_name: "Production Coding"
+  short_description: "Implementasikan kode production dengan aman dan teruji"
+  default_prompt: "Gunakan $coding untuk mengimplementasikan perubahan ini secara minimal, aman, konsisten, dan teruji."

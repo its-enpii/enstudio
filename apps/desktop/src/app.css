@@ -151,7 +151,7 @@
   summary,
   nav,
   .studio-traffic,
-  .studio-traffic *,
+  .studio-traffic-btn,
   [data-no-select],
   [data-no-select] *,
   .select-none,
@@ -192,25 +192,31 @@
       0 8px 28px rgba(0, 0, 0, 0.28);
   }
 
-  /* Traffic lights (decorative on non-mac) */
+  /* Traffic lights = real window controls (frameless) */
   .studio-traffic {
     display: flex;
     align-items: center;
     gap: 7px;
   }
-  .studio-traffic > span {
+  .studio-traffic-btn {
     width: 12px;
     height: 12px;
+    padding: 0;
+    border: 0;
     border-radius: 999px;
+    cursor: pointer;
     box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25) inset;
   }
-  .studio-traffic > span:nth-child(1) {
+  .studio-traffic-btn:hover {
+    filter: brightness(1.12);
+  }
+  .studio-traffic-btn:nth-child(1) {
     background: #ff5f57;
   }
-  .studio-traffic > span:nth-child(2) {
+  .studio-traffic-btn:nth-child(2) {
     background: #febc2e;
   }
-  .studio-traffic > span:nth-child(3) {
+  .studio-traffic-btn:nth-child(3) {
     background: #28c840;
   }
 

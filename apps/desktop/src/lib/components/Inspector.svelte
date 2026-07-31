@@ -23,9 +23,10 @@
     type WorktreePreview,
   } from '../enpii'
   import { t } from '../i18n/index.svelte'
-  import { ConfirmDialog, Switch } from './ui'
+  import { Button, ConfirmDialog, Switch, TextInput } from './ui'
   import GitTools from './GitTools.svelte'
   import SshTools from './SshTools.svelte'
+  import ScheduleTools from './ScheduleTools.svelte'
 
   let wtPreview = $state<WorktreePreview | null>(null)
   let wtBusy = $state(false)
@@ -294,8 +295,8 @@
     return String(n)
   }
 
-  /** Session totals (preferred) or current-run snapshot. */
-  const shownUsage = $derived(app.usage ?? app.run?.usage ?? null)
+  /** Provider-reported usage for the latest turn; never session-accumulated. */
+  const shownUsage = $derived(app.run?.usage ?? null)
 
   async function onDiscardWorktree(): Promise<void> {
     wtBusy = true
@@ -380,25 +381,25 @@
   {:else}
   <section class="flex shrink-0 flex-col gap-3">
     <div class="flex items-center justify-between gap-2">
-      <h3 class="studio-label m-0">Run Status</h3>
-      <button type="button" class="rounded-lg px-2.5 py-1 font-mono text-[11px] text-studio-text-dim transition-colors hover:bg-white/5 hover:text-studio-text" onclick={() => pingEnpii()}>Ping</button>
+      <h3 class="studio-label m-0">{t('inspector.runStatus')}</h3>
+      <button type="button" class="rounded-lg px-2.5 py-1 font-mono text-[11px] text-studio-text-dim transition-colors hover:bg-white/5 hover:text-studio-text" onclick={() => pingEnpii()}>{t('inspector.ping')}</button>
     </div>
     <div class="flex min-w-0 items-center gap-2.5 rounded-md border p-2.5 text-[12px] font-medium {statusTone}" title={app.enpiiInfo ?? undefined}>
       <div class="size-2 shrink-0 rounded-sm {statusDot} {app.busy || app.approval ? 'studio-signal' : ''}"></div>
       <span class="truncate">{statusLabel}</span>
     </div>
     {#if app.provider && !app.provider.hasKey}
-      <div class="min-w-0 break-words text-[11px] leading-snug text-studio-text-dim"><span class="text-studio-gold">API key missing</span> · {app.provider.dialect}</div>
+      <div class="min-w-0 break-words text-[11px] leading-snug text-studio-text-dim"><span class="text-studio-gold">{t('inspector.apiKeyMissing')}</span> · {app.provider.dialect}</div>
     {/if}
   </section>
 
   <section class="flex shrink-0 flex-col gap-3">
     <div class="m-0 flex items-center justify-between gap-2">
-      <h3 class="studio-label m-0">Token Usage</h3>
+      <h3 class="studio-label m-0">{t('inspector.tokenUsage')}</h3>
       {#if shownUsage}
         <span
           class="font-mono text-[11px] font-medium tabular-nums text-studio-text"
-          title="Session totals (cumulative from provider)"
+          title={t('inspector.tokenTotals')}
         >
           {formatTokens(shownUsage.total)}
         </span>
@@ -471,23 +472,27 @@
 
     {#if app.session}
       <div class="mt-0.5 min-w-0">
-        <Switch compact bind:checked={memoryChecked} disabled={app.busy} description="Session memory" />
+        <Switch compact bind:checked={memoryChecked} disabled={app.busy} description={t('inspector.sessionMemory')} />
       </div>
     {/if}
   </section>
 
+  {#if app.mode === 'agent'}
+    <ScheduleTools />
+  {/if}
+
   <section class="flex shrink-0 flex-col gap-3">
-    <h3 class="studio-label m-0">Sessions</h3>
+    <h3 class="studio-label m-0">{t('inspector.sessions')}</h3>
     <div class="flex flex-wrap gap-1.5">
-      <button type="button" class="rounded-lg bg-studio-purple px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-45" disabled={!app.activeProject} onclick={() => void newSession()}>New</button>
-      <button type="button" class="rounded-lg border border-border-subtle px-3 py-1.5 text-[11px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={!app.session || isWorktreeSession} title="Export transcript as Markdown" onclick={() => void onExportTranscript()}>Export</button>
+      <Button variant="primary" size="sm" disabled={!app.activeProject} onclick={() => void newSession()}>{t('inspector.new')}</Button>
+      <Button variant="secondary" size="sm" disabled={!app.session || isWorktreeSession} title={t('inspector.exportTitle')} onclick={() => void onExportTranscript()}>{t('inspector.export')}</Button>
     </div>
     {#if mainSessions.length > 0}
       <div class="flex flex-col gap-1">
         {#each mainSessions as s (s.id)}
           {#if renamingId === s.id}
             <div class="flex items-center gap-1 rounded-md border border-studio-purple/40 bg-studio-purple/10 p-1.5">
-              <input class="min-w-0 flex-1 rounded-sm border border-border-subtle bg-studio-dark px-2 py-1 text-xs text-studio-text outline-none" bind:value={renameDraft} disabled={renameBusy} aria-label="Session title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void commitRename() } else if (e.key === 'Escape') { e.preventDefault(); cancelRename() } }} />
+              <TextInput class="min-w-0 flex-1" bind:value={renameDraft} disabled={renameBusy} aria-label="Session title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void commitRename() } else if (e.key === 'Escape') { e.preventDefault(); cancelRename() } }} />
               <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" disabled={renameBusy} onclick={() => void commitRename()}>Save</button>
               <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" disabled={renameBusy} onclick={cancelRename}>×</button>
             </div>
@@ -509,10 +514,10 @@
   </section>
 
   <section class="flex shrink-0 flex-col gap-3">
-    <h3 class="studio-label m-0">Worktrees</h3>
+    <h3 class="studio-label m-0">{t('inspector.worktrees')}</h3>
     <div class="flex flex-wrap gap-1.5">
-      <button type="button" class="rounded-lg border border-studio-purple/40 bg-studio-purple/15 px-3 py-1.5 text-[11px] font-medium text-studio-text hover:bg-studio-purple/25 disabled:opacity-45" disabled={!app.activeProject || wtBusy} title="Create sandbox worktree + chat" onclick={() => void startWorktreeSession()}>New</button>
-      <button type="button" class="rounded-lg border border-studio-purple/40 bg-studio-purple/15 px-3 py-1.5 text-[11px] font-medium text-studio-text hover:bg-studio-purple/25 disabled:opacity-45" disabled={!app.activeProject || wtBusy} title="Spawn 2 parallel sandbox agents" onclick={() => void startWorktreeAgents(2)}>×2</button>
+      <Button variant="secondary" size="sm" disabled={!app.activeProject || wtBusy} title="Create sandbox worktree + chat" onclick={() => void startWorktreeSession()}>{t('inspector.new')}</Button>
+      <Button variant="secondary" size="sm" disabled={!app.activeProject || wtBusy} title="Spawn 2 parallel sandbox agents" onclick={() => void startWorktreeAgents(2)}>×2</Button>
     </div>
 
     {#if isWorktreeSession}
@@ -564,8 +569,8 @@
           <Switch compact bind:checked={wtKeepBranch} disabled={wtBusy || app.busy} description="Keep enpii/* branch" />
         </div>
         <div class="mt-2 flex flex-wrap gap-1.5">
-          <button type="button" class="rounded-lg bg-studio-purple px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-45" disabled={wtBusy || app.busy || !wtPreview || wtPreview.ahead === 0 || wtPreview.dirty} title={wtPreview?.dirty ? 'Commit worktree changes first' : 'Merge into main and remove worktree'} onclick={() => void onApplyWorktree()}>Apply</button>
-          <button type="button" class="rounded-lg border border-danger/30 bg-danger-bg/30 px-3 py-1.5 text-[11px] text-danger disabled:opacity-45" disabled={wtBusy || app.busy} onclick={requestDiscardWorktree}>Discard</button>
+          <Button variant="primary" size="sm" disabled={wtBusy || app.busy || !wtPreview || wtPreview.ahead === 0 || wtPreview.dirty} title={wtPreview?.dirty ? 'Commit worktree changes first' : 'Merge into main and remove worktree'} onclick={() => void onApplyWorktree()}>Apply</Button>
+          <Button variant="danger" size="sm" disabled={wtBusy || app.busy} onclick={requestDiscardWorktree}>Discard</Button>
         </div>
       </div>
     {/if}
@@ -574,19 +579,18 @@
       <div class="flex flex-col gap-1.5">
         <div class="flex items-center justify-between gap-2 text-[10px] text-studio-text-dim">
           <span>{#if wtBusyCount > 0}{wtBusyCount}/{wtSessions.length} busy{/if}</span>
-          <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] hover:bg-white/5 disabled:opacity-45" disabled={!isWorktreeSession} title="Export active worktree transcript" onclick={() => void onExportTranscript()}>Export</button>
+          <Button variant="ghost" size="sm" disabled={!isWorktreeSession} title={t('inspector.exportTitle')} onclick={() => void onExportTranscript()}>{t('inspector.export')}</Button>
         </div>
         <div class="flex flex-col gap-1">
           {#each wtSessions as s (s.id)}
             {#if renamingId === s.id}
               <div class="flex items-center gap-1 rounded-md border border-studio-purple/40 bg-studio-purple/10 p-1.5">
-                <input class="min-w-0 flex-1 rounded-sm border border-border-subtle bg-studio-dark px-2 py-1 text-xs text-studio-text outline-none" bind:value={renameDraft} disabled={renameBusy} aria-label="Worktree title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void commitRename() } else if (e.key === 'Escape') { e.preventDefault(); cancelRename() } }} />
+                <TextInput class="min-w-0 flex-1" bind:value={renameDraft} disabled={renameBusy} aria-label="Worktree title" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void commitRename() } else if (e.key === 'Escape') { e.preventDefault(); cancelRename() } }} />
                 <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" disabled={renameBusy} onclick={() => void commitRename()}>Save</button>
                 <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5" disabled={renameBusy} onclick={cancelRename}>×</button>
               </div>
             {:else}
               {@const active = app.session?.id === s.id}
-              {@const running = app.isSessionBusy(s.id) || s.status === 'running' || s.status === 'awaiting_approval'}
               <div class="flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 {active ? 'border-studio-purple/40 bg-studio-purple/15' : 'border-transparent hover:border-border-subtle hover:bg-white/[0.03]'}" role="button" tabindex="0" onclick={() => void openSession(s.id)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openSession(s.id) } }}>
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-[12px] font-medium text-studio-text">{s.worktreeBranch ?? s.title}</span>
@@ -599,9 +603,9 @@
           {/each}
         </div>
         <div class="flex flex-wrap items-center gap-1">
-          <input class="min-w-0 flex-1 rounded-lg border border-border-subtle bg-studio-dark px-2.5 py-1 text-[11px] text-studio-text outline-none placeholder:text-studio-text-dim" type="text" placeholder="Fan-out to all worktrees…" bind:value={fanoutText} disabled={fanoutBusy} onkeydown={(e) => { if (e.key === 'Enter') void onFanout() }} />
+          <TextInput class="min-w-0 flex-1" placeholder="Fan-out to all worktrees…" bind:value={fanoutText} disabled={fanoutBusy} onkeydown={(e) => { if (e.key === 'Enter') void onFanout() }} />
           <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={fanoutBusy || !fanoutText.trim()} onclick={() => void onFanout()}>Send all</button>
-          <button type="button" class="rounded-lg px-2 py-0.5 text-[10px] text-studio-text-dim hover:bg-white/5 disabled:opacity-45" disabled={fanoutBusy} title="Merge clean worktrees into main (sequential)" onclick={requestApplyAllAgents}>Apply all</button>
+          <Button variant="ghost" size="sm" disabled={fanoutBusy} title="Merge clean worktrees into main (sequential)" onclick={requestApplyAllAgents}>Apply all</Button>
         </div>
         {#if applyAllReport}
           <div class="rounded-lg border p-4 {applyAllReport.ok ? 'border-border-subtle bg-studio-card' : 'border-danger/30 bg-danger-bg/20'}">

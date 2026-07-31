@@ -14,6 +14,7 @@
     type GitRemote,
     type GitStatus,
   } from '../enpii'
+  import { Button } from './ui'
 
   let status = $state<GitStatus | null>(null)
   let remotes = $state<GitRemote[]>([])
@@ -142,15 +143,10 @@
   <section class="flex flex-col gap-2">
     <div class="flex items-center justify-between gap-2">
       <span class="studio-label">Remote</span>
-      <button
-        type="button"
-        class="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-studio-text-dim ring-1 ring-white/8 hover:bg-white/[0.1] hover:text-studio-text disabled:opacity-40"
-        disabled={loading || busy}
-        onclick={() => void refresh()}
-      >
+      <Button variant="secondary" size="sm" disabled={loading || busy} onclick={() => void refresh()}>
         <Icon name="refresh" size={12} class={loading ? 'animate-spin' : ''} />
         Refresh
-      </button>
+      </Button>
     </div>
     <div class="rounded-xl bg-black/20 p-3 ring-1 ring-white/6">
       <div class="flex items-center justify-between gap-2 py-1 text-[12px]">

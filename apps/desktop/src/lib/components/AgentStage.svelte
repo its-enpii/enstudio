@@ -5,12 +5,11 @@
   import '@xterm/xterm/css/xterm.css'
   import { state as app, COMPOSER_MODES, fontStack, EDITOR_FONT_SIZE, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
   import { t } from '../i18n/index.svelte'
-  import { acceptAgentCheckpoint, approveDiskPlan, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshDraftPlan, refreshSessionList, refreshTeamSurface, rejectDiskPlan, respondApproval, respondAsk, rollbackAgentCheckpoint, saveProviderConfig, searchProjectFiles, sendPrompt, setSessionPlanMode, stopAgentTurn, undoCompactSession } from '../enpii'
+  import { approveDiskPlan, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshDraftPlan, refreshSessionList, refreshTeamSurface, rejectDiskPlan, respondApproval, respondAsk, saveProviderConfig, searchProjectFiles, sendPrompt, setSessionPlanMode, stopAgentTurn, undoCompactSession, visibleApprovals } from '../enpii'
   import { renderMarkdown } from '../markdown'
   import { xtermTheme } from '../theme'
   import SmartSelect from './ui/SmartSelect.svelte'
-  import ConfirmDialog from './ui/ConfirmDialog.svelte'
-  import { Button, Dropdown, Modal, type DropdownItem } from './ui'
+  import { Button, Dropdown, Modal, TextInput, type DropdownItem } from './ui'
   import { Icon } from '../icons'
 
   type AgentPane = 'enpii' | string
@@ -171,7 +170,7 @@
     agentPane = pane
     if (pane === 'enpii') {
       vendorHost?.replaceChildren()
-      void tick().then(focusComposer)
+void tick().then(() => focusComposer())
       return
     }
     const tab = vendorTabs.find((t) => t.id === pane)
@@ -237,7 +236,7 @@
     if (agentPane === tabId) {
       agentPane = 'enpii'
       vendorHost?.replaceChildren()
-      void tick().then(focusComposer)
+void tick().then(() => focusComposer())
     }
   }
 
@@ -348,6 +347,36 @@
 
   const groups = $derived(groupMessages(app.messages))
 
+  function collapsedToolItems(items: ChatMessage[]): ChatMessage[] {
+    const out: ChatMessage[] = []
+    const indexByKey = new Map<string, number>()
+    for (const message of items) {
+      if (message.role !== 'tool' || !message.tool) {
+        out.push(message)
+        continue
+      }
+      const name = message.tool.name
+      const keepSeparate = name === 'write_file' || name === 'edit_file'
+      const key = keepSeparate ? message.id : name + '\\u0000' + (message.tool.summary ?? message.tool.args ?? '')
+      const previousIndex = indexByKey.get(key)
+      if (previousIndex === undefined) {
+        indexByKey.set(key, out.length)
+        out.push(message)
+        continue
+      }
+      const previous = out[previousIndex]!
+      if (previous.role !== 'tool' || !previous.tool) continue
+      const mergedPreview = [previous.tool.preview?.trim(), message.tool.preview?.trim()]
+        .filter(Boolean)
+        .join('\\n\\n--- repeated call ---\\n\\n')
+      out[previousIndex] = {
+        ...message,
+        tool: { ...message.tool, preview: mergedPreview || message.tool.preview },
+      }
+    }
+    return out
+  }
+
   /** Path / short label for tool row (mock: path after tool:name). */
   function toolLabel(m: ChatMessage): string {
     const name = m.tool?.name ?? ''
@@ -434,98 +463,6 @@
     if (m.tool?.status === 'error') return 'Failed'
     if (m.tool?.status === 'ok') return 'Completed'
     return m.tool?.status ?? ''
-  }
-
-  function approvalPath(a: { name: string; summary: string }): string {
-    const s = a.summary ?? ''
-    if (a.name === 'run_shell') {
-      const m = s.match(/^run_shell\s+(.+)$/)
-      return m?.[1] ?? 'command'
-    }
-    if (a.name === 'mcp_call_tool') {
-      const m = s.match(/mcp[_\s]+(\S+)/i) || s.match(/(\S+\/\S+)/)
-      return m?.[1] ?? 'mcp tool'
-    }
-    if (a.name.startsWith('git_')) return s.replace(/^git_\w+\s*/, '') || 'repository'
-    const m = s.match(/(?:write_file|edit_file|replace_file)\s+(\S+)/)
-    return m?.[1] ?? 'file'
-  }
-
-  function approvalVerb(name: string): string {
-    if (name === 'run_shell') return 'run'
-    if (name === 'mcp_call_tool') return 'call MCP'
-    if (name === 'git_stage') return 'stage'
-    if (name === 'git_unstage') return 'unstage'
-    if (name === 'git_commit') return 'commit'
-    if (name === 'git_branch') return 'change branch'
-    if (name === 'git_stash') return 'manage stash'
-    if (name === 'git_fetch') return 'fetch'
-    if (name === 'git_pull') return 'pull'
-    if (name === 'git_push') return 'push'
-    if (name === 'git_resolve_conflict') return 'resolve conflict'
-    return name === 'write_file' ? 'write' : 'edit'
-  }
-
-  function approvalKind(name: string): string {
-    if (name === 'run_shell') return 'Shell Permission'
-    if (name === 'mcp_call_tool') return 'MCP Permission'
-    if (name.startsWith('git_')) return 'Git Permission'
-    return 'Write Permission'
-  }
-
-  function approvalButton(name: string): string {
-    if (name === 'run_shell') return 'Allow Shell'
-    if (name === 'mcp_call_tool') return 'Allow MCP'
-    if (name.startsWith('git_')) return 'Allow Git'
-    return 'Allow Edit'
-  }
-
-  function prettyApprovalArgs(raw?: string): string {
-    if (!raw?.trim()) return '{\n  \n}'
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2)
-    } catch {
-      return raw
-    }
-  }
-
-  function syncApprovalEditDraft(requestId: string, args?: string): void {
-    if (approvalEditForId === requestId) return
-    approvalEditForId = requestId
-    approvalEditOpen = false
-    approvalDenyOpen = false
-    approvalEditError = ''
-    approvalDenyReason = ''
-    approvalEditText = prettyApprovalArgs(args)
-  }
-
-  function allowSticky(requestId: string, scope: 'once' | 'session' = 'once'): void {
-    approvalEditError = ''
-    if (approvalEditOpen) {
-      const trimmed = approvalEditText.trim()
-      if (!trimmed) {
-        approvalEditError = 'Args required'
-        return
-      }
-      try {
-        const parsed = JSON.parse(trimmed) as unknown
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          approvalEditError = 'Args must be a JSON object'
-          return
-        }
-      } catch {
-        approvalEditError = 'Invalid JSON'
-        return
-      }
-      void respondApproval('allow', requestId, scope, { editedArgs: trimmed })
-      return
-    }
-    void respondApproval('allow', requestId, scope)
-  }
-
-  function denySticky(requestId: string): void {
-    const reason = approvalDenyReason.trim()
-    void respondApproval('deny', requestId, 'once', reason ? { reason } : undefined)
   }
 
   function isTerminalTool(name: string): boolean {
@@ -678,13 +615,15 @@
     historyDraft = ''
   }
 
+  /** Only this Agent session's approvals — never Browser UI background jobs. */
+  const agentApprovals = $derived(visibleApprovals())
+
   function pendingForTool(callId: string) {
-    // One card at a time: only the head of the queue is interactive.
-    // Other pending tools keep waiting; next head appears after this one settles.
-    const head = app.pendingApprovals[0]
-    if (!head) return null
-    if (head.toolCallId !== callId && head.requestId !== callId) return null
-    return head
+    return (
+      agentApprovals.find(
+        (a) => a.toolCallId === callId || a.requestId === callId,
+      ) ?? null
+    )
   }
 
   function pendingAskForTool(callId: string) {
@@ -779,20 +718,20 @@
   }
 
   function isUnifiedDiff(text: string): boolean {
-    return text.startsWith('--- ') || text.includes('\n+++ ') || text.startsWith('+++ ')
+    if (!text) return false
+    if (text.startsWith('--- ') || text.startsWith('+++ ')) return true
+    if (text.includes('\n--- ') || text.includes('\n+++ ')) return true
+    if (text.startsWith('@@ ') || text.includes('\n@@ ')) return true
+    return false
+  }
+
+  function isWriteTool(name: string): boolean {
+    return name === 'edit_file' || name === 'write_file' || name === 'replace_file'
   }
 
   let stageEl: HTMLDivElement | undefined
   let composerEl: HTMLTextAreaElement | undefined
   let stickBottom = $state(true)
-  let checkpointBusy = $state(false)
-  /** Sticky approval: edit tool args / deny reason. */
-  let approvalEditOpen = $state(false)
-  let approvalEditText = $state('')
-  let approvalEditError = $state('')
-  let approvalDenyOpen = $state(false)
-  let approvalDenyReason = $state('')
-  let approvalEditForId = $state<string | null>(null)
   let slashActive = $state(0)
   let attachmentPreviewId = $state<string | null>(null)
   let draggingFiles = $state(false)
@@ -990,7 +929,7 @@
     if (!paths.length) return
     try {
       addAttachments(await window.enpiistudio.dialog.parseFiles(paths))
-      void tick().then(focusComposer)
+      void tick().then(() => focusComposer())
     } catch (err) {
       app.notify('error', t('agent.attach.failed'), err instanceof Error ? err.message : String(err))
     }
@@ -1113,10 +1052,42 @@
     return [...new Set(paths)].slice(0, 8)
   }
 
-  /** Only intercept path/file pastes. Plain text always goes through. */
+  function readClipboardImage(file: File, index: number): Promise<Omit<ComposerAttachment, 'id'>> {
+    if (file.size > 10 * 1024 * 1024) throw new Error('Attachment maksimal 10 MB')
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(reader.error ?? new Error('Clipboard image gagal dibaca'))
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+        if (!dataUrl) return reject(new Error('Clipboard image kosong'))
+        const ext = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1] || 'png'
+        const name = file.name && file.name !== 'image.png' ? file.name : `screenshot-${Date.now()}-${index + 1}.${ext}`
+        resolve({
+          name,
+          size: file.size,
+          kind: 'image',
+          content: '[Image attached for vision analysis.]',
+          images: [{ name, mime: file.type || 'image/png', dataUrl }],
+        })
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  /** Intercept pasted files/images. Plain text always goes through. */
   function onPaste(event: ClipboardEvent): void {
     const target = event.target as Node | null
     if (composerEl && target && target !== composerEl && !composerEl.contains(target)) return
+
+    const images = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/')).slice(0, 8)
+    if (images.length) {
+      event.preventDefault()
+      event.stopPropagation()
+      void Promise.all(images.map(readClipboardImage))
+        .then(addAttachments)
+        .catch((err) => app.notify('error', t('agent.attach.failed'), err instanceof Error ? err.message : String(err)))
+      return
+    }
 
     const paths = clipboardPaths(event.clipboardData)
     if (!paths.length) return
@@ -1189,21 +1160,6 @@
     syncAttachmentsFromComposer()
   }
 
-  function removeAttachment(id: string): void {
-    const gone = app.attachments.find((file) => file.id === id)
-    app.attachments = app.attachments.filter((file) => file.id !== id)
-    if (attachmentPreviewId === id) attachmentPreviewId = null
-    if (gone) {
-      const tag = tagOf(gone.name)
-      const cur = app.composer
-      const idx = cur.indexOf(tag)
-      if (idx >= 0) {
-        const next = `${cur.slice(0, idx)}${cur.slice(idx + tag.length)}`.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n')
-        setComposer(next, idx)
-      }
-    }
-  }
-
   function attachmentChips(): { name: string; kind?: 'text' | 'image' }[] {
     return app.attachments
       .filter((file) => !file.error)
@@ -1266,7 +1222,7 @@
   }
 
   function attachmentImages(): { name: string; mime: string; dataUrl: string }[] {
-    return app.attachments.flatMap((file) => file.images ?? []).slice(0, 4)
+    return app.attachments.flatMap((file) => file.images ?? []).slice(0, 8)
   }
 
   function attachmentTokens(): number {
@@ -1448,50 +1404,6 @@
     try { app.checkpoints = await getAgentCheckpoints(app.activeProject.path) } catch { app.checkpoints = [] }
   }
 
-  type CheckpointConfirm =
-    | { kind: 'rollback'; id: string; path?: string }
-    | { kind: 'retry'; id: string; prompt: string }
-
-  let checkpointConfirm = $state<CheckpointConfirm | null>(null)
-
-  function requestRollbackCheckpoint(id: string, path?: string): void {
-    if (!app.activeProject) return
-    checkpointConfirm = { kind: 'rollback', id, path }
-  }
-
-  function requestRetryCheckpoint(id: string, prompt?: string): void {
-    if (!app.activeProject || !prompt) return
-    checkpointConfirm = { kind: 'retry', id, prompt }
-  }
-
-  async function confirmCheckpointAction(): Promise<void> {
-    const req = checkpointConfirm
-    checkpointConfirm = null
-    if (!req || !app.activeProject) return
-    checkpointBusy = true
-    try {
-      if (req.kind === 'rollback') {
-        app.checkpoints = await rollbackAgentCheckpoint(app.activeProject.path, req.id, req.path)
-      } else {
-        await rollbackAgentCheckpoint(app.activeProject.path, req.id)
-        app.checkpoints = await acceptAgentCheckpoint(app.activeProject.path, req.id)
-        await sendPrompt(req.prompt)
-      }
-    } catch (err) {
-      app.pushMessage({ role: 'system', text: err instanceof Error ? err.message : String(err) })
-    } finally {
-      checkpointBusy = false
-    }
-  }
-
-  async function acceptCheckpoint(id: string, path?: string): Promise<void> {
-    if (!app.activeProject) return
-    checkpointBusy = true
-    try { app.checkpoints = await acceptAgentCheckpoint(app.activeProject.path, id, path) }
-    catch (err) { app.pushMessage({ role: 'system', text: err instanceof Error ? err.message : String(err) }) }
-    finally { checkpointBusy = false }
-  }
-
   function onStageScroll() {
     if (!stageEl) return
     const dist = stageEl.scrollHeight - stageEl.scrollTop - stageEl.clientHeight
@@ -1550,10 +1462,6 @@
     composerEl.focus({ preventScroll: true })
   }
 
-  function composerControlFocused(): boolean {
-    return Boolean(composerEl?.closest('.composer-inner')?.contains(document.activeElement))
-  }
-
   function onStagePointerDown(event: PointerEvent): void {
     const t = event.target
     if (!(t instanceof Node)) return
@@ -1604,16 +1512,33 @@
     if (event.defaultPrevented) return
     if (event.ctrlKey || event.metaKey || event.altKey) return
     if (event.isComposing) return
+
+    // Approval hotkeys — only this Agent session.
+    if (agentApprovals.length && !isEditableTarget(event.target)) {
+      const k = event.key.toLowerCase()
+      const head = agentApprovals[0]!
+      if (k === 'y') {
+        event.preventDefault()
+        void respondApproval('allow', head.requestId)
+        return
+      }
+      if (k === 'n') {
+        event.preventDefault()
+        void respondApproval('deny', head.requestId)
+        return
+      }
+      if (k === 's') {
+        event.preventDefault()
+        void respondApproval('allow', head.requestId, 'session')
+        return
+      }
+    }
+
     if (app.busy) return
     if (!composerEl || composerEl.disabled) return
     if (document.activeElement === composerEl) return
     if (isEditableTarget(event.target)) return
     if (document.querySelector('[role="dialog"]')) return
-    // Approval hotkeys (y/n/s) live on window — don't steal them.
-    if (app.pendingApprovals.length) {
-      const k = event.key.toLowerCase()
-      if (k === 'y' || k === 'n' || k === 's') return
-    }
 
     // Printable only (letters, digits, punctuation, space). Not Enter/arrows/F-keys.
     if (event.key.length !== 1) return
@@ -1652,9 +1577,11 @@
 
   $effect(() => {
     void app.messages.length
-    void app.pendingApprovals.length
+    void agentApprovals.length
     void app.pendingAsks.length
     void app.streamingId
+    void app.busy
+    void activityLabel
     void app.messages[app.messages.length - 1]?.text
     void scrollToBottom()
   })
@@ -1691,6 +1618,36 @@
     app.busy && app.turnStartedAt ? formatDuration(Math.max(0, nowTick - app.turnStartedAt)) : '',
   )
 
+  /** Human status while agent works — never dump raw telemetry ids. */
+  const activityLabel = $derived.by((): string => {
+    if (agentApprovals.length) {
+      const n = agentApprovals.length
+      return n > 1 ? `Waiting for approval (${n})` : 'Waiting for approval'
+    }
+    if (app.pendingAsks.length) return 'Waiting for your answer'
+    if (!app.busy) return ''
+    const st = (app.run?.status ?? app.session?.status ?? 'running').toLowerCase()
+    if (st === 'awaiting_approval') return 'Waiting for approval'
+    if (st === 'verifying') return 'Verifying…'
+    if (st === 'repairing') return 'Repairing…'
+    if (app.streamingId) return 'Writing…'
+    const tail = app.messages[app.messages.length - 1]
+    if (tail?.role === 'tool' && tail.tool?.status === 'running') {
+      return `Running ${tail.tool.name}…`
+    }
+    const last = app.run?.lastEvent?.trim() ?? ''
+    if (/tool started:\s*(\S+)/i.test(last)) {
+      return `Running ${RegExp.$1}…`
+    }
+    if (/provider retry/i.test(last)) {
+      const m = last.match(/retry\s+(\d+)/i)
+      return m ? `Retrying model (${m[1]})…` : 'Retrying model…'
+    }
+    if (/circuit/i.test(last)) return 'Provider cooling down…'
+    // model_round_N / snake_case internals → Thinking
+    return 'Thinking…'
+  })
+
   async function onSend() {
     const text = app.composer.trim()
     const chips = attachmentChips()
@@ -1706,7 +1663,7 @@
       } catch (err) {
         addSystem(err instanceof Error ? err.message : String(err))
       } finally {
-        void tick().then(focusComposer)
+        void tick().then(() => focusComposer())
       }
       return
     }
@@ -1738,7 +1695,7 @@
         text: err instanceof Error ? err.message : String(err),
       })
     } finally {
-      void tick().then(focusComposer)
+      void tick().then(() => focusComposer())
     }
   }
 
@@ -1852,6 +1809,7 @@
   class="relative col-start-1 row-span-full grid h-full min-h-0 {agentPane !== 'enpii'
     ? 'grid-rows-[auto_minmax(0,1fr)_0fr]'
     : 'grid-rows-[auto_minmax(0,1fr)_auto]'}"
+  style={agentPane === 'enpii' ? 'grid-template-rows: auto minmax(0, 1fr) max-content' : undefined}
   role="region"
   aria-label="Agent stage"
   ondragenter={onDragEnter}
@@ -1867,31 +1825,31 @@
     </div>
   {/if}
   <div
-    class="relative z-30 flex min-h-[34px] shrink-0 items-stretch gap-0.5 overflow-visible border-b border-white/5 bg-transparent px-2.5 pt-1.5"
+    class="relative z-30 flex h-9 shrink-0 items-center gap-0.5 overflow-visible border-b border-white/5 bg-transparent px-2.5"
     role="tablist"
     aria-label="Agent model"
   >
     <button
       type="button"
-      class="cursor-pointer whitespace-nowrap border-0 bg-transparent px-3 py-1.5 text-xs font-medium {agentPane ===
+      class="grid h-7 place-items-center whitespace-nowrap rounded-md border-0 bg-transparent px-3 text-xs font-medium {agentPane ===
       'enpii'
         ? 'text-white'
         : 'text-studio-text-dim hover:text-white'}"
       role="tab"
       aria-selected={agentPane === 'enpii'}
       onclick={() => void selectAgentPane('enpii')}
-    >enpii</button>
+    >{t('agent.name')}</button>
     {#each vendorTabs as tab (tab.id)}
       {@const cli = VENDOR_CLIS.find((c) => c.id === tab.kind)}
       {#if cli}
         <div
-          class="flex items-stretch rounded-t-lg border border-b-0 {agentPane === tab.id
+          class="flex h-7 items-center rounded-md border {agentPane === tab.id
             ? 'border-border-subtle bg-black/35'
             : 'border-transparent'}"
         >
           <button
             type="button"
-            class="cursor-pointer whitespace-nowrap border-0 bg-transparent px-3 py-1.5 text-xs font-medium {agentPane ===
+            class="grid h-full place-items-center whitespace-nowrap border-0 bg-transparent px-3 text-xs font-medium {agentPane ===
             tab.id
               ? 'text-white'
               : 'text-studio-text-dim hover:text-white'}"
@@ -1902,7 +1860,7 @@
           >{tab.label}</button>
           <button
             type="button"
-            class="mr-1 grid size-7 place-items-center rounded-md text-[14px] leading-none text-studio-text-dim hover:bg-white/10 hover:text-studio-error"
+            class="mr-0.5 grid size-6 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-error"
             aria-label={`Close ${tab.label}`}
             title={`Close ${tab.label}`}
             onclick={(e) => {
@@ -1913,7 +1871,7 @@
         </div>
       {/if}
     {/each}
-    <div class="relative ml-auto flex-none self-center">
+    <div class="relative ml-auto flex h-7 flex-none items-center">
       <Dropdown
         items={vendorMenuItems}
         label="Add vendor"
@@ -1926,7 +1884,7 @@
         {#snippet trigger({ open, toggle })}
           <button
             type="button"
-            class="grid h-[26px] w-[30px] place-items-center rounded-lg border border-white/12 bg-white/5 text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
+            class="grid size-7 place-items-center rounded-lg border border-white/12 bg-white/5 text-studio-text-dim hover:border-studio-gold/45 hover:text-white"
             aria-label="Add vendor agent"
             aria-haspopup="menu"
             aria-expanded={open}
@@ -1952,6 +1910,8 @@
 <div class="relative row-start-2 min-h-0 overflow-hidden {agentPane !== 'enpii' ? 'hidden' : ''}">
 <div
   class="flex h-full min-h-0 flex-col gap-8 overflow-y-auto p-6 select-text"
+  role="region"
+  aria-label="Agent conversation"
   bind:this={stageEl}
   onscroll={onStageScroll}
   onpointerdown={onStagePointerDown}
@@ -1961,21 +1921,17 @@
   {#if !app.activeProject}
     <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
       <div>
-        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">e</div>
-        <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
-        <div class="mx-auto max-w-md text-[13px] leading-relaxed">Open a project from the left to start.</div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">E</div>
+        <div class="mb-2 text-lg font-semibold text-studio-gold">{t('agent.brand')}</div>
+        <div class="mx-auto max-w-md text-[13px] leading-relaxed">{t('agent.empty.noProject')}</div>
       </div>
     </div>
   {:else if app.messages.length === 0}
     <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
       <div>
-        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">e</div>
-        <div class="mb-2 text-lg font-semibold text-studio-gold">enpii</div>
-        <div class="mx-auto max-w-md text-[13px] leading-relaxed">
-          Ask anything about <strong class="text-white">{app.projectLabel(app.activeProject)}</strong>.
-          <br />
-          Tools: list_dir · read_file · glob · grep · write_file · edit_file
-        </div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">E</div>
+        <div class="mb-2 text-lg font-semibold text-studio-gold">{t('agent.brand')}</div>
+        <div class="mx-auto max-w-md text-[13px] leading-relaxed">{t('agent.empty')}</div>
       </div>
     </div>
   {:else}
@@ -1984,8 +1940,8 @@
         class="mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-lg border border-studio-lavender/35 bg-studio-lavender/10 px-3.5 py-2.5 text-xs text-studio-text"
         role="status"
       >
-        <strong class="text-[10px] uppercase tracking-wide text-studio-lavender">Plan mode</strong>
-        <span>Writes, shell, git, MCP, and sub-agents blocked until exit_plan_mode</span>
+        <strong class="text-[10px] uppercase tracking-wide text-studio-lavender">{t('agent.planMode')}</strong>
+        <span>{t('agent.planMode.hint')}</span>
       </div>
     {/if}
     {#if showTeamStrip}
@@ -2055,7 +2011,7 @@
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
       <div
         class="mb-3 overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card outline-none"
-        role="group"
+        role="radiogroup"
         tabindex="0"
         onkeydown={(e) => onAskCardKeydown(e, app.ask!.requestId, app.ask!.options)}
       >
@@ -2097,10 +2053,8 @@
               {/each}
             </div>
           {/if}
-          <div class="grid grid-cols-[1fr_auto] gap-2">
-            <input
-              type="text"
-              class="min-h-[42px] w-full rounded-lg border border-white/8 bg-black/35 px-3 py-2.5 text-[13px] text-studio-text outline-none focus:border-transparent focus:outline focus:outline-studio-lavender/55"
+          <div class="grid grid-cols-[1fr_auto] items-end gap-2">
+            <TextInput
               placeholder="Type something…"
               value={askDraft(app.ask.requestId)}
               oninput={(e) => {
@@ -2122,9 +2076,9 @@
                 }
               }}
             />
-            <button
-              type="button"
-              class="rounded-lg bg-studio-gold px-4 py-3 text-sm font-bold text-studio-dark hover:brightness-95 disabled:opacity-45"
+            <Button
+              variant="primary"
+              class="bg-studio-gold font-bold text-studio-dark hover:bg-studio-gold hover:brightness-95"
               disabled={!askDraft(app.ask.requestId).trim() && askFocusIndex < 0}
               onclick={() => {
                 if (askFocusIndex >= 0 && app.ask?.options?.[askFocusIndex]) {
@@ -2133,7 +2087,7 @@
                   submitAsk(app.ask!.requestId)
                 }
               }}
-            >Submit</button>
+            >{t('agent.ask.submit')}</Button>
           </div>
         </div>
       </div>
@@ -2160,7 +2114,7 @@
               e
             </div>
             <div class="flex min-w-0 max-w-[42rem] flex-1 flex-col gap-4">
-              {#each g.items as m (m.id)}
+              {#each collapsedToolItems(g.items) as m (m.id)}
                 {#if m.role === 'assistant'}
                   {#if m.text}
                     <div class="break-words text-sm leading-relaxed text-studio-text-body select-text">
@@ -2174,7 +2128,7 @@
                     <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
                     <div
                       class="overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card outline-none"
-                      role="group"
+                      role="radiogroup"
                       tabindex="0"
                       onkeydown={(e) => onAskCardKeydown(e, askPending.requestId, askPending.options)}
                     >
@@ -2216,10 +2170,8 @@
                             {/each}
                           </div>
                         {/if}
-                        <div class="grid grid-cols-[1fr_auto] gap-1.5">
-                          <input
-                            type="text"
-                            class="min-h-9 w-full rounded-md border border-border-subtle bg-studio-dark px-2.5 py-2 text-[12px] text-studio-text outline-none focus:border-studio-purple/60"
+                        <div class="grid grid-cols-[1fr_auto] items-end gap-1.5">
+                          <TextInput
                             placeholder="Type something…"
                             value={askDraft(askPending.requestId)}
                             oninput={(e) => {
@@ -2241,9 +2193,10 @@
                               }
                             }}
                           />
-                          <button
-                            type="button"
-                            class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105 disabled:opacity-40"
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            class="bg-studio-gold font-semibold text-studio-dark hover:bg-studio-gold hover:brightness-105"
                             disabled={!askDraft(askPending.requestId).trim() && askFocusIndex < 0}
                             onclick={() => {
                               if (askFocusIndex >= 0 && askPending.options?.[askFocusIndex]) {
@@ -2252,14 +2205,9 @@
                                 submitAsk(askPending.requestId)
                               }
                             }}
-                          >Submit</button>
+                          >{t('agent.ask.submit')}</Button>
                         </div>
                       </div>
-                    </div>
-                  {:else if pending}
-                    <!-- Inline placeholder only — real card is sticky above composer (no scroll to approve). -->
-                    <div class="rounded-md border border-dashed border-studio-gold/25 bg-studio-gold/5 px-3 py-2 font-mono text-[11px] text-studio-gold/80">
-                      Action required · see card above composer
                     </div>
                   {:else if isTerminalTool(m.tool.name)}
                     <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}">
@@ -2269,7 +2217,7 @@
                           <span class="shrink-0 font-semibold text-studio-success-bright">tool:{m.tool.name}</span>
                           <span class="truncate font-mono text-studio-text-dim select-text">{shellCommand(m)}</span>
                         </div>
-                        <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, false)}</span>
+                        <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, Boolean(pending))}</span>
                       </summary>
                       <div class="flex items-center gap-2 px-3 pb-2 font-mono text-[11px]">
                         <span class="shrink-0 text-studio-success-bright">$</span>
@@ -2291,6 +2239,8 @@
                       </div>
                       {#if m.tool.preview && m.tool.status !== 'running'}
                         <pre class="mx-2 mb-2.5 max-h-70 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-success-out select-text">{m.tool.preview}</pre>
+                      {:else if pending}
+                        <div class="mx-2 mb-2.5 rounded-lg border border-studio-gold/25 bg-studio-gold/10 p-3 font-mono text-[11px] text-studio-gold">Waiting for approval…</div>
                       {:else if m.tool.status === 'running'}
                         <div class="mx-2 mb-2.5 rounded-lg border border-white/6 bg-studio-shell-deep p-3 font-mono text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
@@ -2298,7 +2248,13 @@
                       {/if}
                     </details>
                   {:else}
-                    <details class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}" open={Boolean(m.tool.preview && isUnifiedDiff(m.tool.preview))}>
+                    <details
+                      class="rounded-md border border-border-subtle bg-studio-dark font-mono text-xs {toolBorder(m.tool.status)}"
+                      open={Boolean(
+                        m.tool.preview &&
+                          (isWriteTool(m.tool.name) || isUnifiedDiff(m.tool.preview)),
+                      )}
+                    >
                       <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 select-none [&::-webkit-details-marker]:hidden">
                         <div class="flex min-w-0 items-center gap-2">
                           <span class="size-1.5 shrink-0 rounded-full {toolDot(m.tool.status)}"></span>
@@ -2307,7 +2263,7 @@
                           </span>
                           <span class="truncate text-studio-text-dim select-text">{toolLabel(m)}</span>
                         </div>
-                        <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, false)}</span>
+                        <span class="shrink-0 text-[10px] text-studio-text-dim">{statusLabel(m, Boolean(pending))}</span>
                       </summary>
                       {#if m.tool.preview && m.tool.status !== 'running'}
                         {#if isUnifiedDiff(m.tool.preview)}
@@ -2319,6 +2275,8 @@
                         {:else}
                           <pre class="m-0 max-h-40 overflow-auto px-3 pb-2.5 text-[11px] whitespace-pre-wrap break-words text-studio-text/75 select-text">{m.tool.preview}</pre>
                         {/if}
+                      {:else if pending}
+                        <div class="px-3 pb-2.5 text-[11px] text-studio-gold">Waiting for approval…</div>
                       {:else if m.tool.status === 'running'}
                         <div class="px-3 pb-2.5 text-[11px] text-studio-text-dim">Running…</div>
                       {:else}
@@ -2332,6 +2290,26 @@
           </div>
         {/if}
       {/each}
+      {#if app.busy && activityLabel && !agentApprovals.length && !app.pendingAsks.length}
+        <div class="flex items-start justify-center gap-4" aria-live="polite">
+          <div
+            class="grid size-8 shrink-0 place-items-center rounded-lg bg-studio-purple/80 text-xs font-bold text-white"
+          >
+            e
+          </div>
+          <div class="flex min-w-0 max-w-[42rem] flex-1 items-center gap-2 pt-1.5 text-[13px] text-studio-text-dim">
+            <span class="inline-flex gap-0.5" aria-hidden="true">
+              <span class="size-1.5 animate-pulse rounded-full bg-studio-lavender/80 [animation-delay:0ms]"></span>
+              <span class="size-1.5 animate-pulse rounded-full bg-studio-lavender/80 [animation-delay:150ms]"></span>
+              <span class="size-1.5 animate-pulse rounded-full bg-studio-lavender/80 [animation-delay:300ms]"></span>
+            </span>
+            <span class="min-w-0 truncate">{activityLabel}</span>
+            {#if liveElapsed}
+              <span class="shrink-0 font-mono text-[11px] text-studio-text-dim/70">{liveElapsed}</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
     {#if app.run && !app.busy && (app.run.status === 'failed' || app.run.status === 'cancelled')}
       <div class="mx-auto mt-2 flex w-[calc(100%-32px)] max-w-3xl items-center justify-end gap-2 self-center">
@@ -2354,78 +2332,56 @@
   {/if}
 </div>
 
-<footer class="row-start-3 shrink-0 px-4 pb-4 pt-1 {agentPane !== 'enpii' ? 'hidden' : ''}">
-  {#if app.approval}
-    {@const sticky = app.approval}
-    {@const _sync = (syncApprovalEditDraft(sticky.requestId, sticky.args), 0)}
-    <div class="mx-auto mb-2 w-full max-w-3xl overflow-hidden rounded-lg border border-studio-gold/40 bg-studio-card shadow-[0_-8px_24px_rgba(0,0,0,0.35)]">
-      <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
-        <div class="flex items-center gap-2 text-[11px] font-semibold text-studio-gold">
+<footer class="row-start-3 z-20 shrink-0 px-4 pb-4 pt-1 {agentPane !== 'enpii' ? 'hidden' : ''}">
+  <div class="mx-auto flex w-full max-w-3xl flex-col gap-2">
+  {#if agentApprovals[0]}
+    {@const sticky = agentApprovals[0]}
+    <div
+      class="overflow-hidden rounded-lg border-2 border-studio-gold bg-studio-card shadow-[0_8px_28px_rgba(0,0,0,0.35)]"
+      role="alertdialog"
+      aria-label={t('agent.approval.title')}
+    >
+      <div class="flex items-center justify-between gap-3 border-b border-studio-gold/30 bg-studio-gold/15 px-3 py-2">
+        <div class="flex items-center gap-2 text-[12px] font-bold text-studio-gold">
           <Icon name="alert" size={16} class="shrink-0 text-studio-gold" />
-          <span>Action Required</span>
-          {#if app.pendingApprovals.length > 1}
-            <span class="rounded bg-studio-gold/15 px-1.5 py-0.5 font-mono text-[10px] text-studio-gold/90">{app.pendingApprovals.length}</span>
+          <span>{t('agent.approval.title')}</span>
+          {#if agentApprovals.length > 1}
+            <span class="rounded bg-studio-gold/25 px-1.5 py-0.5 font-mono text-[10px]">{agentApprovals.length}</span>
           {/if}
         </div>
-        <span class="text-[10px] font-medium text-studio-text-dim">{approvalKind(sticky.name)}</span>
+        <span class="text-[10px] font-medium text-studio-text-dim">
+          {sticky.name === 'run_shell' ? 'Shell' : sticky.name.startsWith('git_') ? 'Git' : sticky.name === 'mcp_call_tool' ? 'MCP' : 'Write'}
+          · Y / N / S
+        </span>
       </div>
       <div class="p-3">
         <p class="mb-2 text-[13px] leading-relaxed text-studio-text">
-          <span class="font-semibold text-studio-lavender">enpii</span> wants to {approvalVerb(sticky.name)}
-          <code class="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-studio-text">{approvalPath(sticky)}</code>
+          <span class="font-semibold text-studio-lavender">{t('agent.name')}</span>
+          {t('agent.approval.wants')}
+          {sticky.name === 'run_shell' ? 'run' : sticky.name === 'write_file' ? 'write' : sticky.name.startsWith('git_') ? sticky.name.slice(4) : 'edit'}
+          <code class="rounded bg-white/[0.08] px-1.5 py-0.5 font-mono text-[12px] text-studio-text">{sticky.summary || sticky.name}</code>
         </p>
-        {#if sticky.preview && !approvalEditOpen}
-          {#if isUnifiedDiff(sticky.preview)}
-            <div class="mb-2 max-h-36 overflow-auto rounded-md border border-border-subtle bg-studio-diff-bg py-1 font-mono text-[11px] leading-snug">
-              {#each sticky.preview.split('\n').slice(0, 80) as line, li (`sd-${li}`)}
-                <div class="min-h-[1.45em] whitespace-pre-wrap break-words px-2.5 {diffLineClass(line)}">{line || ' '}</div>
-              {/each}
-            </div>
-          {:else}
-            <pre class="mb-2 max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-studio-dark p-2.5 font-mono text-[11px] text-studio-text-dim">{sticky.preview}</pre>
-          {/if}
+        {#if sticky.preview}
+          <pre class="mb-2 max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-studio-dark p-2.5 font-mono text-[11px] text-studio-text-dim">{sticky.preview}</pre>
         {/if}
-        {#if approvalEditOpen}
-          <label class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim" for="approval-edit-args">Tool args (JSON)</label>
-          <textarea
-            id="approval-edit-args"
-            class="mb-1 max-h-40 min-h-[5.5rem] w-full resize-y rounded-md border border-border-subtle bg-studio-dark p-2.5 font-mono text-[11px] leading-snug text-studio-text outline-none focus:border-studio-gold/50"
-            bind:value={approvalEditText}
-            spellcheck="false"
-          ></textarea>
-          {#if approvalEditError}
-            <p class="mb-2 text-[11px] text-red-400">{approvalEditError}</p>
-          {/if}
-        {/if}
-        {#if approvalDenyOpen}
-          <label class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-studio-text-dim" for="approval-deny-reason">Deny reason (optional)</label>
-          <input
-            id="approval-deny-reason"
-            class="mb-2 w-full rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] text-studio-text outline-none focus:border-studio-gold/50"
-            bind:value={approvalDenyReason}
-            placeholder="Shown to the model"
-          />
-        {/if}
-        <div class="mb-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            class="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/[0.04] hover:text-studio-text {approvalEditOpen ? 'border-studio-gold/40 text-studio-gold' : ''}"
-            onclick={() => {
-              approvalEditOpen = !approvalEditOpen
-              approvalEditError = ''
-              if (approvalEditOpen && !approvalEditText.trim()) approvalEditText = prettyApprovalArgs(sticky.args)
-            }}
-          >{approvalEditOpen ? 'Hide args' : 'Edit args'}</button>
-          <button
-            type="button"
-            class="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/[0.04] hover:text-studio-text {approvalDenyOpen ? 'border-studio-gold/40 text-studio-gold' : ''}"
-            onclick={() => { approvalDenyOpen = !approvalDenyOpen }}
-          >{approvalDenyOpen ? 'Hide reason' : 'Deny reason'}</button>
-        </div>
         <div class="grid grid-cols-2 gap-2">
-          <button type="button" class="rounded-md border border-border-subtle px-3 py-2 text-[12px] font-medium text-studio-text hover:bg-white/[0.04]" onclick={() => denySticky(sticky.requestId)}>Deny</button>
-          <button type="button" class="rounded-md bg-studio-gold px-3 py-2 text-[12px] font-semibold text-studio-dark hover:brightness-105" onclick={() => allowSticky(sticky.requestId)}>{approvalEditOpen ? 'Allow with edits' : approvalButton(sticky.name)}</button>
-          <button type="button" class="col-span-2 rounded-md border border-studio-gold/30 bg-studio-gold/10 px-3 py-2 text-[12px] font-semibold text-studio-gold hover:bg-studio-gold/15" title="Auto-allow this action kind for the rest of the session (siblings keep original args)" onclick={() => allowSticky(sticky.requestId, 'session')}>Allow for session</button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onclick={() => void respondApproval('deny', sticky.requestId)}
+          >{t('agent.approval.deny')}</Button>
+          <Button
+            variant="primary"
+            size="sm"
+            class="bg-studio-gold font-semibold text-studio-dark hover:bg-studio-gold hover:brightness-105"
+            onclick={() => void respondApproval('allow', sticky.requestId)}
+          >{sticky.name === 'run_shell' ? t('agent.approval.allowShell') : sticky.name.startsWith('git_') ? t('agent.approval.allowGit') : sticky.name === 'mcp_call_tool' ? t('agent.approval.allowMcp') : t('agent.approval.allowEdit')}</Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            class="col-span-2 border-studio-gold/40 bg-studio-gold/10 font-semibold text-studio-gold hover:bg-studio-gold/15 hover:text-studio-gold"
+            onclick={() => void respondApproval('allow', sticky.requestId, 'session')}
+          >{t('agent.approval.session')}</Button>
         </div>
       </div>
     </div>
@@ -2444,16 +2400,17 @@
             <div class="truncate font-mono text-[9px] text-white/35">{app.draftPlan.relPath}</div>
           </div>
           <div class="flex shrink-0 gap-1.5">
-            <button
-              type="button"
-              class="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-studio-text-dim hover:bg-white/5"
+            <Button
+              variant="secondary"
+              size="sm"
               onclick={() => void rejectDiskPlan(app.draftPlan?.id).catch((e) => app.notify('error', 'Reject failed', e instanceof Error ? e.message : String(e)))}
-            >Reject</button>
-            <button
-              type="button"
-              class="rounded-md bg-studio-gold px-2 py-1 text-[11px] font-semibold text-studio-dark hover:brightness-105"
+            >Reject</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              class="bg-studio-gold font-semibold text-studio-dark hover:bg-studio-gold hover:brightness-105"
               onclick={() => void approveDiskPlan(app.draftPlan?.id).then(() => void sendPrompt('Plan approved. Execute the approved plan steps. Do not re-plan unless blocked.')).catch((e) => app.notify('error', 'Approve failed', e instanceof Error ? e.message : String(e)))}
-            >Approve & run</button>
+            >Approve & run</Button>
           </div>
         </div>
         <ol class="m-0 list-decimal space-y-0.5 pl-4 text-[11px] text-studio-text-dim">
@@ -2495,9 +2452,11 @@
       bind:this={composerEl}
       placeholder={app.activeProject
         ? app.busy
-          ? 'Agent busy — send queues until done…'
-          : 'Message the agent… (Use @ to reference files)'
-        : 'Open a project first'}
+          ? activityLabel
+            ? t('agent.composer.busyNamed', { label: activityLabel })
+            : t('agent.composer.busy')
+          : t('agent.composer.idle')
+        : t('agent.empty.noProject')}
       bind:value={app.composer}
       onkeydown={onKeydown}
       oninput={() => {
@@ -2550,17 +2509,16 @@
           <span class="tabular-nums text-[10px] text-studio-gold/75" title="Elapsed this turn">{liveElapsed}</span>
         {/if}
       </div>
-      <button
-        type="button"
-        class="flex items-center gap-1.5 rounded-md bg-studio-gold px-3 py-1.5 text-[12px] font-semibold text-studio-dark hover:brightness-105 disabled:opacity-40 {app.busy
-          ? 'studio-signal'
-          : ''}"
+      <Button
+        variant="primary"
+        size="sm"
+        class="bg-studio-gold font-semibold text-studio-dark hover:bg-studio-gold hover:brightness-105 {app.busy ? 'studio-signal' : ''}"
         onclick={() => (app.busy ? void stopAgentTurn() : void onSend())}
         disabled={!app.activeProject || (!app.busy && !app.composer.trim() && !app.attachments.length)}
       >
-        {app.busy ? 'Stop' : app.promptQueue.length ? 'Queue' : 'Send'}
+        {app.busy ? t('agent.stop') : app.promptQueue.length ? 'Queue' : t('agent.send')}
         <Icon name={app.busy ? 'stop' : 'send'} size={14} />
-      </button>
+      </Button>
     </div>
     {#if activeMention && (mentionResults.length > 0 || mentionLoading)}
       <div
@@ -2649,27 +2607,9 @@
       {/if}
     {/if}
   </div>
+  </div>
 </footer>
 </div>
-
-<ConfirmDialog
-  open={checkpointConfirm != null}
-  title={checkpointConfirm?.kind === 'retry'
-    ? t('agent.checkpoint.retryTitle')
-    : checkpointConfirm?.path
-      ? t('agent.checkpoint.revertFile', { path: checkpointConfirm.path })
-      : t('agent.checkpoint.revertTurn')}
-  message={checkpointConfirm?.kind === 'retry'
-    ? t('agent.checkpoint.revertRetry')
-    : checkpointConfirm?.path
-      ? t('agent.checkpoint.revertFileMsg')
-      : t('agent.checkpoint.revertTurnMsg')}
-  cancelLabel={t('common.cancel')}
-  confirmLabel={checkpointConfirm?.kind === 'retry' ? t('common.retry') : t('agent.checkpoint.revert')}
-  danger
-  onCancel={() => (checkpointConfirm = null)}
-  onConfirm={() => void confirmCheckpointAction()}
-/>
 
 <Modal
   open={vendorConfigOpen}
@@ -2694,5 +2634,7 @@
     </div>
   {/snippet}
 </Modal>
+
+<!-- Floating Action Required lives in App-level ApprovalOverlay (survives mode/pane switch). -->
 
 <svelte:window onkeydown={onWindowKeydown} />

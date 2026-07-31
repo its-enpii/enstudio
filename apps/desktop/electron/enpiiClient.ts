@@ -10,7 +10,11 @@ type JsonRpcId = string | number
 interface Pending {
   resolve: (value: unknown) => void
   reject: (err: Error) => void
+  timer: ReturnType<typeof setTimeout>
 }
+
+// ponytail: one ceiling for all RPCs; add per-method cancellation when prompts exceed one hour.
+const RPC_TIMEOUT_MS = 60 * 60_000
 
 export class EnpiiClient extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null
@@ -47,6 +51,7 @@ export class EnpiiClient extends EventEmitter {
     this.child.on('error', (err) => {
       this.emit('log', `[enpii] spawn error: ${err.message}`)
       this.emit('exit', { code: -1, signal: null, error: err.message })
+      this.rejectPending(err)
       this.started = false
       this.child = null
       this.scheduleRestart()
@@ -54,10 +59,7 @@ export class EnpiiClient extends EventEmitter {
 
     this.child.on('exit', (code, signal) => {
       this.emit('exit', { code, signal })
-      for (const [, p] of this.pending) {
-        p.reject(new Error(`enpii exited code=${code} signal=${signal}`))
-      }
-      this.pending.clear()
+      this.rejectPending(new Error(`enpii exited code=${code} signal=${signal}`))
       this.child = null
       this.started = false
       if (!this.stopping) this.scheduleRestart()
@@ -94,14 +96,28 @@ export class EnpiiClient extends EventEmitter {
     const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`enpii RPC timeout: ${method}`))
+      }, RPC_TIMEOUT_MS)
+      this.pending.set(id, { resolve, reject, timer })
       this.child!.stdin.write(payload, (err) => {
         if (err) {
+          const pending = this.pending.get(id)
+          if (pending) clearTimeout(pending.timer)
           this.pending.delete(id)
           reject(err)
         }
       })
     })
+  }
+
+  private rejectPending(err: Error): void {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(err)
+    }
+    this.pending.clear()
   }
 
   stop(): void {
@@ -110,6 +126,7 @@ export class EnpiiClient extends EventEmitter {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
     }
+    this.rejectPending(new Error('enpii stopped'))
     if (!this.child) {
       this.started = false
       return
@@ -141,6 +158,7 @@ export class EnpiiClient extends EventEmitter {
 
     if ('id' in msg && this.pending.has(msg.id as JsonRpcId)) {
       const pending = this.pending.get(msg.id as JsonRpcId)!
+      clearTimeout(pending.timer)
       this.pending.delete(msg.id as JsonRpcId)
       if (msg.error) {
         const err = msg.error as { message?: string }

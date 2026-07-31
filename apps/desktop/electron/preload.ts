@@ -74,8 +74,13 @@ const api = {
   },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
+    setMode: (mode: string) => ipcRenderer.invoke('app:setMode', mode) as Promise<void>,
     showNotification: (opts: { title: string; body?: string; urgency?: 'normal' | 'critical' | 'low' }) =>
       ipcRenderer.invoke('app:showNotification', opts) as Promise<boolean>,
+    windowMinimize: () => ipcRenderer.invoke('app:windowMinimize') as Promise<void>,
+    windowMaximizeToggle: () => ipcRenderer.invoke('app:windowMaximizeToggle') as Promise<boolean>,
+    windowClose: () => ipcRenderer.invoke('app:windowClose') as Promise<void>,
+    windowIsMaximized: () => ipcRenderer.invoke('app:windowIsMaximized') as Promise<boolean>,
     /** Electron page zoom (not CSS zoom — CSS zoom breaks text selection). 1 = 100%. */
     setZoomFactor: (factor: number) => {
       const f = Number(factor)
@@ -89,6 +94,12 @@ const api = {
       const listener = (_evt: Electron.IpcRendererEvent, shortcut: string) => handler(shortcut)
       ipcRenderer.on('browser:shortcut', listener)
       return () => ipcRenderer.removeListener('browser:shortcut', listener)
+    },
+    workspace: {
+      load: (projectRoot: string) =>
+        ipcRenderer.invoke('browser:workspace:load', projectRoot) as Promise<Record<string, unknown> | null>,
+      save: (projectRoot: string, data: unknown) =>
+        ipcRenderer.invoke('browser:workspace:save', projectRoot, data) as Promise<boolean>,
     },
     downloads: {
       list: () => ipcRenderer.invoke('browser:downloads:list') as Promise<BrowserDownload[]>,

@@ -8,6 +8,7 @@ import {
   session,
   shell,
   type DownloadItem,
+  type Session,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -37,6 +38,8 @@ type DownloadSummary = {
 }
 const downloadItems = new Map<string, DownloadItem>()
 const downloads = new Map<string, DownloadSummary>()
+const downloadSessions = new WeakSet<Session>()
+let rendererMode = 'agent'
 
 /**
  * node-pty on Windows needs a real .exe path — bare `ssh` / `claude` → "File not found:".
@@ -207,23 +210,26 @@ function killTerminals(): void {
 /** Standard Edit roles so Ctrl/Cmd+C/V/X/A work outside inputs (Windows Electron needs this). */
 function installAppMenu(): void {
   const isMac = process.platform === 'darwin'
+  // Windows/Linux: no in-window menu bar (Edit/View/Window). Mac keeps system menu.
+  if (!isMac) {
+    Menu.setApplicationMenu(null)
+    return
+  }
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? [{
-          label: app.name,
-          submenu: [
-            { role: 'about' as const },
-            { type: 'separator' as const },
-            { role: 'services' as const },
-            { type: 'separator' as const },
-            { role: 'hide' as const },
-            { role: 'hideOthers' as const },
-            { role: 'unhide' as const },
-            { type: 'separator' as const },
-            { role: 'quit' as const },
-          ],
-        }]
-      : []),
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
     {
       label: 'Edit',
       submenu: [
@@ -233,7 +239,7 @@ function installAppMenu(): void {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
-        ...(isMac ? [{ role: 'pasteAndMatchStyle' as const }] : []),
+        { role: 'pasteAndMatchStyle' },
         { role: 'selectAll' },
       ],
     },
@@ -256,12 +262,8 @@ function installAppMenu(): void {
       submenu: [
         { role: 'minimize' },
         { role: 'close' },
-        ...(isMac
-          ? [
-              { type: 'separator' as const },
-              { role: 'front' as const },
-            ]
-          : []),
+        { type: 'separator' },
+        { role: 'front' },
       ],
     },
   ]
@@ -286,6 +288,9 @@ function createWindow(): void {
     minHeight: 640,
     backgroundColor: '#040303',
     title: 'enpiistudio',
+    // Custom titlebar in App.svelte (traffic lights = real window controls).
+    frame: false,
+    autoHideMenuBar: true,
     ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -295,6 +300,7 @@ function createWindow(): void {
       sandbox: false,
     },
   })
+  mainWindow.setMenuBarVisibility(false)
 
   if (process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -334,7 +340,8 @@ function createWindow(): void {
         : input.alt && !modifier && key === 'arrowright'
           ? 'forward'
           : undefined
-    if (!shortcut) return
+    const handled = rendererMode === 'browser' || (rendererMode === 'code' && shortcut === 'close-tab')
+    if (!shortcut || !handled) return
     event.preventDefault()
     mainWindow?.webContents.send('browser:shortcut', shortcut)
   })
@@ -455,8 +462,10 @@ function availableDownloadPath(filename: string): string {
   return candidate
 }
 
-function setupDownloadManager(): void {
-  session.fromPartition('persist:enpii-browser').on('will-download', (_event, item) => {
+function attachDownloadManager(target: Session): void {
+  if (downloadSessions.has(target)) return
+  downloadSessions.add(target)
+  target.on('will-download', (_event, item) => {
     const id = randomUUID()
     const filename = path.basename(item.getFilename()) || 'download'
     const savePath = availableDownloadPath(filename)
@@ -489,6 +498,13 @@ function setupDownloadManager(): void {
       downloadItems.delete(id)
       broadcast('browser:download', { ...summary })
     })
+  })
+}
+
+function setupDownloadManager(): void {
+  attachDownloadManager(session.fromPartition('persist:enpii-browser'))
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() === 'webview') attachDownloadManager(contents.session)
   })
 }
 
@@ -651,6 +667,55 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('app:setMode', (_evt, mode: unknown) => {
+    rendererMode = typeof mode === 'string' ? mode : 'agent'
+  })
+
+  /** Browser workspace under project `.enpii/browser.json` (tabs/bookmarks/history). */
+  ipcMain.handle('browser:workspace:load', (_evt, projectRoot?: string) => {
+    const root = typeof projectRoot === 'string' ? projectRoot.trim() : ''
+    if (!root) return null
+    const file = path.join(path.resolve(root), '.enpii', 'browser.json')
+    try {
+      if (!fs.existsSync(file)) return null
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
+      return raw && typeof raw === 'object' ? raw : null
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('browser:workspace:save', (_evt, projectRoot?: string, data?: unknown) => {
+    const root = typeof projectRoot === 'string' ? projectRoot.trim() : ''
+    if (!root || data == null || typeof data !== 'object') return false
+    const dir = path.join(path.resolve(root), '.enpii')
+    const file = path.join(dir, 'browser.json')
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+      const tmp = `${file}.${process.pid}.tmp`
+      fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+      fs.renameSync(tmp, file)
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('app:windowMinimize', () => {
+    BrowserWindow.getFocusedWindow()?.minimize()
+  })
+  ipcMain.handle('app:windowMaximizeToggle', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) return false
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+    return win.isMaximized()
+  })
+  ipcMain.handle('app:windowClose', () => {
+    BrowserWindow.getFocusedWindow()?.close()
+  })
+  ipcMain.handle('app:windowIsMaximized', () => {
+    return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false
+  })
 
   ipcMain.handle('app:showNotification', (_evt, opts?: {
     title?: string

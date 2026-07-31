@@ -45,11 +45,12 @@
 <svelte:window onclick={onDoc} onkeydown={onKey} />
 
 {#if app.notificationsOpen}
-  <section
+  <div
     bind:this={panelEl}
     class="studio-glass fixed right-4 top-14 z-[230] flex max-h-[70vh] w-80 flex-col overflow-hidden rounded-2xl border border-border-subtle bg-studio-panel/95 shadow-xl"
     aria-label={t('notifications.panel')}
     role="dialog"
+    tabindex="-1"
   >
     <header class="flex items-center justify-between border-b border-border-subtle px-3 py-2.5">
       <strong class="text-[13px] font-semibold text-studio-text">{t('notifications.title')}</strong>
@@ -75,7 +76,7 @@
         <div class="p-4 text-center text-xs text-studio-text-dim">{t('notifications.empty')}</div>
       {/each}
     </div>
-  </section>
+  </div>
 {/if}
 
 <div class="pointer-events-none fixed bottom-4 right-4 z-[240] flex w-80 flex-col gap-2" aria-live="polite">

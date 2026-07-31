@@ -1,0 +1,4 @@
+interface:
+  display_name: "Software Design"
+  short_description: "Rancang software yang sederhana, aman, teruji"
+  default_prompt: "Gunakan $design untuk merancang solusi software ini dengan requirement, trade-off, arsitektur, data flow, dan acceptance criteria."

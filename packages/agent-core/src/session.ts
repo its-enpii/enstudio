@@ -194,6 +194,31 @@ export class SessionStore {
     return s
   }
 
+  /** Propagate provider permission mode to every live/disk-known session. */
+  setPermissionModeAll(mode: SessionMeta['permissionMode']): number {
+    let n = 0
+    const now = new Date().toISOString()
+    for (const s of this.sessions.values()) {
+      if (s.permissionMode === mode) continue
+      s.permissionMode = mode
+      s.updatedAt = now
+      this.sessions.set(s.id, s)
+      this.persist(s.id)
+      n++
+    }
+    return n
+  }
+
+  setPermissionMode(sessionId: string, mode: SessionMeta['permissionMode']): SessionMeta | undefined {
+    const s = this.sessions.get(sessionId) ?? this.get(sessionId)
+    if (!s) return undefined
+    s.permissionMode = mode
+    s.updatedAt = new Date().toISOString()
+    this.sessions.set(sessionId, s)
+    this.persist(sessionId)
+    return s
+  }
+
   getMessages(sessionId: string): ChatMessage[] {
     const meta = this.sessions.get(sessionId) ?? this.get(sessionId)
     this.ensureMessages(meta)

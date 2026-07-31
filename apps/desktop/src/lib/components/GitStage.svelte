@@ -43,7 +43,7 @@
     type GitTag,
   } from '../enpii'
   import { t } from '../i18n/index.svelte'
-  import { ConfirmDialog, Switch } from './ui'
+  import { Button, ConfirmDialog, Switch, TextInput, Textarea } from './ui'
 
   let status = $state<GitStatus | null>(null)
   let selectedPath = $state<string | null>(null)
@@ -538,15 +538,7 @@
     }
   }
 
-  const inputCls =
-    'w-full rounded-lg border-0 bg-black/25 px-2.5 py-2 text-[13px] text-studio-text outline-none ring-1 ring-white/8 placeholder:text-studio-text-dim/60 focus:ring-studio-purple/45'
-  const btnCls =
-    'rounded-lg bg-white/[0.06] px-3 py-1.5 text-[12px] font-medium text-studio-text-dim ring-1 ring-white/8 hover:bg-white/[0.1] hover:text-studio-text disabled:opacity-40'
-  const dangerBtn =
-    'grid size-7 place-items-center rounded-md text-[14px] leading-none text-danger hover:bg-danger-bg disabled:opacity-40'
-  const primaryBtn =
-    'rounded-lg bg-studio-purple px-3 py-1.5 text-[12px] font-medium text-white shadow-sm hover:bg-studio-purple-bright disabled:opacity-40'
-</script>
+  </script>
 
 <div class="flex h-full min-h-0 flex-col bg-transparent">
   {#if !app.activeProject}
@@ -570,16 +562,16 @@
     {#if branchMenuOpen}
       <div class="fixed inset-0 z-[70]" role="presentation" onclick={() => (branchMenuOpen = false)}>
         <div class="studio-glass absolute left-3 top-12 z-[71] w-80 rounded-2xl bg-studio-popover/95 p-2" role="dialog" aria-label="Branch manager" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => { event.stopPropagation(); if (event.key === 'Escape') branchMenuOpen = false }}>
-          <input class="mb-1.5 {inputCls}" bind:value={branchSearch} placeholder="Search branches" aria-label="Search branches" />
-          <div class="mb-1.5 grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
-            <input class={inputCls} bind:value={newBranchName} placeholder="New branch" aria-label="New branch name" onkeydown={(event) => event.key === 'Enter' && createBranch()} />
-            <button type="button" class={primaryBtn} disabled={busy || !newBranchName.trim()} onclick={createBranch}>Create</button>
+          <TextInput class="mb-1.5" bind:value={branchSearch} placeholder="Search branches" aria-label="Search branches" />
+          <div class="mb-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-1.5">
+            <TextInput bind:value={newBranchName} placeholder="New branch" aria-label="New branch name" onkeydown={(event) => event.key === 'Enter' && createBranch()} />
+            <Button variant="primary" size="sm" disabled={busy || !newBranchName.trim()} onclick={createBranch}>Create</Button>
           </div>
           <div class="max-h-80 overflow-auto">
             {#each filteredBranches as branch (branch.name)}
               <div class="grid min-h-[34px] grid-cols-[minmax(0,1fr)_25px_25px] items-center rounded-lg px-1 {branch.current ? 'bg-studio-purple/20' : 'hover:bg-white/[0.05]'}">
                 {#if renamingBranch === branch.name}
-                  <input class="col-span-3 {inputCls}" bind:value={renameBranchName} aria-label={`Rename ${branch.name}`} onkeydown={(event) => { if (event.key === 'Enter') renameBranch(branch); else if (event.key === 'Escape') renamingBranch = null }} />
+                  <TextInput class="col-span-3" bind:value={renameBranchName} aria-label={`Rename ${branch.name}`} onkeydown={(event) => { if (event.key === 'Enter') renameBranch(branch); else if (event.key === 'Escape') renamingBranch = null }} />
                 {:else}
                   <button type="button" class="grid min-w-0 grid-cols-[13px_minmax(0,1fr)] items-center gap-1.5 px-1 py-1 text-left text-[11px] text-studio-text-dim disabled:opacity-50" disabled={busy || branch.current} onclick={() => requestBranchSwitch(branch)}>
                     <span class="text-[10px]">{branch.current ? '●' : branch.remote ? '⇣' : '○'}</span>
@@ -601,15 +593,15 @@
     <div class="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)]">
       <aside class="flex min-h-0 flex-col gap-4 overflow-y-auto border-r border-border-subtle bg-studio-sidebar/40 p-2.5">
         <div class="flex flex-col gap-1.5">
-          <textarea class="{inputCls} min-h-[64px] resize-y" rows="3" bind:value={commitMessage} placeholder="Commit message"></textarea>
+          <Textarea rows={3} bind:value={commitMessage} placeholder="Commit message" />
           <div class="flex gap-1.5">
-            <button type="button" class={btnCls} disabled={busy || stagedFiles.length === 0} onclick={() => void autoCommitMessage()}>Auto</button>
-            <button type="button" class="flex-1 {primaryBtn}" disabled={busy || !commitMessage.trim() || stagedFiles.length === 0} onclick={() => void commit()}>Commit {stagedFiles.length ? `(${stagedFiles.length})` : ''}</button>
+            <Button variant="secondary" size="sm" disabled={busy || stagedFiles.length === 0} onclick={() => void autoCommitMessage()}>Auto</Button>
+            <Button variant="primary" size="sm" class="flex-1" disabled={busy || !commitMessage.trim() || stagedFiles.length === 0} onclick={() => void commit()}>Commit {stagedFiles.length ? `(${stagedFiles.length})` : ''}</Button>
           </div>
           <div class="flex gap-1">
-            <button type="button" class="flex-1 {btnCls}" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('fetch')}>Fetch</button>
-            <button type="button" class="flex-1 {btnCls}" disabled={busy || remotes.length === 0 || !status?.upstream || (status?.files.length ?? 0) > 0} onclick={() => void syncRemote('pull')}>Pull</button>
-            <button type="button" class="flex-1 {btnCls}" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('push')}>Push</button>
+            <Button variant="secondary" size="sm" class="flex-1" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('fetch')}>Fetch</Button>
+            <Button variant="secondary" size="sm" class="flex-1" disabled={busy || remotes.length === 0 || !status?.upstream || (status?.files.length ?? 0) > 0} onclick={() => void syncRemote('pull')}>Pull</Button>
+            <Button variant="secondary" size="sm" class="flex-1" disabled={busy || remotes.length === 0} onclick={() => void syncRemote('push')}>Push</Button>
           </div>
         </div>
 
@@ -678,28 +670,28 @@
             <span class="studio-label">Stashes</span>
             <span class="tabular-nums">{stashes.length}</span>
           </div>
-          <input class={inputCls} bind:value={stashMessage} placeholder="Stash message" aria-label="Stash message" onkeydown={(e) => e.key === 'Enter' && void createStash()} />
+          <TextInput bind:value={stashMessage} placeholder="Stash message" aria-label="Stash message" onkeydown={(e) => e.key === 'Enter' && void createStash()} />
           <Switch compact bind:checked={stashIncludeUntracked} description="Untracked" />
-          <button type="button" class={btnCls} disabled={busy || (status?.files.length ?? 0) === 0} onclick={() => void createStash()}>Stash</button>
+          <Button variant="secondary" size="sm" disabled={busy || (status?.files.length ?? 0) === 0} onclick={() => void createStash()}>Stash</Button>
           {#each stashes as stash (stash.ref)}
             <div class="flex items-start gap-1 rounded-lg bg-black/20 p-2 ring-1 ring-white/6">
               <div class="min-w-0 flex-1">
                 <strong class="block truncate text-[12px] text-studio-text">{stash.message}</strong>
                 <span class="font-mono text-[10px] text-studio-text-dim">{stash.ref}{#if stash.branch} · {stash.branch}{/if}</span>
               </div>
-              <button type="button" class={btnCls} disabled={busy} onclick={() => void applyStash(stash, false)}>Apply</button>
-              <button type="button" class={btnCls} disabled={busy} onclick={() => void applyStash(stash, true)}>Pop</button>
-              <button type="button" class="{dangerBtn} grid place-items-center" disabled={busy} aria-label={`Drop ${stash.ref}`} onclick={() => (dropStashTarget = stash)}><Icon name="trash" size={12} /></button>
+              <Button variant="secondary" size="sm" disabled={busy} onclick={() => void applyStash(stash, false)}>Apply</Button>
+              <Button variant="secondary" size="sm" disabled={busy} onclick={() => void applyStash(stash, true)}>Pop</Button>
+              <button type="button" class="grid size-7 place-items-center rounded-md text-danger hover:bg-danger-bg disabled:opacity-40" disabled={busy} aria-label={`Drop ${stash.ref}`} onclick={() => (dropStashTarget = stash)}><Icon name="trash" size={12} /></button>
             </div>
           {/each}
         </section>
 
         <section class="flex flex-col gap-1.5">
           <span class="studio-label">Release</span>
-          <input class={inputCls} bind:value={releaseName} placeholder="v1.0.0" aria-label="Release version" onkeydown={(e) => e.key === 'Enter' && void createRelease()} />
-          <textarea class="{inputCls} min-h-[64px] resize-y" rows="3" bind:value={releaseNotes} placeholder="Release notes (optional)" aria-label="Release notes"></textarea>
+          <TextInput bind:value={releaseName} placeholder="v1.0.0" aria-label="Release version" onkeydown={(e) => e.key === 'Enter' && void createRelease()} />
+          <Textarea rows={3} bind:value={releaseNotes} placeholder="Release notes (optional)" aria-label="Release notes" />
           <Switch compact bind:checked={releaseGithub} description="GitHub release" />
-          <button type="button" class={primaryBtn} disabled={busy || !releaseName.trim() || remotes.length === 0} onclick={() => void createRelease()}>Create release</button>
+          <Button variant="primary" size="sm" disabled={busy || !releaseName.trim() || remotes.length === 0} onclick={() => void createRelease()}>Create release</Button>
           {#if releaseInfo}
             <div class="text-[11px] text-studio-text-dim">{releaseInfo}</div>
           {/if}
@@ -710,17 +702,17 @@
             <span class="studio-label">Tags</span>
             <span class="tabular-nums">{tags.length}</span>
           </div>
-          <input class={inputCls} bind:value={tagName} placeholder="v1.0.0" aria-label="Tag name" onkeydown={(e) => e.key === 'Enter' && void createTag()} />
-          <input class={inputCls} bind:value={tagMessage} placeholder="Optional message" aria-label="Tag message" />
-          <input class={inputCls} bind:value={tagTarget} placeholder="HEAD" aria-label="Tag target" />
-          <button type="button" class={btnCls} disabled={busy || !tagName.trim()} onclick={() => void createTag()}>Create</button>
+          <TextInput bind:value={tagName} placeholder="v1.0.0" aria-label="Tag name" onkeydown={(e) => e.key === 'Enter' && void createTag()} />
+          <TextInput bind:value={tagMessage} placeholder="Optional message" aria-label="Tag message" />
+          <TextInput bind:value={tagTarget} placeholder="HEAD" aria-label="Tag target" />
+          <Button variant="secondary" size="sm" disabled={busy || !tagName.trim()} onclick={() => void createTag()}>Create</Button>
           {#each tags as tag (tag.name)}
             <div class="flex items-start gap-1 rounded-lg bg-black/20 p-2 ring-1 ring-white/6">
               <div class="min-w-0 flex-1">
                 <strong class="block truncate text-[12px] text-studio-text">{tag.name}</strong>
                 <span class="font-mono text-[10px] text-studio-text-dim">{tag.shortHash} · {tag.subject || 'lightweight tag'}</span>
               </div>
-              <button type="button" class="{dangerBtn} grid place-items-center" disabled={busy} onclick={() => (deleteTagTarget = tag)}><Icon name="trash" size={12} /></button>
+              <button type="button" class="grid size-7 place-items-center rounded-md text-danger hover:bg-danger-bg disabled:opacity-40" disabled={busy} aria-label={`Delete tag ${tag.name}`} onclick={() => (deleteTagTarget = tag)}><Icon name="trash" size={12} /></button>
             </div>
           {/each}
         </section>
@@ -741,13 +733,13 @@
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2 text-[12px]">
             <span class="truncate font-medium text-studio-text">{selected.path}</span>
             <div class="flex flex-wrap gap-1">
-              <button type="button" class={btnCls} onclick={() => app.openCodeFile(selected.path)}>Open</button>
+              <Button variant="secondary" size="sm" onclick={() => app.openCodeFile(selected.path)}>Open</Button>
               {#if selected.conflicted}
-                <button type="button" class={btnCls} onclick={() => requestResolve(selected, 'ours')}>Use Current</button>
-                <button type="button" class={btnCls} onclick={() => requestResolve(selected, 'theirs')}>Use Incoming</button>
-                <button type="button" class={btnCls} onclick={() => requestResolve(selected, 'mark')}>Mark Resolved</button>
+                <Button variant="secondary" size="sm" onclick={() => requestResolve(selected, 'ours')}>Use Current</Button>
+                <Button variant="secondary" size="sm" onclick={() => requestResolve(selected, 'theirs')}>Use Incoming</Button>
+                <Button variant="secondary" size="sm" onclick={() => requestResolve(selected, 'mark')}>Mark Resolved</Button>
               {:else if selected.unstaged}
-                <button type="button" class="rounded-lg bg-danger-bg px-2.5 py-1 text-[11px] font-medium text-danger ring-1 ring-danger/25 hover:bg-danger-bg" onclick={() => requestDiscard(selected)}>Discard</button>
+                <Button variant="danger" size="sm" onclick={() => requestDiscard(selected)}>Discard</Button>
               {/if}
             </div>
           </div>

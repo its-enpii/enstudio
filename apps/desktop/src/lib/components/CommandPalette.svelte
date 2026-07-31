@@ -7,6 +7,7 @@
     type KeybindingAction,
   } from '../store.svelte'
   import { t } from '../i18n/index.svelte'
+  import { compactSession, exportSessionMarkdown, respondApproval, undoCompactSession } from '../enpii'
 
   type Action = { id: string; label: string; binding?: KeybindingAction; run: () => void }
   let open = $state(false)
@@ -39,7 +40,7 @@
       id: 'export',
       label: t('palette.export'),
       run: () => {
-        void import('../enpii').then((m) => m.exportSessionMarkdown()).catch((err) => {
+        void exportSessionMarkdown().catch((err) => {
           app.notify('error', t('palette.exportFailed'), err instanceof Error ? err.message : String(err))
         })
       },
@@ -48,7 +49,7 @@
       id: 'compact',
       label: t('palette.compact'),
       run: () => {
-        void import('../enpii').then((m) => m.compactSession()).catch((err) => {
+        void compactSession().catch((err) => {
           app.notify('error', t('palette.compactFailed'), err instanceof Error ? err.message : String(err))
         })
       },
@@ -57,7 +58,7 @@
       id: 'undo-compact',
       label: t('palette.undoCompact'),
       run: () => {
-        void import('../enpii').then((m) => m.undoCompactSession()).catch((err) => {
+        void undoCompactSession().catch((err) => {
           app.notify('error', t('palette.undoCompactFailed'), err instanceof Error ? err.message : String(err))
         })
       },
@@ -122,17 +123,17 @@
         const key = event.key.toLowerCase()
         if (key === 'y' && !event.ctrlKey && !event.metaKey && !event.altKey) {
           event.preventDefault()
-          void import('../enpii').then((m) => m.respondApproval('allow'))
+          void respondApproval('allow')
           return
         }
         if (key === 'n' && !event.ctrlKey && !event.metaKey && !event.altKey) {
           event.preventDefault()
-          void import('../enpii').then((m) => m.respondApproval('deny'))
+          void respondApproval('deny')
           return
         }
         if (key === 's' && !event.ctrlKey && !event.metaKey && !event.altKey) {
           event.preventDefault()
-          void import('../enpii').then((m) => m.respondApproval('allow', undefined, 'session'))
+          void respondApproval('allow', undefined, 'session')
           return
         }
       }

@@ -9,7 +9,7 @@ const MAX_TOKENS = 1_000_000
 const MAX_RUNTIME_MS = 24 * 60 * 60_000
 
 function root(): string {
-  return path.join(os.homedir(), '.enpiistudio', 'runs')
+  return path.join(process.env.ENPII_HOME?.trim() || path.join(os.homedir(), '.enpiistudio'), 'runs')
 }
 
 function file(sessionId: string, runId: string): string {

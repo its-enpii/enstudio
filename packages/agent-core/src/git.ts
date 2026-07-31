@@ -531,7 +531,8 @@ export interface GitWorktree {
 }
 
 function worktreeHome(mainRoot: string): string {
-  return path.join(os.homedir(), '.enpiistudio', 'worktrees', projectHash(mainRoot))
+  const home = process.env.ENPII_HOME?.trim() || path.join(os.homedir(), '.enpiistudio')
+  return path.join(home, 'worktrees', projectHash(mainRoot))
 }
 
 function safeWorktreeSlug(name: string): string {

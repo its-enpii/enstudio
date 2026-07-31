@@ -22,10 +22,10 @@
     checked = (event.currentTarget as HTMLInputElement).checked
   }
 
-  const track = compact
+  const track = $derived(compact
     ? 'h-4 w-7 peer-checked:[&>span]:translate-x-3'
-    : 'h-5 w-9 peer-checked:[&>span]:translate-x-4'
-  const thumb = compact ? 'size-3' : 'size-4'
+    : 'h-5 w-9 peer-checked:[&>span]:translate-x-4')
+  const thumb = $derived(compact ? 'size-3' : 'size-4')
 </script>
 
 <div

@@ -3,6 +3,8 @@
   import ProjectSidebar from './lib/components/ProjectSidebar.svelte'
   import TopNav from './lib/components/TopNav.svelte'
   import Inspector from './lib/components/Inspector.svelte'
+  import BrowserInspector from './lib/components/BrowserInspector.svelte'
+  import CodeInspector from './lib/components/CodeInspector.svelte'
   import AgentStage from './lib/components/AgentStage.svelte'
   import CodeStage from './lib/components/CodeStage.svelte'
   import TerminalStage from './lib/components/TerminalStage.svelte'
@@ -11,6 +13,7 @@
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import CommandPalette from './lib/components/CommandPalette.svelte'
   import NotificationCenter from './lib/components/NotificationCenter.svelte'
+  import ApprovalOverlay from './lib/components/ApprovalOverlay.svelte'
   import { state, clampProjectLayout } from './lib/store.svelte'
   import { bindEnpiiEvents, pingEnpii, hydrateProjectSession } from './lib/enpii'
 
@@ -20,6 +23,10 @@
   })
 
   let drag: null | { edge: 'sidebar' | 'inspector'; startX: number; startW: number } = null
+
+  $effect(() => {
+    void window.enpiistudio?.app?.setMode?.(state.mode)
+  })
 
   function onResizeStart(edge: 'sidebar' | 'inspector', e: PointerEvent): void {
     const layout = clampProjectLayout({}, state.activeProject?.layout)
@@ -77,15 +84,21 @@
   class="box-border flex h-full w-full flex-col bg-studio-dark {state.ui.goldPulse ? '' : 'gold-pulse-off'}"
   data-theme={state.ui.theme}
 >
-  <!-- Unified titlebar -->
+  <!-- Unified titlebar — frameless; empty chrome drags, controls are no-drag -->
   <div
     class="flex h-11 shrink-0 items-center gap-3 border-b border-border-subtle bg-studio-sidebar px-3"
     style="-webkit-app-region: drag"
+    role="toolbar"
+    aria-label="Window title bar"
+    tabindex="0"
+    ondblclick={() => void window.enpiistudio?.app?.windowMaximizeToggle?.()}
   >
-    <div class="studio-traffic shrink-0" style="-webkit-app-region: no-drag" aria-hidden="true">
-      <span></span><span></span><span></span>
+    <div class="studio-traffic shrink-0" style="-webkit-app-region: no-drag" role="group" aria-label="Window controls">
+      <button type="button" class="studio-traffic-btn" title="Close" aria-label="Close" onclick={() => void window.enpiistudio?.app?.windowClose?.()}></button>
+      <button type="button" class="studio-traffic-btn" title="Minimize" aria-label="Minimize" onclick={() => void window.enpiistudio?.app?.windowMinimize?.()}></button>
+      <button type="button" class="studio-traffic-btn" title="Maximize" aria-label="Maximize" onclick={() => void window.enpiistudio?.app?.windowMaximizeToggle?.()}></button>
     </div>
-    <div class="min-w-0 flex-1" style="-webkit-app-region: no-drag">
+    <div class="min-w-0 flex-1">
       <TopNav />
     </div>
   </div>
@@ -136,7 +149,13 @@
         onpointerup={onResizeEnd}
         onpointercancel={onResizeEnd}
       ></div>
-      <Inspector />
+      {#if state.mode === 'browser'}
+        <BrowserInspector />
+      {:else if state.mode === 'code'}
+        <CodeInspector />
+      {:else}
+        <Inspector />
+      {/if}
     </div>
   </div>
 </div>
@@ -146,3 +165,5 @@
 {/if}
 <CommandPalette />
 <NotificationCenter />
+<!-- Non-agent modes only (AgentStage owns sticky-above-composer card). -->
+<ApprovalOverlay />

@@ -4,7 +4,7 @@
  * No nested tables, dates, or multiline beyond basic """ blocks.
  */
 
-export type TomlValue = string | number | boolean | string[] | TomlTable
+export type TomlValue = string | number | boolean | string[] | TomlTable | TomlTable[]
 export type TomlTable = { [key: string]: TomlValue }
 
 function unquote(s: string): string {

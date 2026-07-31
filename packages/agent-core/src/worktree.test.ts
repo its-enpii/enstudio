@@ -38,7 +38,7 @@ test('git worktree add list remove under managed home', () => {
     assert.equal(created.main, false)
     assert.equal(created.branch, 'enpii/try-one')
     assert.equal(fs.existsSync(path.join(created.path, 'note.txt')), true)
-    assert.ok(created.path.includes(path.join('.enpiistudio', 'worktrees', projectHash(root))))
+    assert.ok(created.path.includes(path.join('worktrees', projectHash(root))))
 
     const listed = gitWorktreeList(root)
     assert.equal(listed.some((wt) => path.resolve(wt.path) === path.resolve(created.path)), true)

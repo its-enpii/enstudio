@@ -908,11 +908,27 @@ function writeFileTool(
       `write_file refused: ${rel} already exists. Use edit_file for partial changes, or write_file with overwrite=true for full replace.`,
     )
   }
+  let prev = ''
+  if (existed) {
+    try {
+      const st = fs.statSync(abs)
+      if (st.size <= MAX_WRITE) {
+        const buf = fs.readFileSync(abs)
+        if (!buf.includes(0)) prev = buf.toString('utf8')
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   const dir = path.dirname(abs)
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(abs, content, 'utf8')
   const action = existed ? 'overwrote' : 'created'
-  return ok(`write_file ${rel} (${action}, ${content.length} chars)`, `${action} ${rel}`)
+  // Content = unified diff so UI/tool card always has highlighter-ready payload.
+  return ok(
+    `write_file ${rel} (${action}, ${content.length} chars)`,
+    unifiedLineDiff(prev, content, rel),
+  )
 }
 
 function editFileTool(
@@ -945,9 +961,10 @@ function editFileTool(
   if (crlf) next = next.replace(/\n/g, '\r\n')
   if (next.length > MAX_WRITE) return fail(`result too large (>${MAX_WRITE} chars)`)
   fs.writeFileSync(abs, next, 'utf8')
+  // Diff body for tool card / transcript (not bare "edited path").
   return ok(
     `edit_file ${rel} (${oldString.length}→${newString.length} chars)`,
-    `edited ${rel}`,
+    unifiedLineDiff(oldN, newN, rel),
   )
 }
 
