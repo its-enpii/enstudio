@@ -3,7 +3,6 @@
   import { state as app } from '../store.svelte'
   import { runBrowserUiEdit } from '../enpii'
   import { browserPanel, setBrowserEditJob, syncBrowserPanel } from '../browser-panel.svelte'
-  import { color } from '../theme'
   import type { BrowserDownload } from '../../../electron/preload'
   import { t } from '../i18n/index.svelte'
   import { ConfirmDialog, Dropdown, TextInput } from './ui'
@@ -381,13 +380,20 @@
     const previous = themeKeys.get(id)
     if (previous) await element.removeInsertedCSS(previous).catch(() => {})
     themeKeys.delete(id)
+    return
+    /*
     if (pageTheme === 'light') return
     // Soft dark: color-scheme only — avoid !important paint on inputs (breaks login UIs).
     const key = await element.insertCSS(`
-      :root { color-scheme: dark; }
+      :root { color-scheme: ${pageTheme}; }
       html { background: ${color.browserBg}; }
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: rgba(255,255,255,0.045); }
+      ::-webkit-scrollbar-thumb { background: rgba(170,170,190,0.42); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(190,190,210,0.62); border: 2px solid transparent; background-clip: padding-box; }
     `)
     themeKeys.set(id, key)
+    */
   }
 
   async function navigate(value = address): Promise<void> {
@@ -1118,7 +1124,7 @@
 
   {#if error}<div class="px-3 py-1.5 font-mono text-[11px] text-danger">{error}</div>{/if}
 
-  <div class="relative min-h-0 flex-1 overflow-hidden bg-studio-dark">
+  <div class="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-studio-dark">
     {#key browserPartition}
       {#each tabs as tab, index (tab.id)}
         <webview

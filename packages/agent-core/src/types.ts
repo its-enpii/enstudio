@@ -77,6 +77,8 @@ export interface SessionMeta {
   loadMemory?: boolean
   /** Accumulated token usage for this session (when endpoint reports usage). */
   usage?: SessionUsageTotals
+  /** Provider-reported usage for the latest completed turn. */
+  lastUsage?: SessionUsageTotals
 }
 
 export interface GoalContract {

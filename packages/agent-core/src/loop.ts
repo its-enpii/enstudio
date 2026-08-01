@@ -141,7 +141,7 @@ export async function compactRuntime(opts: {
   opts.runtime.preCompactMessages = snapshot
   // Summary as user (not system): Gemini/Antigravity reject mid-thread system + broken tool order.
   opts.runtime.messages = repairChatMessages([
-    { role: 'user', content: `Working summary after compaction:\n${summary}` },
+    { role: 'user', content: `Working summary after compaction:\n${summary}`, internal: true },
     // Keep recent raw turns so the model does not lose the last exchange.
     ...(toSummarize.length ? keep : []),
   ])
@@ -163,6 +163,7 @@ export function undoCompactRuntime(runtime: SessionRuntime): {
 // Tool rounds explode message count (assistant + N tool results each). 36 fired mid-task constantly.
 const AUTO_COMPACT_MSG_THRESHOLD = 90
 const AUTO_COMPACT_CHAR_THRESHOLD = 280_000
+const AUTO_COMPACT_TOKEN_THRESHOLD = 225_000
 
 function estimateMessageChars(messages: ChatMessage[]): number {
   let n = 0
@@ -177,12 +178,11 @@ function estimateMessageChars(messages: ChatMessage[]): number {
 export function shouldAutoCompact(
   messages: ChatMessage[],
   usage?: Usage,
-  maxTokens?: number,
+  _maxTokens?: number,
 ): boolean {
   if (messages.length >= AUTO_COMPACT_MSG_THRESHOLD) return true
   if (estimateMessageChars(messages) >= AUTO_COMPACT_CHAR_THRESHOLD) return true
-  // Run-budget usage only — don't compact early on long multi-turn sessions under default 1M cap.
-  if (usage?.total_tokens && maxTokens && maxTokens <= 200_000 && usage.total_tokens >= maxTokens * 0.85) {
+  if (usage?.total_tokens && usage.total_tokens >= AUTO_COMPACT_TOKEN_THRESHOLD) {
     return true
   }
   return false
@@ -207,6 +207,26 @@ Language:
 
 How to work:
 - Answer and explain in plain text. Do not stay silent behind tools.
+- Maintain a working task model before acting: the user's desired outcome, current system state, accepted behavior to preserve, constraints, authorization, evidence, assumptions, unknowns, and success conditions. Update this model after every user message and tool result; do not restart reasoning from isolated sentences.
+- Ground each instruction compositionally before acting: identify the requested operation, target object, location or source qualifier, constraints, exclusions, and rationale. Qualifiers that narrow where or what to change are hard scope boundaries unless the user explicitly expands them.
+- Before any mutation, form a concise internal intent contract containing the allowed operations and targets plus behavior that must remain unchanged. Every write, edit, command, and follow-up question must be justified by that contract. If it does not fit, omit it or ask before expanding scope.
+- Discovery can reveal dependencies and risks but cannot silently enlarge the requested target. Search matches, neighboring implementations, shared names, conventions, and possible consistency improvements are evidence to evaluate, not permission to modify them.
+- Interpret meaning from the whole context, including wording, reasons, corrections, comparisons, and prior accepted results. Infer the practical constraint behind the message, but keep the inference distinct from verified facts.
+- Treat user messages as updates to the task model. New explicit information replaces conflicting older assumptions; unaffected constraints remain active. The assistant's previous plan or conclusion has no authority over the user's current intent.
+- For non-trivial decisions, generate plausible actions, including investigation or no change, then predict each action's direct effects, side effects, remaining symptoms, assumptions, reversibility, and regression risk.
+- Choose the action with the strongest evidence that satisfies the whole outcome, not merely the most literal sentence or the closest existing pattern. Similar code is contextual evidence only; determine why it applies before copying its decision.
+- When uncertainty could change the chosen action, obtain the highest-value evidence with the lowest-risk reversible tool action. Ask the user only when the required fact is not discoverable or different valid interpretations would materially change the result.
+- Evidence is scoped: proof of one fact does not prove adjacent facts. Bind each conclusion only to what the source, tool result, documentation, or explicit user statement actually establishes. Never fill contract or design gaps with plausible conventions.
+- Claims about the live environment, process state, containers, ports, mounts, deployments, external services, or whether an action was performed require fresh direct evidence from the relevant tool in the current task. Source code, memory, familiar conventions, a previous turn, or a plausible topology cannot substitute for that observation.
+- Do not say "already checked", "not needed", "running", "connected", "no change required", or equivalent unless the current evidence supports that exact claim. If evidence is missing, say so and inspect first when inspection is safe and available.
+- Current source, configuration, runtime state, and direct tool results are authoritative for the present project. Memory, summaries, plans, prior messages, and previous conclusions are historical context; verify them against current evidence and discard them when they conflict.
+- Before mutation, compare every proposed change with the task model. Remove changes that are unsupported, unrelated, or merely customary. Preserve accepted behavior; implement only the smallest coherent set that resolves the cause and satisfies the inferred constraints.
+- After each action, update the task model from observed evidence. If evidence disproves the approach, stop compounding it, identify affected changes, and correct course.
+- When the user challenges the factual basis of a conclusion, treat that as an evidence conflict: stop defending the conclusion, identify the exact claim in question, and re-check it with the narrowest relevant observation.
+- When the user corrects the interpreted target or scope, discard the incompatible plan immediately and rebuild the intent contract from the correction. Do not continue negotiating details of the rejected interpretation.
+- Tool success is not task success. Verify observable behavior and relevant side effects against the original outcome and success conditions before claiming completion.
+- Treat precise and absolute claims as proof obligations. State the tested scope, method, evidence, and remaining uncertainty; never claim more than the evidence establishes.
+- Keep private reasoning private. Show concise intent, evidence, decisions, uncertainty, actions, and results instead of hidden chain-of-thought.
 - Short status before a tool batch is good ("Checking package.json…"). After tools, say what you found and what you did.
 - Simple tasks: inspect → act → reply. No ceremony.
 - plan_tasks is OPTIONAL — only for large multi-step work the user wants planned. Never required for small edits, deletes, or Q&A.
@@ -279,6 +299,23 @@ function shortArgs(args: string): string {
   } catch {
     return args.slice(0, 160)
   }
+}
+
+export function repeatedReadOnlyToolCall(
+  seen: Set<string>,
+  name: string,
+  args: string,
+): string | undefined {
+  if (isMutatingTool(name, args)) {
+    seen.clear()
+    return undefined
+  }
+  const signature = `${name}\n${args.trim() || '{}'}`
+  if (seen.has(signature)) {
+    return `Skipped duplicate read-only tool call: ${name}. Use existing evidence or change the query.`
+  }
+  seen.add(signature)
+  return undefined
 }
 
 function plannedTasks(args: string): RunTask[] | null {
@@ -388,7 +425,8 @@ export async function runPromptTurn(opts: {
   setStatus?: (status: SessionMeta['status']) => void
   goal?: unknown
   images?: { name: string; mime: string; dataUrl: string }[]
-}): Promise<{ content: string; usage?: Usage }> {
+  displayText?: string
+}): Promise<{ content: string; usage?: Usage; lastUsage?: Usage }> {
   const { runtime, text, config, emit, setStatus } = opts
   const sessionId = runtime.meta.id
   const root = runtime.meta.projectRoot
@@ -432,7 +470,11 @@ export async function runPromptTurn(opts: {
     }
     textWithImages = g.text
   }
-  runtime.messages.push({ role: 'user', content: imageParts.length ? [{ type: 'text', text: textWithImages }, ...imageParts] : textWithImages })
+  runtime.messages.push({
+    role: 'user',
+    content: imageParts.length ? [{ type: 'text', text: textWithImages }, ...imageParts] : textWithImages,
+    uiContent: opts.displayText?.trim() || text,
+  })
   runtime.abort = new AbortController()
 
   emit({ type: 'task_plan', sessionId, tasks: run.tasks })
@@ -469,16 +511,18 @@ export async function runPromptTurn(opts: {
   setStatus?.('running')
 
   let usage: Usage | undefined
+  let lastResponseUsage: Usage | undefined
   let finalText = ''
   let completed = false
   let repairAttempts = 0
   let didAutoCompact = false
+  const seenReadOnlyToolCalls = new Set<string>()
   const changes: ChangeEvidence[] = []
   const verificationCommands = discoverVerificationCommands(root, goal.verificationCommands)
   const toolsEnabled = !isCasualPrompt(text)
 
   try {
-    for (let round = 0; round < goal.maxRounds!; round++) {
+    for (let round = 0; ; round++) {
       if (runtime.abort.signal.aborted) throw new Error('stopped')
       if (Date.now() - started > goal.maxRuntimeMs!) throw new Error('run time budget exceeded')
       if ((usage?.total_tokens ?? 0) >= goal.maxTokens!) throw new Error('token budget exceeded')
@@ -567,6 +611,7 @@ export async function runPromptTurn(opts: {
       })
 
       usage = addUsage(usage, result.usage)
+      lastResponseUsage = result.usage
       const toolCalls = result.tool_calls?.filter((t) => t.function?.name) ?? []
 
       if (toolCalls.length > 0) {
@@ -631,8 +676,14 @@ export async function runPromptTurn(opts: {
               ti++
             const batch = toolCalls.slice(start, ti)
             const outcomes = await Promise.all(
-              batch.map((tc) =>
-                execOneTool({
+              batch.map((tc) => {
+                const duplicate = repeatedReadOnlyToolCall(
+                  seenReadOnlyToolCalls,
+                  tc.function.name,
+                  tc.function.arguments || '{}',
+                )
+                if (duplicate) return Promise.resolve({ result: { ok: false, content: duplicate } as ToolResult, change: undefined })
+                return execOneTool({
                   root,
                   sessionId,
                   tc,
@@ -649,8 +700,8 @@ export async function runPromptTurn(opts: {
                   checkpointPrompt: text,
                   denyGlobs: config.denyGlobs,
                   config,
-                }),
-              ),
+                })
+              }),
             )
             for (let j = 0; j < batch.length; j++) {
               const tc = batch[j]!
@@ -678,7 +729,14 @@ export async function runPromptTurn(opts: {
 
           const tc = head
           ti++
-          const outcome = await execOneTool({
+          const duplicate = repeatedReadOnlyToolCall(
+            seenReadOnlyToolCalls,
+            tc.function.name,
+            tc.function.arguments || '{}',
+          )
+          const outcome = duplicate
+            ? { result: { ok: false, content: duplicate } as ToolResult, change: undefined }
+            : await execOneTool({
             root,
             sessionId,
             tc,
@@ -870,14 +928,15 @@ export async function runPromptTurn(opts: {
     if (!completed) throw new Error(`max rounds exceeded (${goal.maxRounds})`)
 
     if (usage) {
-      run = updateRunState(run, { usage, lastEvent: 'model_completed' })
-      emit({ type: 'usage', sessionId, usage })
+      const reportedUsage = lastResponseUsage ?? usage
+      run = updateRunState(run, { usage: reportedUsage, lastEvent: 'model_completed' })
+      emit({ type: 'usage', sessionId, usage: reportedUsage })
     }
     run = finishRunState(run, 'completed')
     emit({ type: 'run_state', sessionId, run })
     setStatus?.('idle')
     emit({ type: 'status', sessionId, status: 'idle' })
-    return { content: finalText, usage }
+    return { content: finalText, usage, lastUsage: lastResponseUsage }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     run = updateRunState(run, { tasks: run.tasks.map((task) => task.status === 'running' ? { ...task, status: 'failed' } : task) })

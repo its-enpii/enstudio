@@ -18,7 +18,7 @@
   import { bindEnpiiEvents, pingEnpii, hydrateProjectSession } from './lib/enpii'
 
   const layoutStyle = $derived.by(() => {
-    const layout = clampProjectLayout({}, state.activeProject?.layout)
+    const layout = clampProjectLayout({}, state.ui.layout)
     return `grid-template-columns:${layout.sidebarWidth}px minmax(0, 1fr) ${layout.inspectorWidth}px`
   })
 
@@ -29,7 +29,7 @@
   })
 
   function onResizeStart(edge: 'sidebar' | 'inspector', e: PointerEvent): void {
-    const layout = clampProjectLayout({}, state.activeProject?.layout)
+    const layout = clampProjectLayout({}, state.ui.layout)
     drag = {
       edge,
       startX: e.clientX,
@@ -41,8 +41,8 @@
   function onResizeMove(e: PointerEvent): void {
     if (!drag) return
     const delta = e.clientX - drag.startX
-    if (drag.edge === 'sidebar') state.setProjectLayout({ sidebarWidth: drag.startW + delta })
-    else state.setProjectLayout({ inspectorWidth: drag.startW - delta })
+    if (drag.edge === 'sidebar') state.setLayout({ sidebarWidth: drag.startW + delta })
+    else state.setLayout({ inspectorWidth: drag.startW - delta })
   }
 
   function onResizeEnd(): void {
@@ -60,17 +60,13 @@
       /* ignore */
     }
     if (state.activeProjectId) {
-      state.setProjectLayout({})
-      void hydrateProjectSession()
-    } else if (state.projects[0]) {
-      state.selectProject(state.projects[0].id)
-      state.setProjectLayout({})
+      state.setLayout({})
       void hydrateProjectSession()
     } else {
-      state.setProjectLayout({})
+      state.setLayout({})
     }
     const onWinResize = () => {
-      state.setProjectLayout({})
+      state.setLayout({})
     }
     window.addEventListener('resize', onWinResize)
     return () => {

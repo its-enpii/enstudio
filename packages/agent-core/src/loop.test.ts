@@ -7,6 +7,7 @@ import {
   compactionTranscript,
   isCasualPrompt,
   repairChatMessages,
+  repeatedReadOnlyToolCall,
   runDirectEdit,
   runPromptTurn,
   shouldAutoCompact,
@@ -14,6 +15,18 @@ import {
   undoCompactRuntime,
   type SessionRuntime,
 } from './loop.js'
+
+test('duplicate read-only tool calls require new evidence', () => {
+  const seen = new Set<string>()
+  assert.equal(repeatedReadOnlyToolCall(seen, 'grep', '{"pattern":"token"}'), undefined)
+  assert.match(
+    repeatedReadOnlyToolCall(seen, 'grep', '{"pattern":"token"}') ?? '',
+    /Skipped duplicate read-only tool call/,
+  )
+  assert.equal(repeatedReadOnlyToolCall(seen, 'grep', '{"pattern":"usage"}'), undefined)
+  assert.equal(repeatedReadOnlyToolCall(seen, 'edit_file', '{"path":"a.ts"}'), undefined)
+  assert.equal(repeatedReadOnlyToolCall(seen, 'grep', '{"pattern":"token"}'), undefined)
+})
 
 test('compaction transcript preserves roles and truncates older context', () => {
   const transcript = compactionTranscript([
@@ -31,10 +44,10 @@ test('shouldAutoCompact thresholds', () => {
   assert.equal(shouldAutoCompact(mid), false)
   const many = Array.from({ length: 90 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
   assert.equal(shouldAutoCompact(many), true)
-  // Token pressure only when maxTokens is a tight run budget (≤200k).
-  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 900 }, 1000), true)
-  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 700_000 }, 1_000_000), false)
-  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 100 }, 1000), false)
+  // Compact before context approaches the 250k-token ceiling.
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 225_000 }), true)
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 700_000 }), true)
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 100 }), false)
 })
 
 test('splitForCompaction keeps recent tail raw', () => {

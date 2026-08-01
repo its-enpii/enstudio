@@ -146,13 +146,13 @@ function uiMessagesFromRuntime(messages: ChatMessage[]): {
   }
 
   for (const m of messages) {
-    if (m.role === 'system') continue
+    if (m.role === 'system' || m.internal) continue
     if (m.role === 'user') {
-      const content = typeof m.content === 'string'
+      const content = m.uiContent || (typeof m.content === 'string'
         ? m.content
         : Array.isArray(m.content)
           ? m.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n')
-          : ''
+          : '')
       if (content) out.push({ role: 'user', content })
       continue
     }
@@ -198,7 +198,7 @@ async function main(): Promise<void> {
   function getRuntime(sessionId: string): SessionRuntime | undefined {
     const meta = sessions.get(sessionId)
     if (!meta) return undefined
-    const messages = sessions.getMessages(sessionId)
+    const messages = sessions.getContextMessages(sessionId)
     const existing = runtimes.get(sessionId)
     if (existing) {
       existing.meta = meta
@@ -212,6 +212,20 @@ async function main(): Promise<void> {
     const runtime: SessionRuntime = { meta, messages, allowRules: provider.allowRules }
     runtimes.set(sessionId, runtime)
     return runtime
+  }
+
+  function persistRuntimeTurn(sessionId: string, runtime: SessionRuntime, displayText: string): void {
+    let start = -1
+    for (let index = runtime.messages.length - 1; index >= 0; index -= 1) {
+      const message = runtime.messages[index]!
+      if (message.role === 'user' && (message.uiContent === displayText || message.uiContent === displayText.trim())) {
+        start = index
+        break
+      }
+    }
+    const turn = (start >= 0 ? runtime.messages.slice(start) : []).filter((message) => !message.internal)
+    sessions.setMessages(sessionId, [...sessions.getMessages(sessionId), ...turn])
+    sessions.setContextMessages(sessionId, runtime.messages)
   }
 
   function syncAllowRulesToRuntimes(): void {
@@ -1207,7 +1221,7 @@ async function main(): Promise<void> {
     const runtime = getRuntime(p.sessionId)
     if (runtime) {
       runtime.meta = loaded.meta
-      runtime.messages = loaded.messages
+      runtime.messages = loaded.contextMessages ?? loaded.messages
     }
     return {
       meta: loaded.meta,
@@ -1320,8 +1334,8 @@ async function main(): Promise<void> {
             emit: (event) => rpc.notify('event', event),
             setStatus: (status) => sessions.setStatus(sessionId, status),
           })
-          sessions.setMessages(sessionId, runtime.messages)
-          const sessionUsage = sessions.addUsage(sessionId, result.usage)
+          persistRuntimeTurn(sessionId, runtime, p.text!)
+          const sessionUsage = sessions.addUsage(sessionId, result.usage, result.lastUsage)
           if (sessionUsage) {
             rpc.notify('event', {
               type: 'session_usage',
@@ -1337,6 +1351,8 @@ async function main(): Promise<void> {
           sessions.setStatus(sessionId, 'idle')
           return { sessionId, ok: true as const, content: result.content?.slice(0, 500) }
         } catch (err) {
+          const runtime = getRuntime(sessionId)
+          if (runtime) persistRuntimeTurn(sessionId, runtime, p.text!)
           sessions.setStatus(sessionId, 'idle')
           return {
             sessionId,
@@ -1353,7 +1369,7 @@ async function main(): Promise<void> {
   })
 
   rpc.on('session.prompt', async (_method, params) => {
-    const p = (params ?? {}) as { sessionId?: string; text?: string; goal?: unknown; images?: { name?: unknown; mime?: unknown; dataUrl?: unknown }[] }
+    const p = (params ?? {}) as { sessionId?: string; text?: string; displayText?: string; goal?: unknown; images?: { name?: unknown; mime?: unknown; dataUrl?: unknown }[] }
     if (!p.sessionId) throw new Error('sessionId is required')
     const meta = sessions.get(p.sessionId)
     if (!meta) throw new Error(`session not found: ${p.sessionId}`)
@@ -1387,14 +1403,15 @@ async function main(): Promise<void> {
       const result = await runPromptTurn({
         runtime,
         text: p.text,
+        displayText: p.displayText,
         config: provider,
         goal: p.goal ?? p.text,
         images,
         emit: (event) => rpc.notify('event', event),
         setStatus: (status) => sessions.setStatus(p.sessionId!, status),
       })
-      sessions.setMessages(p.sessionId, runtime.messages)
-      const sessionUsage = sessions.addUsage(p.sessionId, result.usage)
+      persistRuntimeTurn(p.sessionId, runtime, p.displayText?.trim() || p.text)
+      const sessionUsage = sessions.addUsage(p.sessionId, result.usage, result.lastUsage)
       if (sessionUsage) {
         rpc.notify('event', {
           type: 'session_usage',
@@ -1410,7 +1427,7 @@ async function main(): Promise<void> {
       sessions.setStatus(p.sessionId, 'idle')
       return { ok: true, content: result.content, usage: result.usage, sessionUsage }
     } catch (err) {
-      sessions.setMessages(p.sessionId, runtime.messages)
+      persistRuntimeTurn(p.sessionId, runtime, p.displayText?.trim() || p.text)
       sessions.setStatus(p.sessionId, 'error')
       const message = err instanceof Error ? err.message : String(err)
       rpc.notify('event', {
@@ -1818,8 +1835,8 @@ async function main(): Promise<void> {
         emit: (event) => rpc.notify('event', event),
         setStatus: (status) => sessions.setStatus(meta.id, status),
       })
-      sessions.setMessages(meta.id, runtime.messages)
-      sessions.addUsage(meta.id, result.usage)
+      persistRuntimeTurn(meta.id, runtime, job.prompt)
+      sessions.addUsage(meta.id, result.usage, result.lastUsage)
       sessions.setStatus(meta.id, 'idle')
       const marked = cronMarkRan(root, job.id, { ok: true, sessionId: meta.id })
       rpc.notify('event', {

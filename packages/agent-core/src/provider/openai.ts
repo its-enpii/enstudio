@@ -17,6 +17,10 @@ export interface ChatMessage {
   tool_calls?: ToolCall[]
   tool_call_id?: string
   name?: string
+  /** UI-only user text; stripped before provider request. */
+  uiContent?: string
+  /** Internal context message; hidden from transcript UI. */
+  internal?: boolean
 }
 
 export interface ChatResult {
@@ -138,12 +142,11 @@ export async function chatCompletions(opts: {
     opts.onCircuit?.({ state: 'half_open', model: opts.model })
   }
   const wantStream = opts.stream !== false && typeof opts.onDelta === 'function'
-  // Some gateways mishandle stream+tools; prefer non-stream when tools present
-  const stream = wantStream && !(opts.tools && opts.tools.length > 0)
+  const stream = wantStream
 
   const body: Record<string, unknown> = {
     model: opts.model,
-    messages: opts.messages,
+    messages: opts.messages.map(({ uiContent: _uiContent, internal: _internal, ...message }) => message),
     stream,
   }
   // Without this, many OpenAI-compat streams omit the final usage chunk → UI undercounts.

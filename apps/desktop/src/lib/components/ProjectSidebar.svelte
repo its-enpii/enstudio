@@ -62,7 +62,7 @@
     return out
   })
 
-  async function openProject(): Promise<void> {
+  async function openProject(groupId?: string): Promise<void> {
     if (opening) return
     opening = true
     openError = ''
@@ -71,7 +71,10 @@
       if (!api?.dialog) throw new Error('dialog API missing — restart the desktop app')
       const dir = await api.dialog.openDirectory()
       if (!dir) return
-      app.addProject(dir)
+      const normalized = dir.replace(/[\\/]+$/, '').toLowerCase()
+      const existing = app.projects.find((project) => project.path.replace(/[\\/]+$/, '').toLowerCase() === normalized)
+      const project = app.addProject(dir)
+      if (groupId && !existing) app.setProjectGroup(project.id, groupId)
       await hydrateProjectSession()
     } catch (err) {
       openError = err instanceof Error ? err.message : String(err)
@@ -155,14 +158,7 @@
 
   function onGroupMenu(group: ProjectGroup, id: string): void {
     if (id === 'add') {
-      // Prefer active project if free/elsewhere; else first ungrouped
-      const active = app.activeProject
-      const free =
-        active && active.groupId !== group.id
-          ? active
-          : app.projects.find((p) => p.groupId !== group.id)
-      if (free) app.setProjectGroup(free.id, group.id)
-      else app.notify('info', t('sidebar.noFreeProjects'), t('sidebar.noFreeProjectsDetail'))
+      void openProject(group.id)
     } else if (id === 'rename') startGroupRename(group)
     else if (id === 'ungroup') app.ungroupProjectGroup(group.id)
   }
@@ -251,7 +247,7 @@
       class="grid size-[30px] shrink-0 place-items-center rounded-lg bg-black/25 text-studio-text-dim ring-1 ring-white/8 hover:bg-white/8 hover:text-studio-text disabled:opacity-45"
       title={t('sidebar.openFolder')}
       aria-label={t('sidebar.openFolder')}
-      onclick={openProject}
+      onclick={() => void openProject()}
       disabled={opening}
     >
       <Icon name="folder-plus" size={14} />

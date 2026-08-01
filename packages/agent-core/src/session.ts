@@ -19,6 +19,7 @@ function canonRoot(p: string): string {
 export class SessionStore {
   private sessions = new Map<string, SessionMeta>()
   private messages = new Map<string, ChatMessage[]>()
+  private contextMessages = new Map<string, ChatMessage[]>()
 
   constructor() {
     for (const meta of listPersisted()) {
@@ -57,6 +58,7 @@ export class SessionStore {
         this.sessions.set(next.id, next)
         if (!this.messages.has(next.id)) {
           this.messages.set(next.id, disk?.messages ?? [])
+          this.contextMessages.set(next.id, disk?.contextMessages ?? disk?.messages ?? [])
         }
         this.persist(next.id)
         return next
@@ -79,6 +81,7 @@ export class SessionStore {
         }
         this.sessions.set(next.id, next)
         this.messages.set(next.id, latest.messages ?? [])
+        this.contextMessages.set(next.id, latest.contextMessages ?? latest.messages ?? [])
         this.persist(next.id)
         return next
       }
@@ -98,6 +101,7 @@ export class SessionStore {
     }
     this.sessions.set(meta.id, meta)
     this.messages.set(meta.id, [])
+    this.contextMessages.set(meta.id, [])
     this.persist(meta.id)
     return meta
   }
@@ -131,6 +135,7 @@ export class SessionStore {
     }
     this.sessions.set(meta.id, meta)
     this.messages.set(meta.id, [])
+    this.contextMessages.set(meta.id, [])
     this.persist(meta.id)
     return meta
   }
@@ -145,6 +150,7 @@ export class SessionStore {
     if (loaded) {
       this.sessions.set(sessionId, loaded.meta)
       this.messages.set(sessionId, loaded.messages ?? [])
+      this.contextMessages.set(sessionId, loaded.contextMessages ?? loaded.messages ?? [])
       return loaded.meta
     }
     return undefined
@@ -225,6 +231,17 @@ export class SessionStore {
     return this.messages.get(sessionId) ?? []
   }
 
+  getContextMessages(sessionId: string): ChatMessage[] {
+    const meta = this.sessions.get(sessionId) ?? this.get(sessionId)
+    this.ensureMessages(meta)
+    return this.contextMessages.get(sessionId) ?? this.messages.get(sessionId) ?? []
+  }
+
+  setContextMessages(sessionId: string, messages: ChatMessage[]): void {
+    this.contextMessages.set(sessionId, messages)
+    this.persist(sessionId)
+  }
+
   setMessages(sessionId: string, messages: ChatMessage[]): void {
     this.messages.set(sessionId, messages)
     const s = this.sessions.get(sessionId)
@@ -241,6 +258,7 @@ export class SessionStore {
       total_tokens?: number
       cached_tokens?: number
     },
+    lastUsage = usage,
   ): SessionMeta['usage'] | undefined {
     if (!usage) return this.sessions.get(sessionId)?.usage
     const s = this.sessions.get(sessionId) ?? this.get(sessionId)
@@ -250,6 +268,20 @@ export class SessionStore {
       completion: usage.completion_tokens ?? 0,
       total: usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
       cached: usage.cached_tokens ?? 0,
+    }
+    if (lastUsage) {
+      const latest = {
+        prompt: lastUsage.prompt_tokens ?? 0,
+        completion: lastUsage.completion_tokens ?? 0,
+        total: lastUsage.total_tokens ?? (lastUsage.prompt_tokens ?? 0) + (lastUsage.completion_tokens ?? 0),
+        cached: lastUsage.cached_tokens ?? 0,
+      }
+      s.lastUsage = {
+        prompt: latest.prompt,
+        completion: latest.completion,
+        total: latest.total,
+        cached: latest.cached > 0 ? latest.cached : undefined,
+      }
     }
     const cachedSum = s.usage
       ? (s.usage.cached ?? 0) + add.cached
@@ -277,7 +309,7 @@ export class SessionStore {
     const meta = this.get(sessionId)
     if (!meta) return null
     this.ensureMessages(meta)
-    return { meta, messages: this.messages.get(sessionId) ?? [] }
+    return { meta, messages: this.messages.get(sessionId) ?? [], contextMessages: this.contextMessages.get(sessionId) ?? this.messages.get(sessionId) ?? [] }
   }
 
   persist(sessionId: string): void {
@@ -286,7 +318,7 @@ export class SessionStore {
     const msgs = this.messages.get(sessionId) ?? []
     if (msgs.length === 0) return
     try {
-      saveSession(meta, msgs)
+      saveSession(meta, msgs, this.contextMessages.get(sessionId) ?? msgs)
     } catch (err) {
       console.error('[enpii] persist failed', err)
     }
@@ -299,6 +331,9 @@ export class SessionStore {
     const loaded = loadSession(meta.projectRoot, meta.id) ?? loadSessionById(meta.id)
     if (loaded?.messages?.length || !this.messages.has(meta.id)) {
       this.messages.set(meta.id, loaded?.messages ?? [])
+    }
+    if (loaded?.contextMessages?.length || !this.contextMessages.has(meta.id)) {
+      this.contextMessages.set(meta.id, loaded?.contextMessages ?? loaded?.messages ?? [])
     }
   }
 }

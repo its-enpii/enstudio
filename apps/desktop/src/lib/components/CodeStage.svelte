@@ -670,6 +670,19 @@
     }
   }
 
+  async function refreshVisibleTree(): Promise<void> {
+    if (!app.activeProject) return
+    await loadChildren('.', true)
+    const loadedDirs = Object.keys(children)
+      .filter((dir) => dir !== '.' && expanded[dir])
+      .sort((a, b) => a.split('/').length - b.split('/').length)
+    for (const dir of loadedDirs) {
+      const parent = parentPath(dir)
+      if (!(children[parent] ?? []).some((entry) => entry.kind === 'd' && entry.path === dir)) continue
+      await loadChildren(dir, true)
+    }
+  }
+
   async function readPath(file: string, opts: { pin?: boolean } = {}): Promise<void> {
     const project = app.activeProject
     if (!project) return
@@ -786,7 +799,19 @@
   onMount(() => {
     // Electron main routes Mod+W through browser:shortcut (always preventDefault)
     const off = window.enpiistudio?.browser?.onShortcut?.(onAppShortcut)
-    return () => off?.()
+    const refreshOnFocus = (): void => {
+      void refreshVisibleTree()
+    }
+    const refreshOnVisible = (): void => {
+      if (document.visibilityState === 'visible') void refreshVisibleTree()
+    }
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnVisible)
+    return () => {
+      off?.()
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnVisible)
+    }
   })
 
   onDestroy(() => {
@@ -881,7 +906,7 @@
             {#if renamingPath === entry.path}
               <form
                 class="mb-0.5 flex items-center gap-1.5 py-1 pr-2"
-                style={`padding-left:${10 + entry.depth * 16}px`}
+                style={`padding-left:${8 + entry.depth * 12}px`}
                 onsubmit={(event) => { event.preventDefault(); void submitRename() }}
               >
                 <Icon name={entry.kind === 'd' ? 'folder' : 'file'} size={12} class="shrink-0 text-studio-text-dim" />
@@ -899,7 +924,7 @@
                 class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-xs {selectedPath === entry.path || activeDir === entry.path
                   ? 'bg-studio-purple/25 text-studio-text ring-1 ring-studio-purple/30'
                   : 'text-studio-text-dim hover:bg-white/[0.06] hover:text-studio-text'}"
-                style={`padding-left:${10 + entry.depth * 16}px`}
+                style={`padding-left:${8 + entry.depth * 12}px`}
                 onclick={() => void openEntry(entry)}
                 ondblclick={() => void pinEntry(entry)}
                 oncontextmenu={(e) => openCtx(e, entry)}
@@ -918,7 +943,7 @@
             {#if creating && createParent === entry.path && entry.kind === 'd'}
               <form
                 class="mb-1 flex items-center gap-1.5 py-0.5 pr-2"
-                style={`padding-left:${10 + (entry.depth + 1) * 16}px`}
+                style={`padding-left:${8 + (entry.depth + 1) * 12}px`}
                 onsubmit={(event) => { event.preventDefault(); void submitCreate() }}
               >
                 <Icon name={creating === 'file' ? 'file' : 'folder'} size={12} class="shrink-0 text-studio-text-dim" />

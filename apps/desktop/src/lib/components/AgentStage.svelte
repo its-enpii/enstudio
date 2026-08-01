@@ -349,27 +349,26 @@ void tick().then(() => focusComposer())
 
   function collapsedToolItems(items: ChatMessage[]): ChatMessage[] {
     const out: ChatMessage[] = []
-    const indexByKey = new Map<string, number>()
+    let lastKey: string | null = null
     for (const message of items) {
       if (message.role !== 'tool' || !message.tool) {
         out.push(message)
+        lastKey = null
         continue
       }
       const name = message.tool.name
       const keepSeparate = name === 'write_file' || name === 'edit_file'
-      const key = keepSeparate ? message.id : name + '\\u0000' + (message.tool.summary ?? message.tool.args ?? '')
-      const previousIndex = indexByKey.get(key)
-      if (previousIndex === undefined) {
-        indexByKey.set(key, out.length)
+      const key = keepSeparate ? message.id : name
+      const previous = out[out.length - 1]
+      if (key !== lastKey || previous?.role !== 'tool' || !previous.tool) {
         out.push(message)
+        lastKey = key
         continue
       }
-      const previous = out[previousIndex]!
-      if (previous.role !== 'tool' || !previous.tool) continue
       const mergedPreview = [previous.tool.preview?.trim(), message.tool.preview?.trim()]
         .filter(Boolean)
         .join('\\n\\n--- repeated call ---\\n\\n')
-      out[previousIndex] = {
+      out[out.length - 1] = {
         ...message,
         tool: { ...message.tool, preview: mergedPreview || message.tool.preview },
       }
@@ -2010,7 +2009,7 @@ void tick().then(() => focusComposer())
     {#if app.ask && !app.messages.some((m) => m.tool?.callId === app.ask?.toolCallId || m.tool?.callId === app.ask?.requestId)}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
       <div
-        class="mb-3 overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card outline-none"
+        class="sticky bottom-0 z-10 mb-3 overflow-hidden rounded-lg border border-studio-purple/35 bg-studio-card/95 outline-none shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-sm"
         role="radiogroup"
         tabindex="0"
         onkeydown={(e) => onAskCardKeydown(e, app.ask!.requestId, app.ask!.options)}
@@ -2386,43 +2385,43 @@ void tick().then(() => focusComposer())
       </div>
     </div>
   {/if}
+  {#if app.draftPlan?.status === 'draft'}
+    <div class="rounded-lg border border-studio-lavender/30 bg-studio-purple/10 px-3 py-2.5">
+      <div class="mb-1.5 flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-[10px] font-semibold uppercase tracking-wide text-studio-lavender">Draft plan</div>
+          <div class="truncate text-[12px] text-studio-text">{app.draftPlan.title}</div>
+          <div class="truncate font-mono text-[9px] text-white/35">{app.draftPlan.relPath}</div>
+        </div>
+        <div class="flex shrink-0 gap-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            onclick={() => void rejectDiskPlan(app.draftPlan?.id).catch((e) => app.notify('error', 'Reject failed', e instanceof Error ? e.message : String(e)))}
+          >Reject</Button>
+          <Button
+            variant="primary"
+            size="sm"
+            class="bg-studio-gold font-semibold text-studio-dark hover:bg-studio-gold hover:brightness-105"
+            onclick={() => void approveDiskPlan(app.draftPlan?.id).then(() => void sendPrompt('Plan approved. Execute the approved plan steps. Do not re-plan unless blocked.')).catch((e) => app.notify('error', 'Approve failed', e instanceof Error ? e.message : String(e)))}
+          >Approve & run</Button>
+        </div>
+      </div>
+      <ol class="m-0 list-decimal space-y-0.5 pl-4 text-[11px] text-studio-text-dim">
+        {#each app.draftPlan.steps as step, si (si)}
+          <li>
+            <span class="text-studio-text">{step.title}</span>
+            {#if step.detail}<span class="text-white/40"> — {step.detail}</span>{/if}
+          </li>
+        {/each}
+      </ol>
+    </div>
+  {/if}
   <div
     class="composer-inner relative flex flex-col gap-3 rounded-lg border border-border-subtle bg-studio-dark p-3 transition-colors duration-100 focus-within:border-studio-purple/50"
     role="group"
     aria-label="Message composer"
   >
-    {#if app.draftPlan?.status === 'draft'}
-      <div class="mb-1 rounded-md border border-studio-lavender/30 bg-studio-purple/10 px-2.5 py-2">
-        <div class="mb-1 flex items-center justify-between gap-2">
-          <div class="min-w-0">
-            <div class="text-[10px] font-semibold uppercase tracking-wide text-studio-lavender">Draft plan</div>
-            <div class="truncate text-[12px] text-studio-text">{app.draftPlan.title}</div>
-            <div class="truncate font-mono text-[9px] text-white/35">{app.draftPlan.relPath}</div>
-          </div>
-          <div class="flex shrink-0 gap-1.5">
-            <Button
-              variant="secondary"
-              size="sm"
-              onclick={() => void rejectDiskPlan(app.draftPlan?.id).catch((e) => app.notify('error', 'Reject failed', e instanceof Error ? e.message : String(e)))}
-            >Reject</Button>
-            <Button
-              variant="primary"
-              size="sm"
-              class="bg-studio-gold font-semibold text-studio-dark hover:bg-studio-gold hover:brightness-105"
-              onclick={() => void approveDiskPlan(app.draftPlan?.id).then(() => void sendPrompt('Plan approved. Execute the approved plan steps. Do not re-plan unless blocked.')).catch((e) => app.notify('error', 'Approve failed', e instanceof Error ? e.message : String(e)))}
-            >Approve & run</Button>
-          </div>
-        </div>
-        <ol class="m-0 list-decimal space-y-0.5 pl-4 text-[11px] text-studio-text-dim">
-          {#each app.draftPlan.steps as step, si (si)}
-            <li>
-              <span class="text-studio-text">{step.title}</span>
-              {#if step.detail}<span class="text-white/40"> — {step.detail}</span>{/if}
-            </li>
-          {/each}
-        </ol>
-      </div>
-    {/if}
     {#if app.planMode}
       <div class="mb-1 flex flex-wrap items-center gap-2 text-[10px]">
         <span class="rounded-full border border-studio-lavender/40 bg-studio-purple/15 px-2 py-0.5 font-semibold text-studio-lavender">Plan mode · writes blocked</span>

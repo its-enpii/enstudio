@@ -48,6 +48,31 @@ test('sends multimodal user content unchanged', async () => {
   }
 })
 
+test('streams responses when tools are present', async () => {
+  const original = globalThis.fetch
+  let requestBody: Record<string, unknown> | undefined
+  globalThis.fetch = (async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return new Response('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"a.ts\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+  }) as typeof fetch
+  try {
+    const result = await chatCompletions({
+      ...base,
+      stream: true,
+      onDelta: () => {},
+      tools: [{ type: 'function', function: { name: 'read_file', description: 'Read file', parameters: { type: 'object' } } }],
+    })
+    assert.equal(requestBody?.stream, true)
+    assert.equal(result.tool_calls?.[0]?.function.name, 'read_file')
+    assert.equal(result.tool_calls?.[0]?.function.arguments, '{"path":"a.ts"}')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('retries transient provider failure and succeeds', async () => {
   const original = globalThis.fetch
   let calls = 0

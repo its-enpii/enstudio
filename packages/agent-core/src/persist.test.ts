@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
-import { listPersisted, loadSession, projectHash, saveSession } from './persist.js'
+import { listPersisted, loadSession, projectHash, recoverTranscriptTail, saveSession } from './persist.js'
 import { closeSessionIndex, indexGet, rebuildIndex } from './session-index.js'
 import type { SessionMeta } from './types.js'
 
@@ -55,6 +55,31 @@ describe('persist', () => {
     assert.ok(idx)
     assert.equal(idx!.title, 't')
     assert.equal(idx!.model, 'enpii')
+  })
+
+  it('recovers a failed turn stored only in context messages', () => {
+    const meta: SessionMeta = {
+      id: 'failed-turn',
+      contractVersion: '0.1.0',
+      projectRoot: process.cwd(),
+      title: 'failed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'test',
+      dialect: 'openai' as const,
+      permissionMode: 'ask' as const,
+      status: 'error' as const,
+    }
+    const recovered = recoverTranscriptTail({
+      meta,
+      messages: [{ role: 'user', content: 'old' }],
+      contextMessages: [
+        { role: 'user', content: 'old' },
+        { role: 'user', content: 'new request' },
+        { role: 'assistant', content: 'partial work' },
+      ],
+    })
+    assert.deepEqual(recovered.messages.map((message) => message.content), ['old', 'new request', 'partial work'])
   })
 
   it('rebuildIndex rescans JSON sessions', () => {

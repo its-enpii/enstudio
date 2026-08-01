@@ -10,6 +10,18 @@ import { indexList, indexUpsert } from './session-index.js'
 export interface PersistedSession {
   meta: SessionMeta
   messages: ChatMessage[]
+  contextMessages?: ChatMessage[]
+}
+
+export function recoverTranscriptTail(data: PersistedSession): PersistedSession {
+  const transcript = data.messages ?? []
+  const context = data.contextMessages ?? []
+  if (context.length <= transcript.length) return data
+  const isPrefix = transcript.every((message, index) => JSON.stringify(message) === JSON.stringify(context[index]))
+  if (!isPrefix) return data
+  const recovered = context.slice(transcript.length).filter((message) => !message.internal)
+  if (!recovered.length) return data
+  return { ...data, messages: repairChatMessages([...transcript, ...recovered]) }
 }
 
 function enpiiHome(): string {
@@ -50,7 +62,7 @@ function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-export function saveSession(meta: SessionMeta, messages: ChatMessage[]): void {
+export function saveSession(meta: SessionMeta, messages: ChatMessage[], contextMessages: ChatMessage[] = messages): void {
   const root = storageRoot(meta)
   const dir = projectDir(root)
   ensureDir(dir)
@@ -62,6 +74,7 @@ export function saveSession(meta: SessionMeta, messages: ChatMessage[]): void {
       status: meta.status === 'running' || meta.status === 'awaiting_approval' ? 'idle' : meta.status,
     },
     messages: sanitizeMessages(messages),
+    contextMessages: sanitizeMessages(contextMessages),
   }
   const file = sessionPath(root, meta.id)
   fs.writeFileSync(file, JSON.stringify(payload), 'utf8')
@@ -79,7 +92,10 @@ export function loadSession(
     if (Array.isArray(data.messages) && data.messages.length) {
       data.messages = repairChatMessages(data.messages)
     }
-    return data
+    if (Array.isArray(data.contextMessages) && data.contextMessages.length) {
+      data.contextMessages = repairChatMessages(data.contextMessages)
+    }
+    return recoverTranscriptTail(data)
   } catch {
     return null
   }
@@ -104,7 +120,10 @@ export function loadSessionById(sessionId: string): PersistedSession | null {
         if (Array.isArray(data.messages) && data.messages.length) {
           data.messages = repairChatMessages(data.messages)
         }
-        return data
+        if (Array.isArray(data.contextMessages) && data.contextMessages.length) {
+          data.contextMessages = repairChatMessages(data.contextMessages)
+        }
+        return recoverTranscriptTail(data)
       }
     } catch {
       /* skip */

@@ -208,10 +208,7 @@ function applyProvider(cfg: ProviderPublic, healthPrefix?: string): void {
 
 export async function loadProviderConfig(): Promise<ProviderPublic | null> {
   try {
-    const projectRoot = state.activeProject?.path
-    const cfg = (await window.enpiistudio.enpii.request('config.get', {
-      projectRoot,
-    })) as ProviderPublic
+    const cfg = (await window.enpiistudio.enpii.request('config.get')) as ProviderPublic
     applyProvider(cfg)
     return cfg
   } catch (err) {
@@ -233,12 +230,7 @@ export async function saveProviderConfig(patch: {
   allowRules?: string[]
   guardrails?: GuardrailsPublic
 }): Promise<ProviderPublic> {
-  const projectRoot = state.activeProject?.path
-  const cfg = (await window.enpiistudio.enpii.request('config.set', {
-    ...patch,
-    // Reload with project overlay so allowRules union is visible after save.
-    projectRoot,
-  })) as ProviderPublic
+  const cfg = (await window.enpiistudio.enpii.request('config.set', patch)) as ProviderPublic
   applyProvider(cfg)
   state.pushLog(
     `[config] saved model=${cfg.model} mode=${cfg.permissionMode} allow=${cfg.allowRules?.length ?? 0} key=${cfg.hasKey ? 'ok' : 'missing'}`,
@@ -636,9 +628,8 @@ export type McpServerInfo = {
 }
 
 export async function listMcpServers(projectRoot?: string): Promise<McpServerInfo[]> {
-  const root = projectRoot ?? state.activeProject?.path
   const res = (await window.enpiistudio.enpii.request('mcp.list_servers', {
-    projectRoot: root,
+    ...(projectRoot ? { projectRoot } : {}),
   })) as { servers?: McpServerInfo[] }
   return res.servers ?? []
 }
@@ -1130,6 +1121,7 @@ export async function refreshSessionList(): Promise<void> {
       busy?: boolean
       worktree?: boolean
       usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
+      lastUsage?: { prompt?: number; completion?: number; total?: number; cached?: number }
     }[]
     const mapped = list
       .filter((s) => !isBrowserUiSession(s.id) && !/^Browser UI\b/i.test(s.title ?? ''))
@@ -1153,8 +1145,26 @@ export async function refreshSessionList(): Promise<void> {
               cached: s.usage.cached ?? 0,
             }
           : undefined,
+        lastUsage: s.lastUsage
+          ? {
+              prompt: s.lastUsage.prompt ?? 0,
+              completion: s.lastUsage.completion ?? 0,
+              total: s.lastUsage.total ?? 0,
+              cached: s.lastUsage.cached ?? 0,
+            }
+          : undefined,
       }))
     state.sessionList = mapped
+    if (state.session) {
+      const active = mapped.find((session) => session.id === state.session?.id)
+      if (active) {
+        state.session = {
+          ...state.session,
+          usage: active.usage,
+          lastUsage: active.lastUsage,
+        }
+      }
+    }
   } catch {
     state.sessionList = state.session && !isBrowserUiSession(state.session.id) ? [state.session] : []
   }
@@ -1841,6 +1851,7 @@ export async function openSession(sessionId: string): Promise<void> {
               worktreeBranch?: string
               loadMemory?: boolean
               usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
+              lastUsage?: { prompt?: number; completion?: number; total?: number; cached?: number }
             }
           }
           listed = {
@@ -1859,6 +1870,14 @@ export async function openSession(sessionId: string): Promise<void> {
                   cached: loaded.meta.usage.cached ?? 0,
                 }
               : undefined,
+            lastUsage: loaded.meta.lastUsage
+              ? {
+                  prompt: loaded.meta.lastUsage.prompt ?? 0,
+                  completion: loaded.meta.lastUsage.completion ?? 0,
+                  total: loaded.meta.lastUsage.total ?? 0,
+                  cached: loaded.meta.lastUsage.cached ?? 0,
+                }
+              : undefined,
           }
         } catch {
           /* fall through with sparse meta */
@@ -1875,6 +1894,7 @@ export async function openSession(sessionId: string): Promise<void> {
         worktreeBranch: listed?.worktreeBranch,
         loadMemory: listed ? (listed as { loadMemory?: boolean }).loadMemory : undefined,
         usage: listed?.usage,
+        lastUsage: listed?.lastUsage,
       }
       state.pushLog(`[session] restored live msgs=${state.messages.length} busy=${state.busy}`)
       await refreshSessionList()
@@ -1894,10 +1914,20 @@ export async function openSession(sessionId: string): Promise<void> {
         worktreeBranch?: string
         loadMemory?: boolean
         usage?: { prompt?: number; completion?: number; total?: number; cached?: number }
+        lastUsage?: { prompt?: number; completion?: number; total?: number; cached?: number }
       }
       messages: { role: string; content: string; toolName?: string }[]
     }
     const diskUsage = loaded.meta.usage
+    const diskLastUsage = loaded.meta.lastUsage
+    const lastUsage = diskLastUsage
+      ? {
+          prompt: diskLastUsage.prompt ?? 0,
+          completion: diskLastUsage.completion ?? 0,
+          total: diskLastUsage.total ?? 0,
+          cached: diskLastUsage.cached ?? 0,
+        }
+      : undefined
     const usage = diskUsage
       ? {
           prompt: diskUsage.prompt ?? 0,
@@ -1916,6 +1946,7 @@ export async function openSession(sessionId: string): Promise<void> {
       worktreeBranch: loaded.meta.worktreeBranch,
       loadMemory: loaded.meta.loadMemory,
       usage: usage ?? undefined,
+      lastUsage,
     }
     state.bindSessionProject(loaded.meta.id, state.activeProjectId)
     state.messages = mapDiskMessages(loaded.messages ?? [])
@@ -2022,6 +2053,7 @@ export async function sendPrompt(
     await window.enpiistudio.enpii.request('session.prompt', {
       sessionId,
       text,
+      displayText: display,
       images: options?.images?.map(({ name, mime, dataUrl }) => ({ name, mime, dataUrl })),
       goal: {
         goal: text,
@@ -2727,7 +2759,7 @@ export function bindEnpiiEvents(): () => void {
       const count = Number((p as { originalMessageCount?: number }).originalMessageCount ?? 0)
       const auto = Boolean((p as { auto?: boolean }).auto)
       const canUndo = Boolean((p as { canUndo?: boolean }).canUndo)
-      const summary = String((p as { summary?: string }).summary ?? '').slice(0, 280)
+      const summary = ''
       const undoHint = canUndo ? ' · Undo: /undo-compact' : ''
       const note = auto
         ? `Auto-compacted ${count} messages${summary ? ` · ${summary}` : ''}${undoHint}`

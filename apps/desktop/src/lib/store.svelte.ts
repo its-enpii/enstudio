@@ -127,8 +127,8 @@ export const LAYOUT_DEFAULT = {
   inspector: 280,
 } as const
 
-/** Bump → wipe corrupted rail widths from localStorage once. */
-export const LAYOUT_VERSION = 5
+/** Bump when the global shell layout schema changes. */
+export const LAYOUT_VERSION = 6
 const LAYOUT_VERSION_KEY = 'enpiistudio.layoutVersion'
 
 /** Shell chrome: pad 12×2 + gap 12×2 (p-3 gap-3). */
@@ -136,7 +136,7 @@ const LAYOUT_CHROME = 48
 
 export function clampProjectLayout(
   patch: Partial<ProjectLayout>,
-  current?: ProjectLayout,
+  current?: Partial<ProjectLayout>,
   opts?: { viewportWidth?: number },
 ): ProjectLayout {
   let side = Number(patch.sidebarWidth ?? current?.sidebarWidth ?? LAYOUT_DEFAULT.sidebar)
@@ -165,14 +165,6 @@ function defaultLayout(): ProjectLayout {
   return { sidebarWidth: LAYOUT_DEFAULT.sidebar, inspectorWidth: LAYOUT_DEFAULT.inspector }
 }
 
-function layoutNeedsReset(): boolean {
-  try {
-    return Number(localStorage.getItem(LAYOUT_VERSION_KEY) ?? 0) < LAYOUT_VERSION
-  } catch {
-    return true
-  }
-}
-
 function markLayoutVersion(): void {
   try {
     localStorage.setItem(LAYOUT_VERSION_KEY, String(LAYOUT_VERSION))
@@ -191,7 +183,6 @@ export interface Project {
   groupId?: string | null
   /** Manual sidebar order (lower first). Pinned still float above. */
   order?: number
-  layout?: ProjectLayout
 }
 
 export interface ProjectGroup {
@@ -253,6 +244,8 @@ export interface SessionInfo {
   messageCount?: number
   sizeBytes?: number
   usage?: TokenUsage
+  /** Provider-reported usage for the latest completed turn. */
+  lastUsage?: TokenUsage
   /** false = skip durable memory inject (default true). */
   loadMemory?: boolean
   /** Live from sidecar when session is mid-run. */
@@ -408,24 +401,22 @@ function loadProjects(): Project[] {
       markLayoutVersion()
       return []
     }
-    const parsed = JSON.parse(raw) as Project[]
-    const reset = layoutNeedsReset()
+    const parsed = JSON.parse(raw) as Array<Project & { layout?: ProjectLayout }>
     const migrated = sortProjects([...new Map(parsed
       .filter((project) => typeof project?.path === 'string' && project.path.trim())
       .map((project, index) => {
         const path = project.path
-        const layout = reset ? defaultLayout() : clampProjectLayout({}, project.layout)
+        const { layout: _legacyLayout, ...projectMeta } = project
         return [projectPathKey(path), {
-          ...project,
+          ...projectMeta,
           id: projectId(path),
           pinned: Boolean(project.pinned),
           displayName: typeof project.displayName === 'string' ? project.displayName : undefined,
           groupId: typeof project.groupId === 'string' ? project.groupId : null,
           order: typeof project.order === 'number' ? project.order : index,
-          layout,
         }]
       })).values()])
-    if (reset || JSON.stringify(migrated) !== JSON.stringify(parsed)) {
+    if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
       localStorage.setItem('enpiistudio.projects', JSON.stringify(migrated))
     }
     markLayoutVersion()
@@ -488,6 +479,8 @@ export const UI_ZOOM_STEP = 10
 export const EDITOR_FONT_SIZE = 13
 
 export interface UiPrefs {
+  /** Global shell rail widths. */
+  layout: ProjectLayout
   theme: UiTheme
   /** Gold pulse on busy indicators (.studio-signal). */
   goldPulse: boolean
@@ -505,6 +498,7 @@ export interface UiPrefs {
 
 const UI_PREFS_KEY = 'enpiistudio.uiPrefs'
 const DEFAULT_UI_PREFS: UiPrefs = {
+  layout: defaultLayout(),
   theme: 'dark',
   goldPulse: true,
   streamTokens: true,
@@ -551,9 +545,20 @@ function applyUiCss(prefs: UiPrefs): void {
 function loadUiPrefs(): UiPrefs {
   try {
     const raw = localStorage.getItem(UI_PREFS_KEY)
-    if (!raw) return { ...DEFAULT_UI_PREFS }
-    const parsed = JSON.parse(raw) as Partial<UiPrefs>
+    const parsed = raw ? JSON.parse(raw) as Partial<UiPrefs> & { layout?: Partial<ProjectLayout> } : {}
+    let layout = clampProjectLayout({}, parsed.layout)
+    if (!parsed.layout) {
+      try {
+        const projects = JSON.parse(localStorage.getItem('enpiistudio.projects') ?? '[]') as Array<{ layout?: Partial<ProjectLayout> }>
+        const legacy = projects.find((project) => project.layout)?.layout
+        layout = clampProjectLayout({}, legacy)
+        localStorage.setItem(UI_PREFS_KEY, JSON.stringify({ ...parsed, layout }))
+      } catch {
+        /* use defaults */
+      }
+    }
     return {
+      layout,
       theme: parsed.theme === 'light' || parsed.theme === 'system' || parsed.theme === 'dark' ? parsed.theme : 'dark',
       goldPulse: parsed.goldPulse !== false,
       streamTokens: parsed.streamTokens !== false,
@@ -613,11 +618,11 @@ export interface LiveSessionState {
 
 class AppState {
   mode = $state<Mode>('agent')
+  /** Local UI prefs (Appearance + Provider runtime toggles). */
+  ui = $state<UiPrefs>(loadUiPrefs())
   projects = $state<Project[]>(loadProjects())
   projectGroups = $state<ProjectGroup[]>(loadGroups())
   activeProjectId = $state<string | null>(null)
-  /** Local UI prefs (Appearance + Provider runtime toggles). */
-  ui = $state<UiPrefs>(loadUiPrefs())
   session = $state<SessionInfo | null>(null)
   sessionList = $state<SessionInfo[]>([])
   messages = $state<ChatMessage[]>([])
@@ -1085,7 +1090,6 @@ class AppState {
       path: folderPath,
       order: maxOrder + 1,
       groupId: null,
-      layout: { sidebarWidth: LAYOUT_DEFAULT.sidebar, inspectorWidth: LAYOUT_DEFAULT.inspector },
     }
     this.projects = sortProjects([...this.projects, project])
     saveProjects(this.projects)
@@ -1202,31 +1206,15 @@ class AppState {
     this.reorderProjects([...nextIn, ...rest.filter((id) => !nextIn.includes(id))])
   }
 
-  setProjectLayout(patch: Partial<ProjectLayout>): void {
-    const id = this.activeProjectId
-    // Empty patch without active project → reclamp/reset every project (mount heal).
-    if (!id) {
-      if (Object.keys(patch).length === 0) {
-        this.projects = this.projects.map((p) => ({
-          ...p,
-          layout: clampProjectLayout({}, p.layout),
-        }))
-        saveProjects(this.projects)
-      }
-      return
-    }
-    this.projects = this.projects.map((p) => {
-      if (p.id !== id) return p
-      const layout = clampProjectLayout(patch, p.layout)
-      return { ...p, layout }
-    })
-    saveProjects(this.projects)
+  setLayout(patch: Partial<ProjectLayout> = {}): void {
+    this.ui = { ...this.ui, layout: clampProjectLayout(patch, this.ui.layout) }
+    this.persistUi()
   }
 
-  /** Hard-reset all rails to defaults (layout schema migration / user fix). */
+  /** Reset global shell rails to defaults. */
   resetAllLayouts(): void {
-    this.projects = this.projects.map((p) => ({ ...p, layout: defaultLayout() }))
-    saveProjects(this.projects)
+    this.ui = { ...this.ui, layout: defaultLayout() }
+    this.persistUi()
     markLayoutVersion()
   }
 
