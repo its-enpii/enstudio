@@ -1,5 +1,5 @@
 ---
-name: Enpiistudio Design System
+name: EnStudio Design System
 colors:
   surface: '#151313'
   surface-dim: '#151313'

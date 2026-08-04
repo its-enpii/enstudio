@@ -593,6 +593,8 @@ interface ProjectWorkspace {
   planMode?: boolean
   promptQueue?: QueuedPrompt[]
   turnStartedAt?: number | null
+  draftPlan?: any | null
+  activePlan?: any | null
 }
 
 /** Live UI state for one agent session (supports concurrent background runs). */
@@ -618,6 +620,16 @@ export interface LiveSessionState {
 
 class AppState {
   mode = $state<Mode>('agent')
+  /** In-app update state (electron-updater → GitHub Releases). */
+  updateStatus = $state<'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'>('idle')
+  updateInfo = $state<{ version: string; releaseNotes?: string } | null>(null)
+  updateProgress = $state<{ percent: number; transferred: number; total: number } | null>(null)
+  updateError = $state<string | null>(null)
+  /** ms epoch of last completed check (success or up-to-date). */
+  updateLastChecked = $state<number | null>(null)
+  /** Live app version from main process; populated by App boot. */
+  appVersion = $state<string>('')
+  private updateCheckInterval: ReturnType<typeof setInterval> | null = null
   /** Local UI prefs (Appearance + Provider runtime toggles). */
   ui = $state<UiPrefs>(loadUiPrefs())
   projects = $state<Project[]>(loadProjects())
@@ -653,6 +665,12 @@ class AppState {
     title: string
     steps: { title: string; detail?: string }[]
     relPath: string
+    path?: string
+    sessionId?: string
+    createdAt?: string
+    updatedAt?: string
+    /** Raw markdown content (incl. frontmatter) for the preview panel. */
+    raw?: string
   } | null>(null)
   /** Latest approved plan (badge / context). */
   activePlan = $state<{
@@ -1050,6 +1068,8 @@ class AppState {
       planMode: this.planMode,
       promptQueue: this.promptQueue,
       turnStartedAt: this.turnStartedAt,
+      draftPlan: this.draftPlan,
+      activePlan: this.activePlan,
     })
   }
 
@@ -1072,6 +1092,8 @@ class AppState {
     this.promptQueue = ws?.promptQueue ?? []
     this.turnStartedAt = ws?.turnStartedAt ?? null
     this.busy = ws?.busy ?? false
+    this.draftPlan = ws?.draftPlan ?? null
+    this.activePlan = ws?.activePlan ?? null
   }
 
   addProject(folderPath: string): Project {
@@ -1513,6 +1535,91 @@ class AppState {
   setMaxTurns(n: number): void {
     this.ui = { ...this.ui, maxTurns: clampMaxTurns(n) }
     this.persistUi()
+  }
+
+  // -- In-app update (electron-updater → GitHub Releases) -----------------
+
+  /** Subscribe to update events from main process. Idempotent — safe to call from App boot. */
+  bindUpdateEvents(): void {
+    const api = typeof window !== 'undefined' ? window.enpiistudio : undefined
+    if (!api?.app?.update) return
+    api.app.update.onAvailable((info) => {
+      this.updateStatus = 'available'
+      this.updateInfo = info
+      this.updateProgress = null
+      this.updateError = null
+    })
+    api.app.update.onDownloaded((info) => {
+      this.updateStatus = 'downloaded'
+      this.updateInfo = info
+      this.updateProgress = null
+      this.updateError = null
+    })
+    api.app.update.onProgress((progress) => {
+      this.updateStatus = 'downloading'
+      this.updateProgress = progress
+    })
+    api.app.update.onError((message) => {
+      this.updateStatus = 'error'
+      this.updateError = message
+      this.updateProgress = null
+    })
+  }
+
+  /** Fire-and-forget check. Returns true when main process accepted the call (false in dev). */
+  async checkForUpdate(): Promise<boolean> {
+    const api = typeof window !== 'undefined' ? window.enpiistudio : undefined
+    if (!api?.app?.update) return false
+    this.updateStatus = 'checking'
+    this.updateError = null
+    const accepted = await api.app.update.check()
+    if (!accepted) {
+      // Dev mode or bridge missing — silently roll back to idle.
+      this.updateStatus = 'idle'
+    }
+    // Stamps `lastChecked` regardless — useful for UI even when dev.
+    this.updateLastChecked = Date.now()
+    return accepted
+  }
+
+  async downloadUpdate(): Promise<boolean> {
+    const api = typeof window !== 'undefined' ? window.enpiistudio : undefined
+    if (!api?.app?.update) return false
+    const accepted = await api.app.update.download()
+    if (accepted) {
+      this.updateStatus = 'downloading'
+      this.updateError = null
+    }
+    return accepted
+  }
+
+  installUpdate(): void {
+    const api = typeof window !== 'undefined' ? window.enpiistudio : undefined
+    if (!api?.app?.update) return
+    void api.app.update.install()
+  }
+
+  /** Load current app version from main, then start background polling (every 6 h). */
+  async initUpdate(): Promise<void> {
+    const api = typeof window !== 'undefined' ? window.enpiistudio : undefined
+    if (!api?.app) return
+    try {
+      this.appVersion = await api.app.getVersion()
+    } catch {
+      /* preload missing — leave empty */
+    }
+    if (this.updateCheckInterval) clearInterval(this.updateCheckInterval)
+    // 6h cadence. Fire one check soon after boot so users learn about an
+    // already-published version without manually clicking.
+    setTimeout(() => void this.checkForUpdate(), 15_000)
+    this.updateCheckInterval = setInterval(() => void this.checkForUpdate(), 6 * 60 * 60 * 1000)
+  }
+
+  /** Dismiss the banner for this session without affecting future checks. */
+  dismissUpdateBanner(): void {
+    if (this.updateStatus === 'available' || this.updateStatus === 'error') {
+      this.updateStatus = 'idle'
+    }
   }
 }
 

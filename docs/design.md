@@ -1,7 +1,7 @@
-# Design — enpiistudio
+# Design — EnStudio
 
 Status: draft v0  
-Product: **enpiistudio** · Agent: **enpii**  
+Product: **EnStudio** · Agent: **enpii**  
 Scope: personal daily driver UI/UX
 
 ## Current design direction
@@ -34,7 +34,7 @@ The active preference is **macOS-inspired dark workspace chrome**: calm, compact
 
 **Source of truth (in order):**
 1. `docs/design/code.html` — live layout reference (open in browser)
-2. `docs/design/screen.png` / `enpiistudio.png` — visual mockups
+2. `docs/design/screen.png` / `enstudio.png` — visual mockups
 3. `docs/design/DESIGN.md` — tokens + brand notes
 4. This file — product IA + milestones
 

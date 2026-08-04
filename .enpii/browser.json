@@ -1,0 +1,16 @@
+{
+  "tabs": [
+    {
+      "id": "03bf0a1a-2d12-4fd8-9ecb-02aa0ef5eaa5",
+      "title": "New Tab",
+      "url": "",
+      "ready": false,
+      "loading": false,
+      "canBack": false,
+      "canForward": false
+    }
+  ],
+  "activeId": "03bf0a1a-2d12-4fd8-9ecb-02aa0ef5eaa5",
+  "bookmarks": [],
+  "history": []
+}

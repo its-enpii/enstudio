@@ -182,12 +182,7 @@ export const en = {
 
 
   // settings provider
-  'settings.provider.mode': 'Provider mode',
-  'settings.provider.enpii': 'enpii',
   'settings.provider.custom': 'Custom',
-  'settings.provider.defaultModel': 'default model',
-  'settings.provider.enpiiHint':
-    'Uses enpii Studio endpoint. Base URL and API key stay managed — no setup needed.',
   'settings.provider.envOverride': 'Env override active:',
   'settings.provider.baseUrl': 'Base URL',
   'settings.provider.apiKey': 'API key',
@@ -252,6 +247,24 @@ export const en = {
   'settings.appearance.uiZoom': 'UI zoom',
   'settings.appearance.uiZoom.desc': 'Scales the whole app · Mod+= / Mod+-',
 
+  // settings updates
+  'settings.updates.nav': 'Updates',
+  'settings.updates.nav.blurb': 'Check for app updates',
+  'settings.updates.currentVersion': 'Current version',
+  'settings.updates.check': 'Check for updates',
+  'settings.updates.checking': 'Checking…',
+  'settings.updates.available': 'Update available: v{version}',
+  'settings.updates.upToDate': "You're on the latest version",
+  'settings.updates.download': 'Download',
+  'settings.updates.install': 'Restart now',
+  'settings.updates.later': 'Later',
+  'settings.updates.lastChecked': 'Last checked: {time}',
+  'settings.updates.error': 'Update check failed: {message}',
+
+  // update banner (floating toast)
+  'updateBanner.downloaded': 'Update ready to install',
+  'updateBanner.progress': 'Downloading update… {percent}%',
+
   // settings keybindings
   'settings.keybindings.press': 'Press shortcut…',
   'settings.keybindings.group.general': 'General',
@@ -286,6 +299,10 @@ export const en = {
   'agent.empty.noProject': 'Open a project to get started.',
   'agent.brand': 'EnStudio',
   'agent.name': 'enpii',
+  'agent.providerMissing.title': 'No provider configured',
+  'agent.providerMissing.body':
+    'Set up a Base URL, model, and API key in Settings → Provider to start chatting with the agent.',
+  'agent.providerMissing.openSettings': 'Open Settings',
   'agent.approval.allow': 'Allow',
   'agent.approval.deny': 'Deny',
   'agent.approval.title': 'Action required',
@@ -301,6 +318,14 @@ export const en = {
   'agent.ask.submit': 'Submit',
   'agent.planMode': 'Plan mode',
   'agent.planMode.hint': 'Writes and shell blocked until you exit plan mode.',
+  'agent.plan.preview.show': 'Show preview',
+  'agent.plan.preview.hide': 'Hide preview',
+  'agent.plan.preview.openEditor': 'Open in editor',
+  'agent.plan.preview.refresh': 'Refresh',
+  'agent.plan.preview.frontmatter': 'Metadata',
+  'agent.plan.preview.empty': 'No content yet',
+  'agent.plan.composer.refine.placeholder': 'Refine plan: type your feedback or ask for changes…',
+  'agent.plan.composer.refine.hint': 'Each message updates the active draft plan. Writes stay blocked until you approve.',
   'agent.ask.skip': 'Skip',
   'agent.checkpoint.retryTitle': 'Retry turn?',
   'agent.checkpoint.revertFile': 'Revert {path}?',

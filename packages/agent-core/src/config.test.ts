@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
+  assertProviderReady,
   loadProviderConfig,
   publicConfig,
   saveProviderConfig,
@@ -150,4 +151,75 @@ test('legacy JSON still loads when TOML absent', () => {
     else process.env.ENPII_HOME = prevHome
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('fresh install: no file/env returns empty model and baseUrl', () => {
+  // No .enpiistudio directory at all → all fields must be empty so the UI can
+  // require user to fill them in Settings → Provider. The agent MUST NOT default
+  // to a model name (e.g. "enpii") on first run.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'enpii-fresh-'))
+  const prevHome = process.env.ENPII_HOME
+  try {
+    process.env.ENPII_HOME = home
+    delete process.env.ENPII_API_KEY
+    delete process.env.ENPII_BASE_URL
+    delete process.env.ENPII_MODEL
+    delete process.env.ENPII_DIALECT
+
+    const cfg = loadProviderConfig()
+    assert.equal(cfg.baseUrl, '')
+    assert.equal(cfg.apiKey, '')
+    assert.equal(cfg.model, '')
+    assert.deepEqual(cfg.models, [])
+    // dialect has a sane default; the other required fields do not.
+    assert.equal(cfg.dialect, 'openai')
+  } finally {
+    if (prevHome === undefined) delete process.env.ENPII_HOME
+    else process.env.ENPII_HOME = prevHome
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('assertProviderReady blocks agent when model is empty', () => {
+  // Even with valid baseUrl + apiKey, missing model must block the agent turn.
+  assert.throws(
+    () =>
+      assertProviderReady({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        model: '',
+        models: [],
+        dialect: 'openai',
+        permissionMode: 'ask',
+      }),
+    /No model/,
+  )
+})
+
+test('assertProviderReady blocks agent when baseUrl is empty', () => {
+  assert.throws(
+    () =>
+      assertProviderReady({
+        baseUrl: '',
+        apiKey: 'sk-test',
+        model: 'gpt-4.1',
+        models: ['gpt-4.1'],
+        dialect: 'openai',
+        permissionMode: 'ask',
+      }),
+    /No baseUrl/,
+  )
+})
+
+test('assertProviderReady passes when all required fields populated', () => {
+  assert.doesNotThrow(() =>
+    assertProviderReady({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      model: 'gpt-4.1',
+      models: ['gpt-4.1'],
+      dialect: 'openai',
+      permissionMode: 'ask',
+    }),
+  )
 })

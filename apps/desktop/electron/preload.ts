@@ -81,13 +81,59 @@ const api = {
     windowMaximizeToggle: () => ipcRenderer.invoke('app:windowMaximizeToggle') as Promise<boolean>,
     windowClose: () => ipcRenderer.invoke('app:windowClose') as Promise<void>,
     windowIsMaximized: () => ipcRenderer.invoke('app:windowIsMaximized') as Promise<boolean>,
-    /** Electron page zoom (not CSS zoom — CSS zoom breaks text selection). 1 = 100%. */
+    /** Electron page zoom (not CSS zoom — CSS zoom breaks text selection). 1 = 100%.
+     *  webFrame.setZoomFactor schedules the layout reflow asynchronously; the
+     *  renderer fires `enpiistudio:zoom-applied` once the new geometry is live
+     *  so consumers (terminal fit, editor fit, …) can re-measure on the right tick. */
     setZoomFactor: (factor: number) => {
       const f = Number(factor)
       if (!Number.isFinite(f) || f <= 0) return
       webFrame.setZoomFactor(Math.min(3, Math.max(0.5, f)))
+      // 2 RAFs is the empirically-stable wait on Win/Mac for webFrame to settle.
+      // The preload runs in an isolated world but shares the page's window —
+      // we schedule the dispatch via webFrame's setTimeout-like timer so it
+      // runs on the next frame boundary (avoids contextBridge `window` typing).
+      setTimeout(() => {
+        setTimeout(() => {
+          // `globalThis` resolves to the page's window in the preload's isolated world.
+          const w = globalThis as unknown as { dispatchEvent: (ev: Event) => boolean }
+          w.dispatchEvent(
+            new CustomEvent('enpiistudio:zoom-applied', { detail: { factor: webFrame.getZoomFactor() } }),
+          )
+        }, 32)
+      }, 32)
     },
     getZoomFactor: () => webFrame.getZoomFactor(),
+    /** In-app update via electron-updater. IPC returns false in dev (VITE_DEV_SERVER_URL). */
+    update: {
+      check: () => ipcRenderer.invoke('app:update:check') as Promise<boolean>,
+      download: () => ipcRenderer.invoke('app:update:download') as Promise<boolean>,
+      install: () => ipcRenderer.invoke('app:update:install') as Promise<boolean>,
+      onAvailable: (handler: (info: { version: string; releaseNotes?: string }) => void) => {
+        const listener = (_: Electron.IpcRendererEvent, payload: { version: string; releaseNotes?: string }) =>
+          handler(payload)
+        ipcRenderer.on('app:update:available', listener)
+        return () => ipcRenderer.removeListener('app:update:available', listener)
+      },
+      onDownloaded: (handler: (info: { version: string }) => void) => {
+        const listener = (_: Electron.IpcRendererEvent, payload: { version: string }) => handler(payload)
+        ipcRenderer.on('app:update:downloaded', listener)
+        return () => ipcRenderer.removeListener('app:update:downloaded', listener)
+      },
+      onProgress: (handler: (progress: { percent: number; transferred: number; total: number }) => void) => {
+        const listener = (
+          _: Electron.IpcRendererEvent,
+          payload: { percent: number; transferred: number; total: number },
+        ) => handler(payload)
+        ipcRenderer.on('app:update:progress', listener)
+        return () => ipcRenderer.removeListener('app:update:progress', listener)
+      },
+      onError: (handler: (message: string) => void) => {
+        const listener = (_: Electron.IpcRendererEvent, message: string) => handler(message)
+        ipcRenderer.on('app:update:error', listener)
+        return () => ipcRenderer.removeListener('app:update:error', listener)
+      },
+    },
   },
   browser: {
     onShortcut: (handler: (shortcut: string) => void) => {

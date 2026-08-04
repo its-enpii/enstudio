@@ -184,12 +184,7 @@ export const id: Catalog = {
 
 
   // settings provider
-  'settings.provider.mode': 'Mode provider',
-  'settings.provider.enpii': 'enpii',
   'settings.provider.custom': 'Kustom',
-  'settings.provider.defaultModel': 'model default',
-  'settings.provider.enpiiHint':
-    'Pakai endpoint enpii Studio. Base URL dan API key dikelola otomatis.',
   'settings.provider.envOverride': 'Env override aktif:',
   'settings.provider.baseUrl': 'Base URL',
   'settings.provider.apiKey': 'API key',
@@ -254,6 +249,24 @@ export const id: Catalog = {
   'settings.appearance.uiZoom': 'Zoom UI',
   'settings.appearance.uiZoom.desc': 'Scale seluruh app · Mod+= / Mod+-',
 
+  // settings updates
+  'settings.updates.nav': 'Updates',
+  'settings.updates.nav.blurb': 'Cek update aplikasi',
+  'settings.updates.currentVersion': 'Versi saat ini',
+  'settings.updates.check': 'Cek update',
+  'settings.updates.checking': 'Memeriksa…',
+  'settings.updates.available': 'Update tersedia: v{version}',
+  'settings.updates.upToDate': 'Kamu pakai versi terbaru',
+  'settings.updates.download': 'Unduh',
+  'settings.updates.install': 'Restart sekarang',
+  'settings.updates.later': 'Nanti',
+  'settings.updates.lastChecked': 'Terakhir dicek: {time}',
+  'settings.updates.error': 'Gagal cek update: {message}',
+
+  // update banner (floating toast)
+  'updateBanner.downloaded': 'Update siap dipasang',
+  'updateBanner.progress': 'Mengunduh update… {percent}%',
+
   // settings keybindings
   'settings.keybindings.press': 'Tekan shortcut…',
   'settings.keybindings.group.general': 'Umum',
@@ -286,6 +299,10 @@ export const id: Catalog = {
   'agent.empty.noProject': 'Buka proyek untuk mulai.',
   'agent.brand': 'EnStudio',
   'agent.name': 'enpii',
+  'agent.providerMissing.title': 'Provider belum diatur',
+  'agent.providerMissing.body':
+    'Isi Base URL, model, dan API key di Settings → Provider untuk mulai ngobrol dengan agent.',
+  'agent.providerMissing.openSettings': 'Buka Settings',
   'agent.approval.allow': 'Izinkan',
   'agent.approval.deny': 'Tolak',
   'agent.approval.title': 'Perlu tindakan',
@@ -301,6 +318,14 @@ export const id: Catalog = {
   'agent.ask.submit': 'Kirim',
   'agent.planMode': 'Mode rencana',
   'agent.planMode.hint': 'Tulis & shell diblok sampai keluar plan mode.',
+  'agent.plan.preview.show': 'Tampilkan preview',
+  'agent.plan.preview.hide': 'Sembunyikan preview',
+  'agent.plan.preview.openEditor': 'Buka di editor',
+  'agent.plan.preview.refresh': 'Segarkan',
+  'agent.plan.preview.frontmatter': 'Metadata',
+  'agent.plan.preview.empty': 'Belum ada konten',
+  'agent.plan.composer.refine.placeholder': 'Refine plan: ketik feedback atau permintaan ubah…',
+  'agent.plan.composer.refine.hint': 'Setiap pesan akan memperbarui draft plan. Tulis & shell tetap diblok sampai kamu approve.',
   'agent.ask.skip': 'Lewati',
   'agent.checkpoint.retryTitle': 'Ulangi turn?',
   'agent.checkpoint.revertFile': 'Kembalikan {path}?',

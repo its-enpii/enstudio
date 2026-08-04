@@ -41,22 +41,13 @@
     type SelectOption,
   } from './ui'
 
-  type Section = 'provider' | 'permissions' | 'network' | 'appearance' | 'keybindings'
-
-  const ENPII_DEFAULTS = {
-    baseUrl: 'https://ai.enpiistudio.com/v1',
-    model: 'enpii',
-    models: ['enpii'] as string[],
-    dialect: 'openai' as const,
-  }
+  type Section = 'provider' | 'permissions' | 'network' | 'appearance' | 'keybindings' | 'updates'
 
   let section = $state<Section>('provider')
-  /** enpii = fixed model+endpoint (hidden); custom = user base URL / key / models */
-  let providerMode = $state<'enpii' | 'custom'>('enpii')
   let baseUrl = $state('')
   let apiKey = $state('')
   let model = $state('')
-  let models = $state<string[]>(['enpii'])
+  let models = $state<string[]>([])
   let modelDraft = $state('')
   let dialect = $state('openai')
   let permissionMode = $state('ask')
@@ -101,6 +92,7 @@
     { id: 'permissions', label: t('settings.nav.permissions'), blurb: t('settings.nav.permissions.blurb') },
     { id: 'network', label: t('settings.nav.network'), blurb: t('settings.nav.network.blurb') },
     { id: 'appearance', label: t('settings.nav.appearance'), blurb: t('settings.nav.appearance.blurb') },
+    { id: 'updates', label: t('settings.updates.nav'), blurb: t('settings.updates.nav.blurb') },
     { id: 'keybindings', label: t('settings.nav.keybindings'), blurb: t('settings.nav.keybindings.blurb') },
   ])
 
@@ -308,22 +300,6 @@
     FONT_FAMILIES.map((f) => ({ value: f.id, label: f.label })),
   )
 
-  function isEnpiiDefault(cfg: {
-    baseUrl: string
-    model: string
-    models?: string[]
-    dialect: string
-  }): boolean {
-    const url = cfg.baseUrl.replace(/\/+$/, '').toLowerCase()
-    const def = ENPII_DEFAULTS.baseUrl.replace(/\/+$/, '').toLowerCase()
-    const list = normalizeModelList(cfg.models, cfg.model)
-    // enpii mode: default host + model is enpii (or only-enpii catalog)
-    return (
-      url === def &&
-      (cfg.model === ENPII_DEFAULTS.model || (list.length === 1 && list[0] === 'enpii'))
-    )
-  }
-
   async function hydrate(): Promise<void> {
     error = ''
     note = ''
@@ -351,7 +327,6 @@
     hasKey = cfg.hasKey
     envOverrides = { ...cfg.envOverrides }
     apiKey = ''
-    providerMode = isEnpiiDefault(cfg) ? 'enpii' : 'custom'
   }
 
   // Keep local drafts in sync with store when toggled in Settings
@@ -388,23 +363,6 @@
     }
   })
 
-  function setProviderMode(mode: 'enpii' | 'custom'): void {
-    if (mode === providerMode) return
-    providerMode = mode
-    if (mode === 'enpii') {
-      baseUrl = ENPII_DEFAULTS.baseUrl
-      model = ENPII_DEFAULTS.model
-      models = [...ENPII_DEFAULTS.models]
-      dialect = ENPII_DEFAULTS.dialect
-      modelDraft = ''
-    } else if (!baseUrl.trim() || baseUrl === ENPII_DEFAULTS.baseUrl) {
-      // leave room for user endpoint; keep model list editable
-      baseUrl = ''
-      if (models.length === 1 && models[0] === 'enpii') models = []
-      if (model === 'enpii') model = ''
-    }
-  }
-
   function normalizeModelList(list: string[] | undefined, active: string): string[] {
     const out: string[] = []
     for (const m of list ?? []) {
@@ -413,7 +371,6 @@
     }
     const cur = active.trim()
     if (cur && !out.includes(cur)) out.unshift(cur)
-    if (!out.length) out.push('enpii')
     return out
   }
 
@@ -508,37 +465,22 @@
         guardrails: typeof guardrails
       }
 
-      if (providerMode === 'enpii') {
-        patch = {
-          baseUrl: ENPII_DEFAULTS.baseUrl,
-          model: ENPII_DEFAULTS.model,
-          models: [...ENPII_DEFAULTS.models],
-          dialect: ENPII_DEFAULTS.dialect,
-          permissionMode: knownPermission ?? 'ask',
-          denyGlobs,
-          allowRules,
-          guardrails,
-        }
-        // Keep existing key unless user typed one while on custom then switched
-        if (apiKey.trim()) patch.apiKey = apiKey.trim()
-      } else {
-        const knownDialect = PROVIDER_DIALECTS.find((d) => d.value === dialect)?.value
-        const activeModel = model.trim()
-        if (!baseUrl.trim()) throw new Error('Base URL is required for custom provider')
-        if (!activeModel) throw new Error('Add at least one model and set default')
-        const modelList = normalizeModelList(models, activeModel)
-        patch = {
-          baseUrl: baseUrl.trim(),
-          model: activeModel,
-          models: modelList,
-          dialect: knownDialect ?? 'openai',
-          permissionMode: knownPermission ?? 'ask',
-          denyGlobs,
-          allowRules,
-          guardrails,
-        }
-        if (apiKey.trim()) patch.apiKey = apiKey.trim()
+      const knownDialect = PROVIDER_DIALECTS.find((d) => d.value === dialect)?.value
+      const activeModel = model.trim()
+      if (!baseUrl.trim()) throw new Error('Base URL is required')
+      if (!activeModel) throw new Error('Add at least one model and set default')
+      const modelList = normalizeModelList(models, activeModel)
+      patch = {
+        baseUrl: baseUrl.trim(),
+        model: activeModel,
+        models: modelList,
+        dialect: knownDialect ?? 'openai',
+        permissionMode: knownPermission ?? 'ask',
+        denyGlobs,
+        allowRules,
+        guardrails,
       }
+      if (apiKey.trim()) patch.apiKey = apiKey.trim()
 
       const cfg = await saveProviderConfig(patch)
       denyGlobsText = (cfg.denyGlobs ?? []).join('\n')
@@ -551,7 +493,6 @@
       hasKey = cfg.hasKey
       envOverrides = { ...cfg.envOverrides }
       apiKey = ''
-      providerMode = isEnpiiDefault(cfg) ? 'enpii' : 'custom'
       note = t('settings.provider.saved')
       const envBits = [
         envOverrides.baseUrl ? 'baseUrl' : '',
@@ -572,9 +513,7 @@
   const canSave = $derived(
     section !== 'provider'
       ? true
-      : providerMode === 'enpii'
-        ? true
-        : Boolean(baseUrl.trim() && model.trim() && models.length > 0),
+      : Boolean(baseUrl.trim() && model.trim() && models.length > 0),
   )
 </script>
 
@@ -631,145 +570,91 @@
       <div class="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
         {#if section === 'provider'}
           <div class="flex flex-col gap-5">
-            <!-- Mode: enpii (managed) vs custom OpenAI/Anthropic endpoint -->
-            <div
-              class="flex items-center rounded-lg bg-black/25 p-0.5 ring-1 ring-white/8"
-              role="tablist"
-              aria-label={t('settings.provider.mode')}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={providerMode === 'enpii'}
-                class="flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors {providerMode === 'enpii'
-                  ? 'bg-studio-card text-studio-text shadow-sm ring-1 ring-white/10'
-                  : 'text-studio-text-dim hover:text-studio-text'}"
-                disabled={saving}
-                onclick={() => setProviderMode('enpii')}
-              >{t('settings.provider.enpii')}</button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={providerMode === 'custom'}
-                class="flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors {providerMode === 'custom'
-                  ? 'bg-studio-card text-studio-text shadow-sm ring-1 ring-white/10'
-                  : 'text-studio-text-dim hover:text-studio-text'}"
-                disabled={saving}
-                onclick={() => setProviderMode('custom')}
-              >{t('settings.provider.custom')}</button>
-            </div>
-
-            {#if providerMode === 'enpii'}
-              <div class="rounded-xl bg-black/20 p-4 ring-1 ring-white/6">
-                <div class="flex items-center gap-2">
-                  <span class="rounded-md bg-studio-purple/20 px-2 py-0.5 font-mono text-[12px] text-studio-lavender-muted">enpii</span>
-                  <span class="text-[12px] text-studio-text-dim">{t('settings.provider.defaultModel')}</span>
-                </div>
-                <p class="mt-2 m-0 text-[12px] leading-relaxed text-studio-text-dim">
-                  {t('settings.provider.enpiiHint')}
-                </p>
-                {#if envOverrides.baseUrl || envOverrides.apiKey || envOverrides.model}
-                  <p class="mt-2 m-0 text-[11px] text-studio-gold">
-                    {t('settings.provider.envOverride')}
-                    {[
-                      envOverrides.baseUrl ? 'BASE_URL' : '',
-                      envOverrides.apiKey ? 'API_KEY' : '',
-                      envOverrides.model ? 'MODEL' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                {/if}
-              </div>
-            {:else}
-              <div class="flex flex-col gap-5">
-                <TextInput
-                  label={t('settings.provider.baseUrl')}
-                  bind:value={baseUrl}
-                  placeholder="https://api.openai.com/v1"
-                  autocomplete="off"
-                  disabled={saving}
-                  hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'OpenAI- or Anthropic-compatible endpoint'}
-                />
-                <TextInput
-                  label={hasKey ? `${t('settings.provider.apiKey')} (${t('common.ok')})` : t('settings.provider.apiKey')}
-                  type="password"
-                  bind:value={apiKey}
-                  placeholder={hasKey ? t('settings.provider.apiKeySet') : 'sk-…'}
-                  autocomplete="off"
-                  disabled={saving}
-                  hint={envOverrides.apiKey ? 'env ENPII_API_KEY active' : ''}
-                />
-                <SmartSelect
-                  label={t('settings.provider.dialect')}
-                  bind:value={dialect}
-                  options={dialectOpts}
-                  disabled={saving}
-                  hint={envOverrides.dialect ? 'env ENPII_DIALECT active' : 'Wire format for the endpoint'}
-                />
-                <SmartSelect
-                  label={t('settings.provider.model')}
-                  bind:value={model}
-                  options={models.map((m) => ({ value: m, label: m }))}
-                  disabled={saving || !models.length}
-                  placeholder={models.length ? 'Select…' : t('settings.provider.addModel')}
-                  hint={envOverrides.model ? 'env ENPII_MODEL active' : ''}
-                />
-                <div class="flex flex-col gap-2">
-                  <div class="text-xs font-medium text-studio-text-dim">{t('settings.provider.models')}</div>
-                  <div class="flex flex-wrap gap-1.5">
-                    {#each models as m (m)}
-                      <span
-                        class="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] leading-none {m === model
-                          ? 'border-studio-purple/40 text-studio-text'
-                          : 'text-studio-text-dim'}"
-                      >
-                        <button
-                          type="button"
-                          class="leading-none hover:text-studio-text"
-                          disabled={saving}
-                          onclick={() => (model = m)}
-                        >{m}</button>
-                        {#if models.length > 1}
-                          <button
-                            type="button"
-                            class="grid size-4 place-items-center rounded leading-none text-studio-text-dim hover:bg-white/10 hover:text-danger"
-                            aria-label={t('common.remove')}
-                            disabled={saving}
-                            onclick={() => removeModel(m)}
-                          >×</button>
-                        {/if}
-                      </span>
-                    {:else}
-                      <span class="text-[11px] text-studio-text-dim">{t('settings.provider.addModel')}</span>
-                    {/each}
-                  </div>
-                  <div class="flex items-end gap-2">
-                    <TextInput
-                      class="min-w-0 flex-1"
-                      label={t('settings.provider.addModel')}
-                      bind:value={modelDraft}
-                      placeholder="gpt-4.1 / claude-opus-4"
-                      autocomplete="off"
+            <TextInput
+              label={t('settings.provider.baseUrl')}
+              bind:value={baseUrl}
+              placeholder="https://api.openai.com/v1"
+              autocomplete="off"
+              disabled={saving}
+              hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'OpenAI- or Anthropic-compatible endpoint'}
+            />
+            <TextInput
+              label={hasKey ? `${t('settings.provider.apiKey')} (${t('common.ok')})` : t('settings.provider.apiKey')}
+              type="password"
+              bind:value={apiKey}
+              placeholder={hasKey ? t('settings.provider.apiKeySet') : 'sk-…'}
+              autocomplete="off"
+              disabled={saving}
+              hint={envOverrides.apiKey ? 'env ENPII_API_KEY active' : ''}
+            />
+            <SmartSelect
+              label={t('settings.provider.dialect')}
+              bind:value={dialect}
+              options={dialectOpts}
+              disabled={saving}
+              hint={envOverrides.dialect ? 'env ENPII_DIALECT active' : 'Wire format for the endpoint'}
+            />
+            <SmartSelect
+              label={t('settings.provider.model')}
+              bind:value={model}
+              options={models.map((m) => ({ value: m, label: m }))}
+              disabled={saving || !models.length}
+              placeholder={models.length ? 'Select…' : t('settings.provider.addModel')}
+              hint={envOverrides.model ? 'env ENPII_MODEL active' : ''}
+            />
+            <div class="flex flex-col gap-2">
+              <div class="text-xs font-medium text-studio-text-dim">{t('settings.provider.models')}</div>
+              <div class="flex flex-wrap gap-1.5">
+                {#each models as m (m)}
+                  <span
+                    class="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-studio-dark px-2.5 py-1.5 text-[12px] leading-none {m === model
+                      ? 'border-studio-purple/40 text-studio-text'
+                      : 'text-studio-text-dim'}"
+                  >
+                    <button
+                      type="button"
+                      class="leading-none hover:text-studio-text"
                       disabled={saving}
-                      onkeydown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          addModel()
-                        }
-                      }}
-                    />
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      class="min-h-[38px] self-end px-3.5"
-                      disabled={saving || !modelDraft.trim()}
-                      onclick={addModel}
-                    >{t('common.add')}</Button>
-                  </div>
-                </div>
+                      onclick={() => (model = m)}
+                    >{m}</button>
+                    {#if models.length > 1}
+                      <button
+                        type="button"
+                        class="grid size-4 place-items-center rounded leading-none text-studio-text-dim hover:bg-white/10 hover:text-danger"
+                        aria-label={t('common.remove')}
+                        disabled={saving}
+                        onclick={() => removeModel(m)}
+                      >×</button>
+                    {/if}
+                  </span>
+                {:else}
+                  <span class="text-[11px] text-studio-text-dim">{t('settings.provider.addModel')}</span>
+                {/each}
               </div>
-            {/if}
+              <div class="flex items-end gap-2">
+                <TextInput
+                  class="min-w-0 flex-1"
+                  label={t('settings.provider.addModel')}
+                  bind:value={modelDraft}
+                  placeholder="gpt-4.1 / claude-opus-4"
+                  autocomplete="off"
+                  disabled={saving}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addModel()
+                    }
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  class="min-h-[38px] self-end px-3.5"
+                  disabled={saving || !modelDraft.trim()}
+                  onclick={addModel}
+                >{t('common.add')}</Button>
+              </div>
+            </div>
 
             <div class="flex flex-col gap-5 border-t border-border-subtle pt-4">
               <NumberInput
@@ -971,6 +856,63 @@
               description={t('settings.appearance.goldPulse.desc')}
             />
           </div>
+        {:else if section === 'updates'}
+          <div class="flex flex-col gap-5">
+            <div class="flex flex-col gap-1">
+              <div class="text-xs font-medium text-studio-text-dim">{t('settings.updates.currentVersion')}</div>
+              <div class="font-mono text-[14px] text-studio-text">
+                v{app.appVersion || '—'}
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={app.updateStatus === 'checking' || app.updateStatus === 'downloading'}
+                loading={app.updateStatus === 'checking'}
+                onclick={() => void app.checkForUpdate()}
+              >{t('settings.updates.check')}</Button>
+              {#if app.updateStatus === 'available'}
+                <Button variant="primary" size="sm" onclick={() => void app.downloadUpdate()}>
+                  {t('settings.updates.download')} v{app.updateInfo?.version ?? ''}
+                </Button>
+              {/if}
+              {#if app.updateStatus === 'downloaded'}
+                <Button variant="primary" size="sm" onclick={() => app.installUpdate()}>
+                  {t('settings.updates.install')}
+                </Button>
+              {/if}
+            </div>
+
+            <div class="flex flex-col gap-1 text-[12px] text-studio-text-dim">
+              {#if app.updateStatus === 'available'}
+                <span class="text-studio-gold">{t('settings.updates.available', { version: app.updateInfo?.version ?? '' })}</span>
+              {:else if app.updateStatus === 'downloading'}
+                <span>{t('updateBanner.progress', { percent: Math.round(app.updateProgress?.percent ?? 0) })}</span>
+              {:else if app.updateStatus === 'downloaded'}
+                <span class="text-studio-success-shell">{t('updateBanner.downloaded')}</span>
+              {:else if app.updateStatus === 'error'}
+                <span class="text-danger">{t('settings.updates.error', { message: app.updateError ?? '' })}</span>
+              {:else if app.updateLastChecked}
+                <span>{t('settings.updates.upToDate')}</span>
+              {/if}
+              {#if app.updateLastChecked}
+                <span class="text-[10px] text-studio-text-dim/70">
+                  {t('settings.updates.lastChecked', { time: new Date(app.updateLastChecked).toLocaleString() })}
+                </span>
+              {/if}
+            </div>
+
+            {#if app.updateInfo?.releaseNotes}
+              <details class="rounded-lg border border-border-subtle p-3">
+                <summary class="cursor-pointer text-[12px] font-medium text-studio-text-dim">Release notes</summary>
+                <p class="mt-2 m-0 whitespace-pre-wrap text-[12px] leading-relaxed text-studio-text">
+                  {app.updateInfo.releaseNotes}
+                </p>
+              </details>
+            {/if}
+          </div>
         {:else}
           <div class="flex flex-col gap-5">
             {#each keybindingGroups as group (group.id)}
@@ -1012,7 +954,7 @@
       </div>
 
       <footer class="flex items-center justify-end gap-2 border-t border-border-subtle px-6 py-4">
-        {#if section === 'keybindings' || section === 'network' || section === 'appearance'}
+        {#if section === 'keybindings' || section === 'network' || section === 'appearance' || section === 'updates'}
           {#if section === 'keybindings'}
             <Button variant="ghost" onclick={() => app.resetKeybindings()}>{t('settings.resetDefaults')}</Button>
           {/if}

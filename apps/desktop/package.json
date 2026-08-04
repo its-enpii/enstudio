@@ -1,21 +1,32 @@
 {
-  "name": "@enpiistudio/desktop",
-  "version": "0.1.0",
+  "name": "@enstudio/desktop",
+  "version": "0.1.1",
   "private": true,
+  "description": "Personal agentic coding workspace — enpii on your own endpoint",
+  "author": {
+    "name": "enpii",
+    "email": "noreply@enpii.studio"
+  },
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "dev:devtools": "node ./scripts/dev-devtools.mjs",
-    "build": "vite build",
+    "build": "node ./scripts/build.mjs",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json --threshold error",
     "preview": "vite preview",
-    "pack": "npm run build -w @enpiistudio/agent-core && vite build && electron-builder --dir",
-    "dist": "npm run build -w @enpiistudio/agent-core && vite build && electron-builder",
-    "dist:dir": "npm run pack",
-    "dist:linux": "npm run build -w @enpiistudio/agent-core && vite build && electron-builder --linux",
-    "dist:win": "npm run build -w @enpiistudio/agent-core && vite build && electron-builder --win",
-    "dist:mac": "npm run build -w @enpiistudio/agent-core && vite build && electron-builder --mac"
+    "prepack": "node ./scripts/build.mjs",
+    "pack": "electron-builder --dir",
+    "predist": "node ./scripts/build.mjs",
+    "dist": "electron-builder",
+    "predist:dir": "node ./scripts/build.mjs",
+    "dist:dir": "electron-builder --dir",
+    "predist:linux": "node ./scripts/build.mjs",
+    "dist:linux": "electron-builder --linux",
+    "predist:win": "node ./scripts/build.mjs",
+    "dist:win": "electron-builder --win",
+    "predist:mac": "node ./scripts/build.mjs",
+    "dist:mac": "electron-builder --mac"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -32,10 +43,11 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.6",
-    "@enpiistudio/agent-core": "0.1.0",
+    "@enstudio/agent-core": "0.1.0",
     "@lezer/highlight": "^1.2.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
@@ -54,13 +66,13 @@
   },
   "build": {
     "appId": "studio.enpii.app",
-    "productName": "enpiistudio",
+    "productName": "EnStudio",
     "copyright": "Copyright © enpii",
     "directories": {
       "output": "release",
       "buildResources": "build"
     },
-    "icon": "build/icon.png",
+    "icon": "build/icon.ico",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
@@ -70,7 +82,7 @@
     "asarUnpack": [
       "**/node_modules/node-pty/**"
     ],
-    "npmRebuild": true,
+    "npmRebuild": false,
     "extraResources": [
       {
         "from": "../../packages/agent-core/dist",
@@ -81,7 +93,11 @@
       }
     ],
     "asar": true,
-    "publish": null,
+    "publish": {
+      "provider": "github",
+      "owner": "its-enpii",
+      "repo": "enstudio"
+    },
     "linux": {
       "target": [
         "AppImage",

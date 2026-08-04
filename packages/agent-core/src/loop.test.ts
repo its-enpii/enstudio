@@ -39,15 +39,13 @@ test('compaction transcript preserves roles and truncates older context', () => 
 
 test('shouldAutoCompact thresholds', () => {
   assert.equal(shouldAutoCompact([{ role: 'user', content: 'hi' }]), false)
-  // Mid-task tool chatter (36–89 msgs) must not force compact.
-  const mid = Array.from({ length: 50 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
-  assert.equal(shouldAutoCompact(mid), false)
-  const many = Array.from({ length: 90 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
-  assert.equal(shouldAutoCompact(many), true)
-  // Compact before context approaches the 250k-token ceiling.
-  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 225_000 }), true)
+  // Message count alone (90+ msgs) must NOT trigger auto-compact — pure token driven.
+  const many = Array.from({ length: 120 }, (_, i) => ({ role: 'user' as const, content: `m${i}` }))
+  assert.equal(shouldAutoCompact(many), false)
+  // Trigger auto-compact only when context approaches the 250k-token ceiling (>= 240k).
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 240_000 }), true)
   assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 700_000 }), true)
-  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 100 }), false)
+  assert.equal(shouldAutoCompact([{ role: 'user', content: 'x' }], { total_tokens: 100_000 }), false)
 })
 
 test('splitForCompaction keeps recent tail raw', () => {

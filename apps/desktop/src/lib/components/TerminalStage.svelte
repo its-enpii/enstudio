@@ -61,6 +61,7 @@
   const terminals = new Map<string, Terminal>()
   const fitAddons = new Map<string, FitAddon>()
   const terminalSizes = new Map<string, { cols: number; rows: number }>()
+  const nudgedForFontKey = new Map<string, string>()
   const pendingData = new Map<string, string>()
   const creatingFor = new Set<string>()
   const ghosts = new Map<string, GhostState>()
@@ -138,22 +139,42 @@
     if (!fit || !terminal) return
     const apply = () => {
       if (!hostReady(host)) return
-      try {
-        fit.fit()
-        // Guard post-fit: FitAddon can still land tiny mid-layout
-        if (terminal.cols < 40 || terminal.rows < 10) return
-        const previous = terminalSizes.get(id)
-        if (previous?.cols === terminal.cols && previous.rows === terminal.rows) {
-          host.style.opacity = '1'
-          readyHosts.add(host)
-          return
+      // Snapshot host box before fit — if it shifts before our size settles we
+      // re-fit one more tick (webFrame zoom + font swap often change host size
+      // mid-measurement, leaving the terminal cropped).
+      const w0 = host.clientWidth
+      const h0 = host.clientHeight
+      const fontKey = `${fontStack(app.ui.fontFamily)}|${EDITOR_FONT_SIZE}|${app.ui.uiZoom}`
+      // Force a re-measure when font/zoom has changed since the last successful
+      // fit. xterm caches `_charSizeService` measurements and only re-measures
+      // when buffer cols/rows differ — so without this nudge, a stale
+      // (pre-font-load) cell.width keeps us locked at the wrong column count
+      // and the terminal stays visibly cropped on the right edge.
+      if (nudgedForFontKey.get(id) !== fontKey && terminal.cols > 0 && terminal.rows > 0) {
+        nudgedForFontKey.set(id, fontKey)
+        try {
+          terminal.resize(Math.max(2, terminal.cols + 1), terminal.rows)
+          terminal.resize(Math.max(2, terminal.cols - 1), terminal.rows)
+        } catch {
+          /* not yet mounted */
         }
+      }
+      try {
+        // Validate before fit(): fit() mutates browser-side xterm immediately.
+        // Returning afterward would leave xterm and node-pty at different sizes.
+        const proposed = fit.proposeDimensions()
+        if (!proposed || proposed.cols < 40 || proposed.rows < 10) return
+        fit.fit()
         terminalSizes.set(id, { cols: terminal.cols, rows: terminal.rows })
         void api.resize(id, terminal.cols, terminal.rows)
         host.style.opacity = '1'
         readyHosts.add(host)
       } catch {
         /* hidden or not mounted yet */
+      }
+      // Re-fit if host is still resizing (e.g. webFrame layout cascading in).
+      if (host.clientWidth !== w0 || host.clientHeight !== h0) {
+        requestAnimationFrame(() => fitPane(pane, true))
       }
     }
     // Debounce — TUI CLIs thrash on rapid resize; initial settle needs a beat.
@@ -173,6 +194,37 @@
         apply()
       }, 100),
     )
+  }
+
+  /**
+   * Aggressive re-fit: keep polling host size until it stops increasing (or
+   * we hit a frame cap). Catches webFrame zoom cascades where RO fires once
+   * but the host keeps growing for several frames. Call after zoom, font swap,
+   * or mode-switch — anywhere the layout might still be settling.
+   * Generation counter cancels superseded loops (e.g. fast back-to-back zooms).
+   */
+  const refitGenerations = [0, 0]
+  function refitUntilStable(pane: 0 | 1, maxFrames = 16): void {
+    const gen = ++refitGenerations[pane]
+    let frames = 0
+    let lastW = -1
+    let lastH = -1
+    const tick = (): void => {
+      if (gen !== refitGenerations[pane]) return // superseded
+      const host = hostForPane(pane)
+      if (!host || !hostReady(host)) return
+      const w = host.clientWidth
+      const h = host.clientHeight
+      // Only call fit when size actually changed — avoids resize spam on settling.
+      if (w !== lastW || h !== lastH) {
+        lastW = w
+        lastH = h
+        fitPane(pane, true)
+      }
+      frames += 1
+      if (frames < maxFrames) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
   }
 
   function fitVisible(immediate = false): void {
@@ -218,8 +270,8 @@
     const rows = Math.max(term.rows, 1)
     const w = screen?.clientWidth || host.clientWidth
     const h = screen?.clientHeight || host.clientHeight
-    const padX = 12 // host p-3
-    const padY = 12
+    const padX = host.offsetLeft
+    const padY = host.offsetTop
     return { cellW: w / cols, cellH: h / rows, padX, padY }
   }
 
@@ -477,6 +529,10 @@
     fitPane(pane, true)
     // Always reveal — blank forever worse than rare wrap
     host.style.opacity = '1'
+    // Keep refitting until host size stops growing (catches webFrame/grid
+    // layouts that settle after our 2-RAF wait — leaves terminal cropped
+    // otherwise). Runs in the background, doesn't block mount.
+    refitUntilStable(pane)
   }
 
   async function activateTerminal(id: string, requestedPane: 0 | 1 = focusedPane): Promise<void> {
@@ -516,21 +572,10 @@
     if (name) void connectSshByName(name)
   }
 
-  function measureHost(pane: 0 | 1): { cols: number; rows: number } {
-    const host = hostForPane(pane)
-    // JetBrains Mono 12 / lineHeight 1.25 — small cellW → seed cols ≥ final fit (no wrap)
-    const cellW = 7.0
-    const cellH = 15
-    const w = host?.clientWidth ?? 0
-    const h = host?.clientHeight ?? 0
-    // Only trust real laid-out host; else generous seed (never tiny)
-    if (w > 80 && h > 40) {
-      return {
-        cols: Math.max(80, Math.floor(w / cellW)),
-        rows: Math.max(24, Math.floor(h / cellH)),
-      }
-    }
-    return { cols: 120, rows: 32 }
+  function measureHost(_pane: 0 | 1): { cols: number; rows: number } {
+    // Bootstrap conservatively; the first valid FitAddon measurement becomes
+    // authoritative before the host is revealed.
+    return { cols: 40, rows: 10 }
   }
 
   /** Wait until pane host has real layout (avoids tiny seed → jump-fit). */
@@ -668,6 +713,7 @@
     fitAddons.delete(id)
     terminalSizes.delete(id)
     pendingData.delete(id)
+    nudgedForFontKey.delete(id)
     clearGhost(id, false)
     ghosts.delete(id)
     tabs = tabs.filter((tab) => tab.id !== id)
@@ -787,8 +833,23 @@
     for (const terminal of terminals.values()) {
       terminal.options.fontFamily = family
       terminal.options.fontSize = EDITOR_FONT_SIZE
+      // Force renderer to re-measure cell metrics — without this, FitAddon
+      // reads stale css.cell.width/height from before the font swap and
+      // computes wrong cols (terminal stays "cropped" until the next paint).
+      try {
+        terminal.refresh(0, Math.max(0, terminal.rows - 1))
+      } catch {
+        /* not yet mounted */
+      }
     }
-    untrack(() => fitVisible(true))
+    // Defer one frame: webFrame.setZoomFactor reflows asynchronously, so an
+    // immediate fit would measure the pre-zoom box and crop the terminal.
+    untrack(() => {
+      requestAnimationFrame(() => {
+        refitUntilStable(0)
+        refitUntilStable(1)
+      })
+    })
   })
 
   onMount(() => {
@@ -819,11 +880,26 @@
       terminals.get(id)?.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)
     })
     window.addEventListener('enpiistudio:terminal-ssh', onSshConnectEvent)
-    resizeObserver = new ResizeObserver(() => fitVisible(false))
+    // Re-fit once webFrame finishes its reflow (terminal cells stay cropped
+    // until the host box is at its post-zoom dimensions).
+    const onZoomApplied = () => {
+      if (app.mode !== 'terminal') return
+      refitUntilStable(0)
+      refitUntilStable(1)
+    }
+    window.addEventListener('enpiistudio:zoom-applied', onZoomApplied)
+    resizeObserver = new ResizeObserver(() => {
+      // ResizeObserver fires during layout pass — the host may still grow.
+      // Use the stable loop instead of the 100ms debounce so we catch the
+      // final settled size even on a slow webFrame cascade.
+      refitUntilStable(0)
+      refitUntilStable(1)
+    })
     return () => {
       offData()
       offExit()
       window.removeEventListener('enpiistudio:terminal-ssh', onSshConnectEvent)
+      window.removeEventListener('enpiistudio:zoom-applied', onZoomApplied)
       resizeObserver?.disconnect()
     }
   })
@@ -851,6 +927,7 @@
     for (const id of terminals.keys()) void api.kill(id)
     for (const terminal of terminals.values()) terminal.dispose()
     terminals.clear()
+    nudgedForFontKey.clear()
     workspaces.clear()
   })
 </script>
@@ -952,9 +1029,9 @@
             <Icon name="plus" size={18} />
           </button>
         {/if}
-        <div class="relative h-full min-h-0 w-full">
+        <div class="relative h-full min-h-0 w-full bg-[#0b0c10] p-3">
           <div
-            class="box-border h-full min-h-0 w-full p-3 transition-opacity duration-75"
+            class="h-full min-h-0 min-w-0 w-full transition-opacity duration-75"
             style="opacity:0"
             bind:this={primaryHost}
           ></div>
@@ -1064,9 +1141,9 @@
             <Icon name="plus" size={18} />
           </button>
         {/if}
-        <div class="relative h-full min-h-0 w-full">
+        <div class="relative h-full min-h-0 w-full bg-[#0b0c10] p-3">
           <div
-            class="box-border h-full min-h-0 w-full p-3 transition-opacity duration-75"
+            class="h-full min-h-0 min-w-0 w-full transition-opacity duration-75"
             style="opacity:0"
             bind:this={secondaryHost}
           ></div>

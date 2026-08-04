@@ -26,11 +26,11 @@
         ? app.provider.models
         : app.provider?.model
           ? [app.provider.model]
-          : ['enpii']
+          : []
     return list.map((m) => ({ value: m, label: m }))
   })
 
-  const activeModel = $derived(app.provider?.model ?? modelOptions[0]?.value ?? 'enpii')
+  const activeModel = $derived(app.provider?.model ?? modelOptions[0]?.value ?? '')
 
   function togglePick(): void {
     if (!canEdit || running) return

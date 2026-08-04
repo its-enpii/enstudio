@@ -27,6 +27,8 @@ export interface SavedPlan {
   path: string
   /** Path relative to ENPII home. */
   relPath: string
+  /** Raw markdown file content (incl. frontmatter). Populated by fileToPlan(). */
+  raw?: string
 }
 
 const MAX_STEPS = 12
@@ -136,6 +138,7 @@ function fileToPlan(file: string, _projectRoot: string): SavedPlan | null {
       updatedAt: meta.updatedAt || now(),
       path: file,
       relPath,
+      raw,
     }
   } catch {
     return null
@@ -158,7 +161,7 @@ function writePlanFile(projectRoot: string, plan: Omit<SavedPlan, 'path' | 'relP
     `${JSON.stringify({ id: plan.id, status: plan.status, updatedAt: plan.updatedAt }, null, 2)}\n`,
     'utf8',
   )
-  return { ...plan, path: file, relPath }
+  return { ...plan, path: file, relPath, raw: md }
 }
 
 /** Persist a draft (or replace same id). Requires ≥2 steps. */
@@ -264,6 +267,7 @@ export function readPlan(projectRoot: string, planId: string): SavedPlan | null 
 export function latestPlan(
   projectRoot: string,
   status?: PlanStatus,
+  sessionId?: string,
 ): SavedPlan | null {
   const dir = plansDir(projectRoot)
   if (!fs.existsSync(dir)) return null
@@ -274,7 +278,7 @@ export function latestPlan(
     }
     if (pointer.id) {
       const p = readPlan(projectRoot, pointer.id)
-      if (p && (!status || p.status === status)) return p
+      if (p && (!status || p.status === status) && (!sessionId || p.sessionId === sessionId)) return p
     }
   } catch {
     /* scan */
@@ -286,7 +290,7 @@ export function latestPlan(
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
   for (const file of files) {
     const p = fileToPlan(file, projectRoot)
-    if (p && (!status || p.status === status)) return p
+    if (p && (!status || p.status === status) && (!sessionId || p.sessionId === sessionId)) return p
   }
   return null
 }

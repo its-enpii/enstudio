@@ -1,61 +1,43 @@
-/** Minimal 512x512 PNG icon generator (no deps). */
-import fs from 'node:fs'
+/**
+ * Stage the branded app icon for electron-builder packaging.
+ *
+ * electron-builder resolves `build/icon.png` (from `directories.buildResources`)
+ * during `npm run pack` / `dist:*`.
+ *
+ * To avoid electron-builder's WebAssembly-based converter (icon-tool.js) crashing
+ * with "Error: WebAssembly.Memory(): could not allocate memory" on Windows, we
+ * pre-convert the PNG to ICO natively using `ffmpeg` (which is installed on the host).
+ *
+ * If `build/icon.ico` is present, electron-builder skips WASM conversion.
+ */
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import path from 'node:path'
-import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const outDir = path.join(__dirname, '..', 'build')
-const w = 512
-const h = 512
+const projectRoot = path.resolve(__dirname, '..')
 
-function chunk(type, data) {
-  const len = Buffer.alloc(4)
-  len.writeUInt32BE(data.length)
-  const typeBuf = Buffer.from(type)
-  const crc = Buffer.alloc(4)
-  crc.writeUInt32BE(zlib.crc32(Buffer.concat([typeBuf, data])) >>> 0)
-  return Buffer.concat([len, typeBuf, data, crc])
+const sourcePng = path.join(projectRoot, 'src', 'lib', 'AppIcons', 'Square44x44Logo.targetsize-256.png')
+const buildDir = path.join(projectRoot, 'build')
+const targetPng = path.join(buildDir, 'icon.png')
+const targetIco = path.join(buildDir, 'icon.ico')
+
+if (!existsSync(sourcePng)) {
+  console.error(`[gen-icon] missing source PNG at ${sourcePng}`)
+  process.exit(1)
 }
 
-const rows = []
-const cx = 256
-const cy = 256
-const r = 180
-for (let y = 0; y < h; y++) {
-  const row = Buffer.alloc(1 + w * 4)
-  row[0] = 0
-  for (let x = 0; x < w; x++) {
-    const i = 1 + x * 4
-    const dx = x - cx
-    const dy = y - cy
-    if (dx * dx + dy * dy <= r * r) {
-      row[i] = 230
-      row[i + 1] = 175
-      row[i + 2] = 46
-      row[i + 3] = 255
-    } else {
-      row[i] = 9
-      row[i + 1] = 9
-      row[i + 2] = 9
-      row[i + 3] = 255
-    }
-  }
-  rows.push(row)
+mkdirSync(buildDir, { recursive: true })
+copyFileSync(sourcePng, targetPng)
+console.log(`[gen-icon] wrote ${targetPng}`)
+
+// Convert PNG to ICO via ffmpeg to bypass electron-builder's WebAssembly icon-tool crash
+try {
+  console.log(`[gen-icon] converting PNG to ICO via ffmpeg...`)
+  execSync(`ffmpeg -i "${sourcePng}" -y "${targetIco}"`, { stdio: 'ignore' })
+  console.log(`[gen-icon] wrote ${targetIco} (native conversion success)`)
+} catch (err) {
+  console.warn(`[gen-icon] ffmpeg native conversion failed or ffmpeg not found.`)
+  console.warn(`[gen-icon] electron-builder might attempt WASM conversion (may crash if memory fails).`)
 }
-const raw = Buffer.concat(rows)
-const ihdr = Buffer.alloc(13)
-ihdr.writeUInt32BE(w, 0)
-ihdr.writeUInt32BE(h, 4)
-ihdr[8] = 8
-ihdr[9] = 6
-const png = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  chunk('IHDR', ihdr),
-  chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
-  chunk('IEND', Buffer.alloc(0)),
-])
-fs.mkdirSync(outDir, { recursive: true })
-const out = path.join(outDir, 'icon.png')
-fs.writeFileSync(out, png)
-console.log('wrote', out, png.length)

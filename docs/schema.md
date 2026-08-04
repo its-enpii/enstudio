@@ -1,8 +1,8 @@
-# Schema — enpiistudio
+# Schema — EnStudio
 
 Status: draft v0  
 Contract version: **0.1.0**  
-Product: **enpiistudio** · Agent: **enpii**
+Product: **EnStudio** · Agent: **enpii**
 
 This document is the machine-oriented source of truth for configs, messages, tools, and events.  
 Types are described in TypeScript-like notation (implement in TS for agent-core).

@@ -296,7 +296,11 @@
   }
 
   /** Provider-reported usage for the latest turn; never session-accumulated. */
-  const shownUsage = $derived(app.run?.usage ?? app.session?.lastUsage ?? null)
+  const shownUsage = $derived(
+    app.busy
+      ? (app.run?.usage ?? app.session?.lastUsage ?? app.session?.usage ?? null)
+      : (app.session?.lastUsage ?? app.session?.usage ?? app.run?.usage ?? null)
+  )
 
   async function onDiscardWorktree(): Promise<void> {
     wtBusy = true

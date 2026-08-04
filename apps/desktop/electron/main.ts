@@ -287,7 +287,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: '#040303',
-    title: 'enpiistudio',
+    title: 'EnStudio',
     // Custom titlebar in App.svelte (traffic lights = real window controls).
     frame: false,
     autoHideMenuBar: true,
@@ -508,6 +508,50 @@ function setupDownloadManager(): void {
   })
 }
 
+// electron-updater is a CJS module; dynamic-import keeps the ESM build happy
+// and lets us skip it cleanly in dev mode.
+let autoUpdater: typeof import('electron-updater').autoUpdater | null = null
+
+async function setupAutoUpdater(): Promise<void> {
+  if (process.env.VITE_DEV_SERVER_URL) return
+  try {
+    const mod = await import('electron-updater')
+    autoUpdater = mod.autoUpdater
+  } catch (err) {
+    // Module not installed yet (first run before npm install completes, or
+    // packaging without the dep). Fail open — UI will show "check failed".
+    broadcast('app:update:error', err instanceof Error ? err.message : String(err))
+    return
+  }
+  if (!autoUpdater) return
+
+  // User triggers download manually — no surprise bandwidth.
+  autoUpdater.autoDownload = false
+  // If user quits with a downloaded update waiting, finish the install.
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', (info: { version: string; releaseNotes?: string | null }) => {
+    broadcast('app:update:available', {
+      version: info.version,
+      releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined,
+    })
+  })
+  autoUpdater.on('download-progress', (progress: { percent: number; transferred: number; total: number }) => {
+    broadcast('app:update:progress', progress)
+  })
+  autoUpdater.on('update-downloaded', (info: { version: string }) => {
+    broadcast('app:update:downloaded', { version: info.version })
+  })
+  autoUpdater.on('error', (err: Error) => {
+    broadcast('app:update:error', err.message)
+  })
+
+  // GitHub Releases feed is picked up from electron-builder `publish` config
+  // in package.json, but setFeedURL also works explicitly if you ever need to
+  // override (e.g. staging channel).
+  // autoUpdater.setFeedURL({ provider: 'github', owner: 'its-enpii', repo: 'enstudio' })
+}
+
 app.whenReady().then(() => {
   installAppMenu()
   enpii.start()
@@ -723,7 +767,7 @@ app.whenReady().then(() => {
     urgency?: 'normal' | 'critical' | 'low'
   }) => {
     if (!Notification.isSupported()) return false
-    const title = opts?.title?.trim() || 'enpiistudio'
+    const title = opts?.title?.trim() || 'EnStudio'
     const n = new Notification({
       title,
       body: opts?.body?.slice(0, 240) || '',
@@ -739,7 +783,33 @@ app.whenReady().then(() => {
     return true
   })
 
+  // In-app update via electron-updater. Dev mode (VITE_DEV_SERVER_URL) is
+  // excluded so a running dev build can't be clobbered by an auto-update.
+  ipcMain.handle('app:update:check', () => {
+    if (process.env.VITE_DEV_SERVER_URL) return false
+    void autoUpdater.checkForUpdates().catch((err: unknown) => {
+      broadcast('app:update:error', err instanceof Error ? err.message : String(err))
+    })
+    return true
+  })
+
+  ipcMain.handle('app:update:download', () => {
+    if (process.env.VITE_DEV_SERVER_URL) return false
+    void autoUpdater.downloadUpdate().catch((err: unknown) => {
+      broadcast('app:update:error', err instanceof Error ? err.message : String(err))
+    })
+    return true
+  })
+
+  ipcMain.handle('app:update:install', () => {
+    if (process.env.VITE_DEV_SERVER_URL) return false
+    // isForce=false: graceful, lets the user finish any pending work.
+    autoUpdater.quitAndInstall(false)
+    return true
+  })
+
   setupDownloadManager()
+  setupAutoUpdater()
   createWindow()
 
   app.on('activate', () => {

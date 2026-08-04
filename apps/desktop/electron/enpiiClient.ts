@@ -245,6 +245,6 @@ function resolveSpawn(): {
   }
 
   throw new Error(
-    `enpii entry not found. Expected ${jsEntry} or ${tsEntry} (+ tsx). Run: npm run build -w @enpiistudio/agent-core`,
+    `enpii entry not found. Expected ${jsEntry} or ${tsEntry} (+ tsx). Run: npm run build -w @enstudio/agent-core`,
   )
 }

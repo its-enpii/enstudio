@@ -480,7 +480,7 @@ export function ensureEnpiiDir(root: string): { created: boolean; path: string }
     // No secrets — project overlay only (model/dialect/denyGlobs optional).
     fs.writeFileSync(
       configToml,
-      '# Project enpii config (optional overrides; no API keys)\n# model = "enpii"\n# dialect = "openai"\n# permissionMode = "ask"\n# denyGlobs = [".env", "**/*secret*"]\n#\n# Claude-style allow rules (skip approval when match):\n# [permissions]\n# allow = [\n#   "run_shell(npm *)",\n#   "run_shell(git *)",\n#   "web_fetch(domain:github.com)",\n#   "web_search",\n# ]\n',
+      '# Project enpii config (optional overrides; no API keys)\n# model = "gpt-4.1"\n# dialect = "openai"\n# permissionMode = "ask"\n# denyGlobs = [".env", "**/*secret*"]\n#\n# Claude-style allow rules (skip approval when match):\n# [permissions]\n# allow = [\n#   "run_shell(npm *)",\n#   "run_shell(git *)",\n#   "web_fetch(domain:github.com)",\n#   "web_search",\n# ]\n',
       'utf8',
     )
     created = true

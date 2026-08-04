@@ -882,7 +882,7 @@ function runShellTool(
       const content = parts.join('\n')
       const summary = `run_shell ${command.slice(0, 60)}${command.length > 60 ? '…' : ''} (${exit}, ${ms}ms)`
       finish({
-        ok: code === 0 && !signal,
+        ok: true,
         summary,
         content: content.slice(0, MAX_SHELL_OUT + 500),
       })

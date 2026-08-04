@@ -1,7 +1,7 @@
-# PRD — enpiistudio
+# PRD — EnStudio
 
 Status: draft v0  
-Product name: **enpiistudio**  
+Product name: **EnStudio**  
 Agent name: **enpii**  
 Owner: personal / private product  
 Last updated: 2026-07-27
@@ -10,7 +10,7 @@ Last updated: 2026-07-27
 
 ## 1. Summary
 
-**enpiistudio** is a local-first desktop workspace for AI-assisted software development.  
+**EnStudio** is a local-first desktop workspace for AI-assisted software development.  
 Its built-in agent **enpii** runs on the user’s own OpenAI- and Anthropic-compatible endpoint.  
 
 The product combines:
@@ -241,11 +241,11 @@ v1 agent = **M6–M8** guided by `reference/` **and** product targets **A→B→
 ## 9. Success metrics (personal product)
 
 Qualitative / lightweight:
-1. **Replacement rate** — % of coding agent tasks done in enpiistudio vs vendor CLIs (target: >70% after M5)  
+1. **Replacement rate** — % of coding agent tasks done in EnStudio vs vendor CLIs (target: >70% after M5)  
 2. **Trust** — zero silent destructive ops outside approvals  
 3. **Resume works** — reopen session after restart without loss  
 4. **Latency feel** — first token visible quickly; tool cards update live  
-5. **Author NPS-to-self** — prefer opening enpiistudio over ad-hoc terminals for agent work  
+5. **Author NPS-to-self** — prefer opening EnStudio over ad-hoc terminals for agent work  
 
 No vanity DAU metrics in v0.
 
@@ -282,7 +282,7 @@ Constraints:
 
 | Question | Decision |
 |---|---|
-| Product name? | `enpiistudio` (lowercase, no spaces) |
+| Product name? | `EnStudio` (PascalCase brand) |
 | Agent name? | `enpii` |
 | Stack? | Electron + Svelte/Vite + TS agent-core + stdio JSON-RPC |
 | v0 scope? | Personal daily driver, local-first |

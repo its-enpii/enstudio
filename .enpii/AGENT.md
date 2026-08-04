@@ -17,18 +17,18 @@ Top-level:
 - tsconfig.base.json
 
 npm scripts:
-- dev: npm run dev -w @enpiistudio/desktop
-- dev:devtools: npm run dev:devtools -w @enpiistudio/desktop
-- build: npm run build -w @enpiistudio/agent-core && npm run build -w @enpiistudio/deskto
-- dev:agent: npm run dev -w @enpiistudio/agent-core
-- typecheck: npm run typecheck -w @enpiistudio/agent-core && npm run typecheck -w @enpiistudi
-- test: npm run test -w @enpiistudio/agent-core
+- dev: npm run dev -w @enstudio/desktop
+- dev:devtools: npm run dev:devtools -w @enstudio/desktop
+- build: npm run build -w @enstudio/agent-core && npm run build -w @enstudio/deskto
+- dev:agent: npm run dev -w @enstudio/agent-core
+- typecheck: npm run typecheck -w @enstudio/agent-core && npm run typecheck -w @enpiistudi
+- test: npm run test -w @enstudio/agent-core
 - pack:check: npm run build && npm run typecheck && npm run test
-- pack: npm run pack -w @enpiistudio/desktop
-- dist: npm run dist -w @enpiistudio/desktop
-- dist:linux: npm run dist:linux -w @enpiistudio/desktop
-- dist:win: npm run dist:win -w @enpiistudio/desktop
-- dist:mac: npm run dist:mac -w @enpiistudio/desktop
+- pack: npm run pack -w @enstudio/desktop
+- dist: npm run dist -w @enstudio/desktop
+- dist:linux: npm run dist:linux -w @enstudio/desktop
+- dist:win: npm run dist:win -w @enstudio/desktop
+- dist:mac: npm run dist:mac -w @enstudio/desktop
 
 Git: branch: main
 

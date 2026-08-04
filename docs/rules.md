@@ -1,8 +1,8 @@
-# Rules — enpiistudio
+# Rules — EnStudio
 
 Status: draft v0  
 Applies to: humans building the product + **enpii** runtime behavior  
-Product: **enpiistudio** · Agent: **enpii**
+Product: **EnStudio** · Agent: **enpii**
 
 ---
 
@@ -16,7 +16,7 @@ They bind **engineering**, **agent policy**, and **product scope**.
 ## 2. Product identity rules
 
 R1. **Name**  
-- Product: `enpiistudio` (lowercase, no spaces)  
+- Product: `EnStudio` (PascalCase brand)  
 - Agent: `enpii`  
 - Do not rebrand mid-code to Claude/Codex/OpenHarness names.
 
@@ -124,7 +124,7 @@ R28. **Prompt injection stance**
 
 R30. **Minimal default prompt**  
 Built-in system prompt states:
-- who it is (enpii in enpiistudio)
+- who it is (enpii in EnStudio)
 - workspace root
 - tool use expectations
 - prefer small diffs
@@ -241,7 +241,7 @@ R63. **Skills**
 
 | Decision | Rule ref |
 |---|---|
-| enpiistudio + enpii naming | R1 |
+| EnStudio + enpii naming | R1 |
 | Own agent, not CLI host core | R2 |
 | Electron + Svelte + TS | R40 |
 | Anthropic-like internal schema | R12 |

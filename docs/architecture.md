@@ -1,4 +1,4 @@
-# Architecture — enpiistudio
+# Architecture — EnStudio
 
 Status: draft v0  
 Audience: implementer (solo / small team)  
@@ -8,7 +8,7 @@ Scope: personal daily driver, local-first
 
 ## 1. Purpose
 
-**enpiistudio** is a personal agentic coding workspace.  
+**EnStudio** is a personal agentic coding workspace.  
 It hosts **enpii** (owned agent runtime) plus terminals, editor, and git — without depending on third-party coding CLIs (Claude Code, Codex, OpenCode, etc.).
 
 North star hybrid:
@@ -21,7 +21,7 @@ v0 ships local-only. Remote SSH, tunnel, cloud agents are out of scope for this 
 
 ## 2. Design principles
 
-1. **Own the contract** — messages, tools, permissions, sessions are defined by enpiistudio; frameworks are optional organs.
+1. **Own the contract** — messages, tools, permissions, sessions are defined by EnStudio; frameworks are optional organs.
 2. **Model is pluggable** — user endpoint supports OpenAI + Anthropic shapes; internal schema is stable.
 3. **Local-first** — project files, sessions, logs live on disk; no required cloud control plane.
 4. **Safety at the host** — path allowlists, command gates, confirmations; never prompt-only safety.
@@ -34,7 +34,7 @@ v0 ships local-only. Remote SSH, tunnel, cloud agents are out of scope for this 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  enpiistudio desktop (Electron)                         │
+│  EnStudio desktop (Electron)                            │
 │  layout: projects | mode nav + stage | inspector        │
 │  modes: Agent (enpii) · Code · Terminal · Git…          │
 └───────────────────────────┬─────────────────────────────┘
@@ -155,7 +155,7 @@ Does **not**:
 v0 topology (locked):
 
 ```
-enpiistudio.exe (Electron)
+EnStudio.exe (Electron)
   ├── main process (Node/TS host)
   │     · IPC ↔ renderer
   │     · node-pty, fs jail, git, session store

@@ -14,6 +14,7 @@
   import CommandPalette from './lib/components/CommandPalette.svelte'
   import NotificationCenter from './lib/components/NotificationCenter.svelte'
   import ApprovalOverlay from './lib/components/ApprovalOverlay.svelte'
+  import UpdateBanner from './lib/components/UpdateBanner.svelte'
   import { state, clampProjectLayout } from './lib/store.svelte'
   import { bindEnpiiEvents, pingEnpii, hydrateProjectSession } from './lib/enpii'
 
@@ -52,6 +53,9 @@
   onMount(() => {
     const unbind = bindEnpiiEvents()
     void pingEnpii()
+    // In-app update wiring (electron-updater → GitHub Releases).
+    state.bindUpdateEvents()
+    void state.initUpdate()
     // Re-apply zoom via webFrame after preload is live (clears any leftover CSS zoom).
     try {
       document.documentElement.style.zoom = ''
@@ -163,3 +167,5 @@
 <NotificationCenter />
 <!-- Non-agent modes only (AgentStage owns sticky-above-composer card). -->
 <ApprovalOverlay />
+<!-- In-app update banner (bottom-right). Self-hides when no update state. -->
+<UpdateBanner />

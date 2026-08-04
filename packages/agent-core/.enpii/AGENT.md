@@ -2,7 +2,7 @@
 
 _Auto-generated starter brief. Edit freely — enpii will not overwrite once you change this file._
 
-Project: @enpiistudio/agent-core
+Project: @enstudio/agent-core
 
 Top-level:
 - dist/

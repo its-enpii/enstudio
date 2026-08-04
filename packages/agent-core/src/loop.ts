@@ -75,6 +75,17 @@ export interface SessionRuntime {
   handoffBrief?: string
 }
 
+export class RunTurnError extends Error {
+  usage?: Usage
+  lastUsage?: Usage
+  constructor(message: string, usage?: Usage, lastUsage?: Usage) {
+    super(message)
+    this.name = 'RunTurnError'
+    this.usage = usage
+    this.lastUsage = lastUsage
+  }
+}
+
 function messageText(message: ChatMessage): string {
   if (typeof message.content === 'string') return message.content
   if (Array.isArray(message.content)) return message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n')
@@ -160,10 +171,8 @@ export function undoCompactRuntime(runtime: SessionRuntime): {
   return { ok: true, messageCount: runtime.messages.length }
 }
 
-// Tool rounds explode message count (assistant + N tool results each). 36 fired mid-task constantly.
-const AUTO_COMPACT_MSG_THRESHOLD = 90
-const AUTO_COMPACT_CHAR_THRESHOLD = 280_000
-const AUTO_COMPACT_TOKEN_THRESHOLD = 225_000
+// Pure token-driven compact: trigger only when context approaches 250k tokens.
+const AUTO_COMPACT_TOKEN_THRESHOLD = 240_000
 
 function estimateMessageChars(messages: ChatMessage[]): number {
   let n = 0
@@ -174,17 +183,16 @@ function estimateMessageChars(messages: ChatMessage[]): number {
   return n
 }
 
-/** True when session context is large enough to warrant auto-compact. */
+/** True when session context is large enough to warrant auto-compact (approaching 250k tokens). */
 export function shouldAutoCompact(
   messages: ChatMessage[],
   usage?: Usage,
   _maxTokens?: number,
 ): boolean {
-  if (messages.length >= AUTO_COMPACT_MSG_THRESHOLD) return true
-  if (estimateMessageChars(messages) >= AUTO_COMPACT_CHAR_THRESHOLD) return true
-  if (usage?.total_tokens && usage.total_tokens >= AUTO_COMPACT_TOKEN_THRESHOLD) {
-    return true
-  }
+  const tokens = usage?.prompt_tokens ?? usage?.total_tokens ?? 0
+  if (tokens >= AUTO_COMPACT_TOKEN_THRESHOLD) return true
+  // Emergency fallback when provider does not report usage: ~800k chars approx 240k tokens
+  if (!tokens && estimateMessageChars(messages) >= 800_000) return true
   return false
 }
 
@@ -196,7 +204,7 @@ export type LoopEmit = (event: {
 
 const APPROVAL_TIMEOUT_MS = 5 * 60_000
 
-const SYSTEM = `You are enpii, a local coding agent in enpiistudio.
+const SYSTEM = `You are enpii, a local coding agent in EnStudio.
 Workspace = open project. Help by talking and acting.
 
 Language:
@@ -275,11 +283,12 @@ type Usage = {
 
 function addUsage(a?: Usage, b?: Usage): Usage | undefined {
   if (!a && !b) return undefined
-  const prompt = (a?.prompt_tokens ?? 0) + (b?.prompt_tokens ?? 0)
+  // Prompt input and cached tokens are cumulative in context window; take the max (latest round) rather than summing.
+  const prompt = Math.max(a?.prompt_tokens ?? 0, b?.prompt_tokens ?? 0)
+  const cached = Math.max(a?.cached_tokens ?? 0, b?.cached_tokens ?? 0)
+  // Completion output tokens must be summed round-by-round.
   const completion = (a?.completion_tokens ?? 0) + (b?.completion_tokens ?? 0)
-  const cached = (a?.cached_tokens ?? 0) + (b?.cached_tokens ?? 0)
-  const total =
-    (a?.total_tokens ?? 0) + (b?.total_tokens ?? 0) || prompt + completion
+  const total = prompt + completion
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,
@@ -431,6 +440,9 @@ export async function runPromptTurn(opts: {
   goal?: unknown
   images?: { name: string; mime: string; dataUrl: string }[]
   displayText?: string
+  /** Frontend signals: user's message in plan mode should refine the draft plan,
+   *  not execute. We inject a directive + flag the user message. */
+  planRefine?: boolean
 }): Promise<{ content: string; usage?: Usage; lastUsage?: Usage }> {
   const { runtime, text, config, emit, setStatus } = opts
   const sessionId = runtime.meta.id
@@ -569,6 +581,21 @@ export async function runPromptTurn(opts: {
       const planModeLine = runtime.planMode
         ? 'Runtime: planMode=ON — mutations blocked until exit_plan_mode (after user approves draft).'
         : ''
+      // chat-driven plan refine: when frontend is in plan mode + a draft exists,
+      // every composer message should be interpreted as "update the plan".
+      // We only force the refine directive when the flag is set; otherwise the
+      // model can still answer conversationally under plan mode (e.g. clarifying
+      // questions) without writing tools.
+      const planRefineLine =
+        opts.planRefine && runtime.planMode
+          ? [
+              'PLAN REFINE (user message requests changes to the active draft plan):',
+              '- Respond by calling `plan_tasks` to overwrite the on-disk plan file. Do NOT call exit_plan_mode / approve_plan.',
+              '- Do NOT execute write / shell / git tools — plan mode keeps them blocked.',
+              '- If the user message is a clarification question or a small acknowledgement, answer briefly and only call `plan_tasks` when you actually need to change the plan.',
+              '- Surface trade-offs in the plan body (title, numbered steps) so the user can review before approving.',
+            ].join('\n')
+          : ''
       const handoffLine = runtime.handoffRole
         ? [
             ROLE_PREAMBLE[runtime.handoffRole],
@@ -581,7 +608,7 @@ export async function runPromptTurn(opts: {
       const apiMessages: ChatMessage[] = [
         {
           role: 'system',
-          content: [SYSTEM, contextPrompt, goalPrompt(goal), planModeLine, handoffLine, planBlock]
+          content: [SYSTEM, contextPrompt, goalPrompt(goal), planRefineLine, planModeLine, handoffLine, planBlock]
             .filter(Boolean)
             .join('\n\n'),
         },
@@ -947,7 +974,7 @@ export async function runPromptTurn(opts: {
     run = updateRunState(run, { tasks: run.tasks.map((task) => task.status === 'running' ? { ...task, status: 'failed' } : task) })
     run = finishRunState(run, runtime.abort?.signal.aborted ? 'cancelled' : 'failed', message)
     emit({ type: 'run_state', sessionId, run })
-    throw error
+    throw new RunTurnError(message, usage, lastResponseUsage)
   }
 }
 

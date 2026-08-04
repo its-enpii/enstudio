@@ -46,11 +46,16 @@ export type PublicProviderConfig = Omit<ProviderConfig, 'apiKey'> & {
   }
 }
 
+/**
+ * Empty defaults: app must not silently pick a model or endpoint.
+ * On fresh install, model/baseUrl/apiKey are all '' — Settings → Provider blocks
+ * agent turns until user fills them in (see assertProviderReady).
+ */
 const DEFAULTS: ProviderConfig = {
-  baseUrl: 'https://ai.enpiistudio.com/v1',
+  baseUrl: '',
   apiKey: '',
-  model: 'enpii',
-  models: ['enpii'],
+  model: '',
+  models: [],
   dialect: 'openai',
   permissionMode: 'ask',
 }
@@ -63,7 +68,7 @@ function normalizeModels(models: unknown, active?: string): string[] {
   for (const m of raw) if (!out.includes(m)) out.push(m)
   const cur = active?.trim()
   if (cur && !out.includes(cur)) out.unshift(cur)
-  if (!out.length) out.push(DEFAULTS.model)
+  // No silent fallback to DEFAULTS.model — fresh install stays empty until user configures.
   return out
 }
 
@@ -262,21 +267,21 @@ export function loadProviderConfig(projectRoot?: string): ProviderConfig {
   // later layers win for defined fields
   const file = mergePartial(userJson, userToml, projectToml)
 
-  const model = process.env.ENPII_MODEL || file.model || DEFAULTS.model
+  const model = process.env.ENPII_MODEL ?? file.model ?? ''
   return {
     baseUrl: (
-      process.env.ENPII_BASE_URL ||
-      file.baseUrl ||
-      DEFAULTS.baseUrl
+      process.env.ENPII_BASE_URL ??
+      file.baseUrl ??
+      ''
     ).replace(/\/+$/, ''),
-    apiKey: process.env.ENPII_API_KEY || file.apiKey || DEFAULTS.apiKey,
+    apiKey: process.env.ENPII_API_KEY ?? file.apiKey ?? '',
     model,
-    models: normalizeModels(file.models ?? DEFAULTS.models, model),
+    models: normalizeModels(file.models ?? [], model),
     dialect:
       process.env.ENPII_DIALECT === 'anthropic' || process.env.ENPII_DIALECT === 'openai'
         ? process.env.ENPII_DIALECT
-        : file.dialect || DEFAULTS.dialect,
-    permissionMode: file.permissionMode || DEFAULTS.permissionMode,
+        : file.dialect ?? DEFAULTS.dialect,
+    permissionMode: file.permissionMode ?? DEFAULTS.permissionMode,
     denyGlobs: file.denyGlobs,
     allowRules: file.allowRules,
     guardrails: file.guardrails,
@@ -421,12 +426,15 @@ export function saveProviderConfig(
 }
 
 export function assertProviderReady(cfg: ProviderConfig): void {
+  if (!cfg.baseUrl?.trim()) {
+    throw new Error('No baseUrl — open Settings → Provider')
+  }
+  if (!cfg.model?.trim()) {
+    throw new Error('No model — open Settings → Provider')
+  }
   if (!cfg.apiKey?.trim()) {
     throw new Error(
       'No API key. Open Settings or set ENPII_API_KEY / ~/.enpiistudio/config.toml',
     )
-  }
-  if (!cfg.baseUrl?.trim()) {
-    throw new Error('No baseUrl for provider')
   }
 }

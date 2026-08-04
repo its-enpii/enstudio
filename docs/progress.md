@@ -1,4 +1,4 @@
-# Progress — enpiistudio / enpii
+# Progress — EnStudio / enpii
 
 Status: **working daily-driver slice** — product north star: **solo team-for-one through target C**
 Last updated: 2026-07-29 (Advanced usage MVP: HITL edit-args, guardrails, memory_store, handoff/route)
@@ -31,7 +31,7 @@ Order: **A → B → C**. Do not start B/C glue until A operator surface works.
 - Open folder as icon beside sidebar search
 - Tailwind v4 tokens via `app.css` `@theme` (`studio-*` palette from mock)
 
-### Agent core (`@enpiistudio/agent-core`)
+### Agent core (`@enstudio/agent-core`)
 - stdio JSON-RPC sidecar: `health`, `config.get`/`config.set`, `session.*`, `git.*`
 - Provider: OpenAI-compatible Chat Completions + Anthropic Messages (`ENPII_*` env or `~/.enpiistudio/config.toml`, legacy JSON OK)
 - Real multi-round tool loop (default maxRounds 24, UI `maxTurns`), stream text + tool events
@@ -152,6 +152,11 @@ Order: **A → B → C**. Do not start B/C glue until A operator surface works.
 
 - **Apply-all report** Inspector per-agent ok/skip/conflict + **click path → Code** / Open Git
 
+### Distribution & updates
+- **In-app update** via `electron-updater` (`autoUpdater`) → GitHub Releases repo `github.com/its-enpii/enstudio`. `package.json` `build.publish` set to GitHub provider. Dev mode (`VITE_DEV_SERVER_URL`) is skipped so a running dev build is never overwritten.
+- **UX flow**: passive banner (bottom-right) when an update is found, manual `Download` + `Restart now` buttons. Auto-check every 6h after boot. `Settings → Updates` panel for manual `Check for updates`, current version, last-checked timestamp, optional release notes.
+- **Code-signing not yet configured.** First-run installer/update on Windows will surface an "Unknown publisher" SmartScreen warning until a signing certificate is wired in. macOS auto-update requires notarization; until then macOS users should pull installers from the Releases page manually. `autoInstallOnAppQuit` is on so a downloaded update finishes installing on next quit.
+
 ### PRD checklist (v0)
 
 | # | Item | Status |
@@ -235,7 +240,7 @@ Ordered by impact for chat-default users; implement one phase at a time:
 ## How to run
 ```bash
 npm install
-npm run build -w @enpiistudio/agent-core
+npm run build -w @enstudio/agent-core
 npm run dev
 ```
 Configure provider via `~/.enpiistudio/config.toml` (or legacy `config.json`) / `.env` (see `.env.example`).

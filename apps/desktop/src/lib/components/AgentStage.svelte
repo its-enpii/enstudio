@@ -6,6 +6,7 @@
   import { state as app, COMPOSER_MODES, fontStack, EDITOR_FONT_SIZE, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
   import { t } from '../i18n/index.svelte'
   import { approveDiskPlan, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshDraftPlan, refreshSessionList, refreshTeamSurface, rejectDiskPlan, respondApproval, respondAsk, saveProviderConfig, searchProjectFiles, sendPrompt, setSessionPlanMode, stopAgentTurn, undoCompactSession, visibleApprovals } from '../enpii'
+  import PlanPreview from './PlanPreview.svelte'
   import { renderMarkdown } from '../markdown'
   import { xtermTheme } from '../theme'
   import SmartSelect from './ui/SmartSelect.svelte'
@@ -27,6 +28,8 @@
   let vendorHost = $state<HTMLDivElement>()
   let vendorError = $state('')
   let vendorBusy = $state(false)
+  /** Toggle for the draft-plan markdown preview panel. */
+  let planPreviewOpen = $state(false)
   /** Open vendor instances (multi of same kind OK). Default none — enpii only. */
   let vendorTabs = $state<VendorTab[]>([])
   let vendorSeq = 0
@@ -178,12 +181,16 @@ void tick().then(() => focusComposer())
     await ensureVendor(tab.id, tab.kind, tab.provider)
   }
 
+  const providerReady = $derived(
+    Boolean(app.provider?.baseUrl?.trim() && app.provider?.model?.trim() && app.provider?.hasKey),
+  )
+
   const vendorModelOptions = $derived.by(() => {
     const list = app.provider?.models?.length
       ? app.provider.models
       : app.provider?.model
         ? [app.provider.model]
-        : ['enpii']
+        : []
     const out: string[] = []
     for (const m of list) if (m && !out.includes(m)) out.push(m)
     return out.map((m) => ({ value: m, label: m }))
@@ -1670,6 +1677,11 @@ void tick().then(() => focusComposer())
       app.pushMessage({ role: 'system', text: 'Open a project first.' })
       return
     }
+    if (!providerReady) {
+      app.pushMessage({ role: 'system', text: t('agent.providerMissing.body') })
+      app.settingsOpen = true
+      return
+    }
     mentionResults = []
     const displayText = withFileTags(text)
     pushPromptHistory(displayText || text)
@@ -1854,7 +1866,7 @@ void tick().then(() => focusComposer())
               : 'text-studio-text-dim hover:text-white'}"
             role="tab"
             aria-selected={agentPane === tab.id}
-            title={`${cli.command} · model ${app.provider?.model ?? 'enpii settings'}`}
+            title={`${cli.command} · model ${app.provider?.model ?? 'no model set'}`}
             onclick={() => void selectAgentPane(tab.id)}
           >{tab.label}</button>
           <button
@@ -1931,6 +1943,19 @@ void tick().then(() => focusComposer())
         <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">E</div>
         <div class="mb-2 text-lg font-semibold text-studio-gold">{t('agent.brand')}</div>
         <div class="mx-auto max-w-md text-[13px] leading-relaxed">{t('agent.empty')}</div>
+      </div>
+    </div>
+  {:else if !providerReady}
+    <div class="grid flex-1 place-items-center px-4 py-8 text-center text-studio-text-dim">
+      <div>
+        <div class="mx-auto mb-4 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">E</div>
+        <div class="mb-2 text-lg font-semibold text-studio-gold">{t('agent.providerMissing.title')}</div>
+        <div class="mx-auto max-w-md text-[13px] leading-relaxed">{t('agent.providerMissing.body')}</div>
+        <button
+          type="button"
+          class="mt-4 inline-flex items-center rounded-lg border border-studio-purple/40 bg-studio-purple/15 px-4 py-2 text-[13px] font-medium text-studio-text hover:bg-studio-purple/25"
+          onclick={() => (app.settingsOpen = true)}
+        >{t('agent.providerMissing.openSettings')}</button>
       </div>
     </div>
   {:else}
@@ -2395,6 +2420,11 @@ void tick().then(() => focusComposer())
         </div>
         <div class="flex shrink-0 gap-1.5">
           <Button
+            variant="ghost"
+            size="sm"
+            onclick={() => (planPreviewOpen = !planPreviewOpen)}
+          >{planPreviewOpen ? t('agent.plan.preview.hide') : t('agent.plan.preview.show')}</Button>
+          <Button
             variant="secondary"
             size="sm"
             onclick={() => void rejectDiskPlan(app.draftPlan?.id).catch((e) => app.notify('error', 'Reject failed', e instanceof Error ? e.message : String(e)))}
@@ -2415,6 +2445,22 @@ void tick().then(() => focusComposer())
           </li>
         {/each}
       </ol>
+      {#if planPreviewOpen}
+        <PlanPreview />
+      {/if}
+    </div>
+  {/if}
+  {#if !providerReady}
+    <div
+      class="flex items-center justify-between gap-3 rounded-lg border border-studio-purple/35 bg-studio-purple/12 px-3 py-2 text-[12px] text-studio-text"
+      role="status"
+    >
+      <span class="text-studio-lavender">{t('agent.providerMissing.title')}</span>
+      <button
+        type="button"
+        class="rounded-md border border-studio-purple/45 bg-studio-purple/18 px-2.5 py-1 font-medium hover:bg-studio-purple/28"
+        onclick={() => (app.settingsOpen = true)}
+      >{t('agent.providerMissing.openSettings')}</button>
     </div>
   {/if}
   <div
@@ -2445,6 +2491,15 @@ void tick().then(() => focusComposer())
         {/each}
       </div>
     {/if}
+    {#if app.planMode && app.draftPlan}
+      <div
+        class="flex items-center gap-1.5 rounded-md border border-studio-lavender/30 bg-studio-lavender/8 px-2.5 py-1.5 text-[11px] text-studio-lavender-soft"
+        role="status"
+      >
+        <span class="size-1.5 rounded-full bg-studio-lavender-soft" aria-hidden="true"></span>
+        <span>{t('agent.plan.composer.refine.hint')}</span>
+      </div>
+    {/if}
     <textarea
       class="min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-studio-text outline-none placeholder:text-studio-text-dim disabled:opacity-45"
       rows="3"
@@ -2454,7 +2509,9 @@ void tick().then(() => focusComposer())
           ? activityLabel
             ? t('agent.composer.busyNamed', { label: activityLabel })
             : t('agent.composer.busy')
-          : t('agent.composer.idle')
+          : app.planMode && app.draftPlan
+            ? t('agent.plan.composer.refine.placeholder')
+            : t('agent.composer.idle')
         : t('agent.empty.noProject')}
       bind:value={app.composer}
       onkeydown={onKeydown}

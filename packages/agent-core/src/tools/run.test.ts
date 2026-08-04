@@ -46,7 +46,7 @@ describe('tools R/O', () => {
     const r = await runTool(
       root,
       'search_codebase',
-      JSON.stringify({ query: 'enpiistudio agent-core', path: 'packages/agent-core', maxResults: 10 }),
+      JSON.stringify({ query: 'enstudio agent-core', path: 'packages/agent-core', maxResults: 10 }),
     )
     assert.equal(r.ok, true)
     assert.match(r.content, /agent-core|package\.json|loop\.ts/i)

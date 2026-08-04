@@ -11,6 +11,7 @@ Thumbs.db
 *.local
 .enpii/logs/
 apps/desktop/dist-electron/
+apps/desktop/build/
 coverage/
 .vite/
 .claude/

@@ -17,7 +17,10 @@ export function isBrowserUiSession(sessionId: string | null | undefined): boolea
 
 /** Approvals visible for the current UI surface (Agent chat vs Browser). */
 export function visibleApprovals(): import('./store.svelte').ApprovalRequest[] {
-  const all = state.pendingApprovals
+  const all = state.pendingApprovals.filter((a) => {
+    const pid = state.sessionProject[a.sessionId]
+    return pid === state.activeProjectId
+  })
   if (state.mode === 'browser') {
     return all.filter((a) => isBrowserUiSession(a.sessionId))
   }
@@ -248,6 +251,8 @@ export type DiskPlan = {
   updatedAt: string
   path: string
   relPath: string
+  /** Raw markdown content (incl. frontmatter). Populated by refreshDraftPlan. */
+  raw?: string
 }
 
 /** Sync runtime.planMode with Composer Plan (UI-driven, not only model tool). */
@@ -281,10 +286,11 @@ export async function approveDiskPlan(planId?: string): Promise<DiskPlan | null>
   const sessionId = state.session?.id
   const projectRoot = state.activeProject?.path
   if (!sessionId && !projectRoot) throw new Error('Open a project first')
+  const targetId = planId?.trim() || state.draftPlan?.id?.trim()
   const res = (await window.enpiistudio.enpii.request('session.plan_approve', {
     sessionId,
     projectRoot,
-    planId,
+    planId: targetId,
   })) as { ok: boolean; plan?: DiskPlan; content?: string }
   if (!res.ok || !res.plan) throw new Error(res.content || 'approve failed')
   state.planMode = false
@@ -547,10 +553,11 @@ export async function rejectDiskPlan(planId?: string): Promise<DiskPlan | null> 
   const sessionId = state.session?.id
   const projectRoot = state.activeProject?.path
   if (!sessionId && !projectRoot) throw new Error('Open a project first')
+  const targetId = planId?.trim() || state.draftPlan?.id?.trim()
   const res = (await window.enpiistudio.enpii.request('session.plan_reject', {
     sessionId,
     projectRoot,
-    planId,
+    planId: targetId,
   })) as { ok: boolean; plan?: DiskPlan; content?: string }
   if (!res.ok || !res.plan) throw new Error(res.content || 'reject failed')
   state.draftPlan = null
@@ -562,12 +569,43 @@ export async function rejectDiskPlan(planId?: string): Promise<DiskPlan | null> 
 export async function refreshDraftPlan(): Promise<void> {
   try {
     const draft = await fetchLatestPlan('draft')
+    if (draft) {
+      // Best-effort: also fetch raw markdown so preview panel can render the
+      // file without a second user click. Failures (file deleted between
+      // fetchLatestPlan and plan_read) just leave raw empty.
+      try {
+        const res = (await window.enpiistudio.enpii.request('session.plan_read', {
+          planId: draft.id,
+          projectRoot: state.activeProject?.path,
+        })) as { plan: DiskPlan | null; raw: string | null }
+        if (res?.raw) draft.raw = res.raw
+      } catch {
+        /* ignore */
+      }
+    }
     state.draftPlan = draft
     if (!state.activePlan || state.activePlan.status !== 'approved') {
       state.activePlan = (await fetchLatestPlan('approved')) ?? state.activePlan
     }
   } catch {
     /* ignore */
+  }
+}
+
+/** Re-fetch raw markdown for the current draft plan (used by Refresh button). */
+export async function refreshDraftPlanRaw(): Promise<void> {
+  const draft = state.draftPlan
+  if (!draft) return
+  try {
+    const res = (await window.enpiistudio.enpii.request('session.plan_read', {
+      planId: draft.id,
+      projectRoot: state.activeProject?.path,
+    })) as { plan: DiskPlan | null; raw: string | null }
+    if (res?.raw) {
+      state.draftPlan = { ...draft, raw: res.raw }
+    }
+  } catch {
+    /* ignore — keep stale raw */
   }
 }
 
@@ -1125,35 +1163,38 @@ export async function refreshSessionList(): Promise<void> {
     }[]
     const mapped = list
       .filter((s) => !isBrowserUiSession(s.id) && !/^Browser UI\b/i.test(s.title ?? ''))
-      .map((s) => ({
-        id: s.id,
-        title: s.title,
-        status: s.status,
-        model: s.model,
-        projectRoot: s.projectRoot,
-        baseProjectRoot: s.baseProjectRoot,
-        worktreeBranch: s.worktreeBranch,
-        messageCount: s.messageCount,
-        sizeBytes: s.sizeBytes,
-        busy: s.busy,
-        worktree: s.worktree,
-        usage: s.usage
-          ? {
-              prompt: s.usage.prompt ?? 0,
-              completion: s.usage.completion ?? 0,
-              total: s.usage.total ?? 0,
-              cached: s.usage.cached ?? 0,
-            }
-          : undefined,
-        lastUsage: s.lastUsage
-          ? {
-              prompt: s.lastUsage.prompt ?? 0,
-              completion: s.lastUsage.completion ?? 0,
-              total: s.lastUsage.total ?? 0,
-              cached: s.lastUsage.cached ?? 0,
-            }
-          : undefined,
-      }))
+      .map((s) => {
+        state.bindSessionProject(s.id, project.id)
+        return {
+          id: s.id,
+          title: s.title,
+          status: s.status,
+          model: s.model,
+          projectRoot: s.projectRoot,
+          baseProjectRoot: s.baseProjectRoot,
+          worktreeBranch: s.worktreeBranch,
+          messageCount: s.messageCount,
+          sizeBytes: s.sizeBytes,
+          busy: s.busy,
+          worktree: s.worktree,
+          usage: s.usage
+            ? {
+                prompt: s.usage.prompt ?? 0,
+                completion: s.usage.completion ?? 0,
+                total: s.usage.total ?? 0,
+                cached: s.usage.cached ?? 0,
+              }
+            : undefined,
+          lastUsage: s.lastUsage
+            ? {
+                prompt: s.lastUsage.prompt ?? 0,
+                completion: s.lastUsage.completion ?? 0,
+                total: s.lastUsage.total ?? 0,
+                cached: s.lastUsage.cached ?? 0,
+              }
+            : undefined,
+        }
+      })
     state.sessionList = mapped
     if (state.session) {
       const active = mapped.find((session) => session.id === state.session?.id)
@@ -1222,7 +1263,8 @@ export async function runBrowserUiEdit(
 ): Promise<{ sessionId: string }> {
   const project = state.activeProject
   if (!project) throw new Error('Open a project first')
-  const model = opts?.model?.trim() || state.provider?.model || 'enpii'
+  const model = opts?.model?.trim() || state.provider?.model
+  if (!model) throw new Error('Provider not configured — open Settings → Provider')
   const dialect = state.provider?.dialect === 'anthropic' ? 'anthropic' : 'openai'
 
   const meta = (await window.enpiistudio.enpii.request('session.upsert', {
@@ -1459,11 +1501,15 @@ export async function newSession(expectedProjectId?: string): Promise<void> {
   // Keep previous session running in background — do not stop it.
   state.stashLiveSession()
 
+  const providerModel = state.provider?.model?.trim()
+  if (!providerModel) {
+    throw new Error('Provider not configured — open Settings → Provider')
+  }
   const meta = (await window.enpiistudio.enpii.request('session.upsert', {
     projectRoot: project.path,
     title: `${project.name} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
-    model: 'enpii',
-    dialect: 'openai',
+    model: providerModel,
+    dialect: state.provider?.dialect === 'anthropic' ? 'anthropic' : 'openai',
     fresh: true,
   })) as {
     id: string
@@ -1888,7 +1934,7 @@ export async function openSession(sessionId: string): Promise<void> {
         id: sessionId,
         title: listed?.title ?? 'Session',
         status: live.status || listed?.status || (live.busy ? 'running' : 'idle'),
-        model: listed?.model ?? state.provider?.model ?? 'enpii',
+        model: listed?.model ?? state.provider?.model ?? '',
         projectRoot: listed?.projectRoot,
         baseProjectRoot: listed?.baseProjectRoot,
         worktreeBranch: listed?.worktreeBranch,
@@ -2050,10 +2096,16 @@ export async function sendPrompt(
   liveStart.busy = true
   state.stashLiveSession(sessionId)
   try {
+    // chat-driven plan refine: in plan mode + draft plan present, every
+    // composer message should be interpreted as "update the plan" by the
+    // backend (loop.ts injects a directive). Plain conversation under plan
+    // mode (no draft) falls through to normal prompt flow.
+    const planRefine = Boolean(state.planMode && state.draftPlan)
     await window.enpiistudio.enpii.request('session.prompt', {
       sessionId,
       text,
       displayText: display,
+      planRefine,
       images: options?.images?.map(({ name, mime, dataUrl }) => ({ name, mime, dataUrl })),
       goal: {
         goal: text,
@@ -2220,6 +2272,12 @@ export function bindEnpiiEvents(): () => void {
         summary?: string
         preview?: string
         usage?: {
+          prompt_tokens?: number
+          completion_tokens?: number
+          total_tokens?: number
+          cached_tokens?: number
+        }
+        lastUsage?: {
           prompt_tokens?: number
           completion_tokens?: number
           total_tokens?: number
@@ -2532,7 +2590,9 @@ export function bindEnpiiEvents(): () => void {
     }
 
     if (p.type === 'plan_updated') {
-      void refreshDraftPlan()
+      if (active) {
+        void refreshDraftPlan()
+      }
       return
     }
 
@@ -2730,6 +2790,12 @@ export function bindEnpiiEvents(): () => void {
         total: p.usage.total_tokens ?? (p.usage.prompt_tokens ?? 0) + (p.usage.completion_tokens ?? 0),
         cached: p.usage.cached_tokens ?? 0,
       }
+      const singleTurn = p.lastUsage ? {
+        prompt: p.lastUsage.prompt_tokens ?? 0,
+        completion: p.lastUsage.completion_tokens ?? 0,
+        total: p.lastUsage.total_tokens ?? (p.lastUsage.prompt_tokens ?? 0) + (p.lastUsage.completion_tokens ?? 0),
+        cached: p.lastUsage.cached_tokens ?? 0,
+      } : totals
       if (active) {
         state.setUsage(
           {
@@ -2740,9 +2806,15 @@ export function bindEnpiiEvents(): () => void {
           },
           'replace',
         )
-        if (state.session) state.session = { ...state.session, usage: totals }
+        if (state.session) {
+          state.session = {
+            ...state.session,
+            usage: totals,
+            lastUsage: singleTurn,
+          }
+        }
         state.sessionList = state.sessionList.map((s) =>
-          s.id === eventSessionId ? { ...s, usage: totals } : s,
+          s.id === eventSessionId ? { ...s, usage: totals, lastUsage: singleTurn } : s,
         )
         state.stashLiveSession(eventSessionId)
       } else {
@@ -2750,7 +2822,7 @@ export function bindEnpiiEvents(): () => void {
           live.usage = totals
         })
         state.sessionList = state.sessionList.map((s) =>
-          s.id === eventSessionId ? { ...s, usage: totals } : s,
+          s.id === eventSessionId ? { ...s, usage: totals, lastUsage: singleTurn } : s,
         )
       }
     }

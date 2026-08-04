@@ -1,27 +1,34 @@
 {
   "name": "enpiistudio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Personal agentic coding workspace — enpii on your own endpoint",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @enpiistudio/desktop",
-    "dev:devtools": "npm run dev:devtools -w @enpiistudio/desktop",
-    "build": "npm run build -w @enpiistudio/agent-core && npm run build -w @enpiistudio/desktop",
-    "dev:agent": "npm run dev -w @enpiistudio/agent-core",
-    "typecheck": "npm run typecheck -w @enpiistudio/agent-core && npm run typecheck -w @enpiistudio/desktop",
-    "test": "npm run test -w @enpiistudio/agent-core",
-    "pack:check": "npm run build && npm run typecheck && npm run test",
-    "pack": "npm run pack -w @enpiistudio/desktop",
-    "dist": "npm run dist -w @enpiistudio/desktop",
-    "dist:linux": "npm run dist:linux -w @enpiistudio/desktop",
-    "dist:win": "npm run dist:win -w @enpiistudio/desktop",
-    "dist:mac": "npm run dist:mac -w @enpiistudio/desktop"
+    "dev": "npm run dev -w @enstudio/desktop",
+    "dev:devtools": "npm run dev:devtools -w @enstudio/desktop",
+    "build": "run-s -x build:agent build:desktop",
+    "dev:agent": "npm run dev -w @enstudio/agent-core",
+    "typecheck": "run-s -x typecheck:agent typecheck:desktop",
+    "test": "npm run test -w @enstudio/agent-core",
+    "typecheck:agent": "npm run typecheck -w @enstudio/agent-core",
+    "typecheck:desktop": "npm run typecheck -w @enstudio/desktop",
+    "pack:check": "run-s -x build typecheck test",
+    "build:agent": "npm run build -w @enstudio/agent-core",
+    "build:desktop": "npm run build -w @enstudio/desktop",
+    "pack": "npm run pack -w @enstudio/desktop",
+    "dist": "npm run dist -w @enstudio/desktop",
+    "dist:linux": "npm run dist:linux -w @enstudio/desktop",
+    "dist:win": "npm run dist:win -w @enstudio/desktop",
+    "dist:mac": "npm run dist:mac -w @enstudio/desktop"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "npm-run-all2": "^9.0.3"
   }
 }

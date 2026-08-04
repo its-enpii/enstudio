@@ -18,6 +18,7 @@ import {
   stopTurn,
   undoCompactRuntime,
   type SessionRuntime,
+  RunTurnError,
 } from './loop.js'
 import { approvePlan, latestPlan, listPlans, readPlan, rejectPlan } from './plans.js'
 import { taskCreate, taskGet, taskList, taskStop, taskUpdate } from './tasks.js'
@@ -76,7 +77,7 @@ import {
   upsertSshHost,
 } from './ssh.js'
 
-const VERSION = '0.1.0'
+const VERSION = '0.1.1'
 
 function shortToolSummary(name: string, args: string): string {
   try {
@@ -917,6 +918,11 @@ async function main(): Promise<void> {
       throw new Error('projectRoot is required')
     }
 
+    // Defense in depth: block creating any session without a usable provider.
+    // Frontend already gates via newSession() in enpii.ts, but cron / worktree /
+    // direct-RPC paths skip that gate.
+    assertProviderReady(provider)
+
     const meta = p.fresh
       ? sessions.create({
           projectRoot: p.projectRoot,
@@ -954,6 +960,7 @@ async function main(): Promise<void> {
       permissionMode?: 'read_only' | 'ask' | 'autopilot_workspace' | 'full'
     }
     if (!p.projectRoot) throw new Error('projectRoot is required')
+    assertProviderReady(provider)
     const base = path.resolve(p.projectRoot)
     const wt = gitWorktreeAdd(base, { name: p.name, branch: p.branch })
     const branch = wt.branch ?? p.branch ?? 'detached'
@@ -994,6 +1001,8 @@ async function main(): Promise<void> {
     const listed = gitWorktreeList(base)
     const entry = listed.find((w) => path.resolve(w.path) === wtPath)
     if (!entry || entry.main) throw new Error('path is not a linked worktree of this project')
+
+    assertProviderReady(provider)
 
     const branch = (p.branch || entry.branch || path.basename(wtPath)).replace(/^refs\/heads\//, '')
     const existing = sessions
@@ -1040,6 +1049,7 @@ async function main(): Promise<void> {
       permissionMode?: 'read_only' | 'ask' | 'autopilot_workspace' | 'full'
     }
     if (!p.projectRoot) throw new Error('projectRoot is required')
+    assertProviderReady(provider)
     const base = path.resolve(p.projectRoot)
     const count = Math.max(1, Math.min(4, Math.floor(p.count ?? 2)))
     const prefix = (p.prefix?.trim() || 'agent').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 24)
@@ -1346,6 +1356,12 @@ async function main(): Promise<void> {
                 total_tokens: sessionUsage.total,
                 cached_tokens: sessionUsage.cached ?? 0,
               },
+              lastUsage: result.lastUsage ? {
+                prompt_tokens: result.lastUsage.prompt_tokens ?? 0,
+                completion_tokens: result.lastUsage.completion_tokens ?? 0,
+                total_tokens: result.lastUsage.total_tokens ?? 0,
+                cached_tokens: result.lastUsage.cached_tokens ?? 0,
+              } : undefined,
             })
           }
           sessions.setStatus(sessionId, 'idle')
@@ -1369,7 +1385,15 @@ async function main(): Promise<void> {
   })
 
   rpc.on('session.prompt', async (_method, params) => {
-    const p = (params ?? {}) as { sessionId?: string; text?: string; displayText?: string; goal?: unknown; images?: { name?: unknown; mime?: unknown; dataUrl?: unknown }[] }
+    const p = (params ?? {}) as {
+      sessionId?: string
+      text?: string
+      displayText?: string
+      goal?: unknown
+      images?: { name?: unknown; mime?: unknown; dataUrl?: unknown }[]
+      /** Frontend flags: user is in plan mode + has draft plan, treat turn as plan refine. */
+      planRefine?: boolean
+    }
     if (!p.sessionId) throw new Error('sessionId is required')
     const meta = sessions.get(p.sessionId)
     if (!meta) throw new Error(`session not found: ${p.sessionId}`)
@@ -1407,6 +1431,7 @@ async function main(): Promise<void> {
         config: provider,
         goal: p.goal ?? p.text,
         images,
+        planRefine: p.planRefine === true,
         emit: (event) => rpc.notify('event', event),
         setStatus: (status) => sessions.setStatus(p.sessionId!, status),
       })
@@ -1422,12 +1447,39 @@ async function main(): Promise<void> {
             total_tokens: sessionUsage.total,
             cached_tokens: sessionUsage.cached ?? 0,
           },
+          lastUsage: result.lastUsage ? {
+            prompt_tokens: result.lastUsage.prompt_tokens ?? 0,
+            completion_tokens: result.lastUsage.completion_tokens ?? 0,
+            total_tokens: result.lastUsage.total_tokens ?? 0,
+            cached_tokens: result.lastUsage.cached_tokens ?? 0,
+          } : undefined,
         })
       }
       sessions.setStatus(p.sessionId, 'idle')
       return { ok: true, content: result.content, usage: result.usage, sessionUsage }
     } catch (err) {
       persistRuntimeTurn(p.sessionId, runtime, p.displayText?.trim() || p.text)
+      if (err instanceof RunTurnError && err.usage) {
+        const sessionUsage = sessions.addUsage(p.sessionId, err.usage, err.lastUsage)
+        if (sessionUsage) {
+          rpc.notify('event', {
+            type: 'session_usage',
+            sessionId: p.sessionId,
+            usage: {
+              prompt_tokens: sessionUsage.prompt,
+              completion_tokens: sessionUsage.completion,
+              total_tokens: sessionUsage.total,
+              cached_tokens: sessionUsage.cached ?? 0,
+            },
+            lastUsage: err.lastUsage ? {
+              prompt_tokens: err.lastUsage.prompt_tokens ?? 0,
+              completion_tokens: err.lastUsage.completion_tokens ?? 0,
+              total_tokens: err.lastUsage.total_tokens ?? 0,
+              cached_tokens: err.lastUsage.cached_tokens ?? 0,
+            } : undefined,
+          })
+        }
+      }
       sessions.setStatus(p.sessionId, 'error')
       const message = err instanceof Error ? err.message : String(err)
       rpc.notify('event', {
@@ -1713,7 +1765,26 @@ async function main(): Promise<void> {
       p.projectRoot?.trim() ||
       (p.sessionId ? sessions.get(p.sessionId)?.projectRoot : undefined)
     if (!root) throw new Error('sessionId or projectRoot required')
-    return { plan: latestPlan(root, p.status) }
+    return { plan: latestPlan(root, p.status, p.sessionId) }
+  })
+
+  rpc.on('session.plan_read', (_method, params) => {
+    // Resolve target plan + return parsed metadata + raw markdown content so the
+    // UI can render a faithful preview without re-reading the file.
+    const p = (params ?? {}) as {
+      sessionId?: string
+      projectRoot?: string
+      planId?: string
+    }
+    const root =
+      p.projectRoot?.trim() ||
+      (p.sessionId ? sessions.get(p.sessionId)?.projectRoot : undefined)
+    if (!root) throw new Error('sessionId or projectRoot required')
+    const target = p.planId
+      ? readPlan(root, p.planId)
+      : latestPlan(root, 'draft', p.sessionId) ?? latestPlan(root, undefined, p.sessionId)
+    if (!target) return { plan: null, raw: null }
+    return { plan: target, raw: target.raw ?? null }
   })
 
   rpc.on('session.plan_approve', (_method, params) => {
