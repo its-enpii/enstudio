@@ -1,137 +1,103 @@
-Prioritas belanja icon — monoline stroke 24×24, 1.75 weight (match existing).
+# Enpii Studio
 
-App / shell (wajib)
+Personal agentic coding workspace � enpii on your own endpoint.
 
-┌───────────────────────┬─────────────────────────────────┬─────────────┐
-│         Icon          │           Dipakai di            │  Sekarang   │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ App mark (logo enpii) │ window, tray, installer, splash │ huruf E     │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Agent                 │ TopNav mode                     │ text        │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Code / file           │ TopNav                          │ text        │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Terminal              │ TopNav                          │ text        │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Git / branch          │ TopNav                          │ text        │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Browser / globe       │ TopNav                          │ text        │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Bell                  │ TopNav                          │ ✅ SVG      │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Settings / gear       │ TopNav                          │ ✅ SVG      │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Search                │ sidebar                         │ ✅ SVG      │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Folder-plus           │ open project                    │ ✅ SVG      │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Star / pin            │ pin project, bookmark           │ ★☆          │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ X / close             │ modal, tab, find                │ × + 1 SVG   │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Plus                  │ new tab, add model/host         │ +           │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ Chevron L/R/D         │ tree, back/fwd, dropdown        │ ‹›⌄ + 1 SVG │
-├───────────────────────┼─────────────────────────────────┼─────────────┤
-│ More vertical ⋮       │ browser overflow                │ ⋮           │
-└───────────────────────┴─────────────────────────────────┴─────────────┘
+## Overview
 
-Agent
+Enpii Studio is an Electron desktop application that provides an integrated development environment with:
 
-| Icon | Dipakai |
+- **Agent** � AI-powered coding assistant with multi-vendor LLM support
+- **Code** � File editor with syntax highlighting (CodeMirror 6)
+- **Terminal** � Modular command-card terminal with SSH support
+- **Git** � Visual git interface for staging, committing, and branch management
+- **Browser** � Built-in browser inspector
+
+## Tech Stack
+
+- **Runtime**: Electron (main + renderer)
+- **Frontend**: Svelte 5 (runic syntax � `$state`, `$derived`, `$effect`)
+- **Styling**: Tailwind CSS v4 with custom design tokens
+- **Editor**: CodeMirror 6
+- **Terminal**: xterm.js with node-pty backend
+- **Build**: Vite + electron-builder
+
+## Project Structure
+
+```
+apps/desktop/
++-- electron/              # Electron main process
+�   +-- main.ts            # App entry, IPC handlers
+�   +-- preload.ts         # Context bridge (renderer API)
+�   +-- terminal/          # PTY backend, shell integration
+�       +-- terminalHost.ts
+�       +-- terminalWorker.ts
+�       +-- shellMarkerParser.ts
+�       +-- powerShellIntegration.ts
+�       +-- eventJournal.ts
+�       +-- validation.ts
+�       +-- types.ts
++-- src/
+�   +-- app.css            # Global styles & design tokens
+�   +-- lib/
+�       +-- components/    # Svelte UI components
+�       �   +-- AgentStage.svelte
+�       �   +-- CodeStage.svelte
+�       �   +-- TerminalStage.svelte
+�       �   +-- GitStage.svelte
+�       �   +-- BrowserStage.svelte
+�       �   +-- ui/        # Reusable UI kit (Button, Badge, etc.)
+�       +-- terminal/      # Terminal frontend modules
+�       �   +-- tabStore.svelte.ts
+�       �   +-- surfaceManager.ts
+�       �   +-- ptyBridge.ts
+�       �   +-- helpers.ts
+�       �   +-- commandHistory.ts
+�       �   +-- constants.ts
+�       �   +-- types.ts
+�       +-- store.svelte.ts
+�       +-- icons/
+�       +-- enpii.ts       # API client
++-- docs/                  # Design & architecture docs
+�   +-- terminal/
+�   +-- architecture.md
+�   +-- design.md
+�   +-- prd.md
++-- package.json
+```
+
+## Terminal Architecture
+
+The terminal uses a **command-card model** where each executed command produces a discrete `<article>` card in a scrollable timeline:
+
+- **Shell integration markers** (`command_start`, `command_end`) drive block lifecycle
+- **Prompt detection fallback** (`looksLikeShellPrompt`) handles environments without markers (including SSH remote shells)
+- **Stream-follow detection** auto-identifies long-running commands (`docker logs -f`, `npm run dev`, etc.)
+- **Unified input** via composer bar � routes to `runComposer()` or `sendProcessInput()` based on whether a command is running
+- **SSH sessions** create a new PTY tab, connect via `ssh` command, and behave identically to local terminal once the remote prompt is detected
+
+### Key Modules
+
+| Module | Responsibility |
 |---|---|
-| Paperclip | attach | ✅ |
-| Send | composer | ✅ |
-| Stop / square | cancel run | text “Running…” |
-| Check | approve tool | text |
-| Ban / X-circle | reject | text |
-| Sparkles / bot | agent empty / vendor | — |
-| Claude / Codex / Aider / Gemini marks | vendor tabs (opsional brand) | text label |
+| `tabStore.svelte.ts` | Reactive tab/block state management |
+| `surfaceManager.ts` | xterm.js terminal instance lifecycle |
+| `ptyBridge.ts` | PTY ? renderer event bridge |
+| `helpers.ts` | Prompt detection, ANSI stripping, output formatting |
+| `commandHistory.ts` | Per-project persistent command history |
 
-Code
+## Development
 
-┌──────────────────────┬──────────────────────┐
-│         Icon         │       Dipakai        │
-├──────────────────────┼──────────────────────┤
-│ File                 │ tree file            │
-├──────────────────────┼──────────────────────┤
-│ Folder / folder-open │ tree dir             │
-├──────────────────────┼──────────────────────┤
-│ Save                 │ dirty tab (opsional) │
-├──────────────────────┼──────────────────────┤
-│ Diff                 │ modified indicator   │
-└──────────────────────┴──────────────────────┘
+```bash
+# Install dependencies
+npm install
 
-Terminal / SSH
+# Development (renderer + electron)
+npm run dev
 
-┌───────────────┬───────────────┐
-│     Icon      │    Dipakai    │
-├───────────────┼───────────────┤
-│ Terminal      │ pane          │
-├───────────────┼───────────────┤
-│ Server / plug │ SSH host      │
-├───────────────┼───────────────┤
-│ Key           │ identity file │
-├───────────────┼───────────────┤
-│ Refresh       │ reconnect     │
-└───────────────┴───────────────┘
+# Build for production
+npm run build
+```
 
-Git
+## License
 
-┌──────────────────────────────┬────────────────────────────────┐
-│             Icon             │            Dipakai             │
-├──────────────────────────────┼────────────────────────────────┤
-│ Git-branch                   │ remote card                    │
-├──────────────────────────────┼────────────────────────────────┤
-│ Git-commit                   │ history                        │
-├──────────────────────────────┼────────────────────────────────┤
-│ Arrow-up / down              │ push/pull ahead-behind ↑↓      │
-├──────────────────────────────┼────────────────────────────────┤
-│ Plus-circle / minus / pencil │ status A / D / M (ganti huruf) │
-├──────────────────────────────┼────────────────────────────────┤
-│ Refresh                      │ refresh status                 │
-└──────────────────────────────┴────────────────────────────────┘
-
-Browser
-
-| Icon | Dipakai |
-|---|---|
-| Arrow-left / right | back/forward |
-| Reload | ↻ |
-| Stop | loading cancel |
-| Star | bookmark |
-| Download | downloads panel |
-| History / clock | history | ✅ clock di Inspector |
-| External-link | open external |
-| Moon / sun | theme toggle |
-| Find / magnifier | find in page |
-
-Settings / generic UI
-
-| Icon | Dipakai |
-|---|---|
-| Trash | delete SSH host / model |
-| Pencil / edit | edit host |
-| Copy | copy path/hash |
-| Check | saved / success |
-| Alert / warning | error | ✅ 1 di Agent |
-| Info | empty states |
-| Eye / eye-off | show API key |
-| Link | base URL |
-| Cpu / chip | model |
-
----
-Bundle cari sekarang (hemat)
-
-Cukup 1 set Heroicons / Lucide / Phosphor regular:
-
-1. app-logo custom (kamu desain)
-2. sparkles, code, terminal, git-branch, globe
-3. bell, cog, search, folder-plus, star
-4. x, plus, chevron-{left,right,down}, dots-vertical
-5. paperclip, send, stop, check, ban
-6. file, folder, folder-open, save
-7. server, key, refresh
-8. arrow-{up,down,left,right}, download, external-link, moon, sun
-9. trash, pencil, copy, eye, eye-off, alert-triangle, info
-10. plus-circle, minus-circle (git A/D)
+Private � All rights reserved.

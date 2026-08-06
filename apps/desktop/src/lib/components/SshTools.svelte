@@ -121,7 +121,10 @@
   }
 
   function connect(h: SshHostInfo): void {
-    window.dispatchEvent(new CustomEvent('enpiistudio:terminal-ssh', { detail: { name: h.name } }))
+    app.setMode('terminal')
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent('enpiistudio:terminal-ssh', { detail: { name: h.name, host: h.host } }))
+    })
   }
 
   function hostLine(h: SshHostInfo): string {

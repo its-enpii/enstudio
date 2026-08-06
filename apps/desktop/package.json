@@ -2,16 +2,17 @@
   "name": "@enstudio/desktop",
   "version": "0.1.1",
   "private": true,
-  "description": "Personal agentic coding workspace — enpii on your own endpoint",
+  "description": "Personal agentic coding workspace \u00e2\u20ac\u201d enpii on your own endpoint",
   "author": {
     "name": "enpii",
     "email": "noreply@enpii.studio"
   },
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/main.cjs",
   "scripts": {
-    "dev": "vite",
+    "dev": "node ./scripts/dev-all.mjs",
     "dev:devtools": "node ./scripts/dev-devtools.mjs",
+    "predev": "node ./scripts/build-electron-extras.mjs",
     "build": "node ./scripts/build.mjs",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json --threshold error",
     "preview": "vite preview",
@@ -26,7 +27,9 @@
     "predist:win": "node ./scripts/build.mjs",
     "dist:win": "electron-builder --win",
     "predist:mac": "node ./scripts/build.mjs",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "dev:vite": "vite",
+    "dev:electron": "node ./scripts/dev-electron.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -67,7 +70,7 @@
   "build": {
     "appId": "studio.enpii.app",
     "productName": "EnStudio",
-    "copyright": "Copyright © enpii",
+    "copyright": "Copyright \u00c2\u00a9 enpii",
     "directories": {
       "output": "release",
       "buildResources": "build"

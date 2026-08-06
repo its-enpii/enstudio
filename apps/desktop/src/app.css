@@ -91,8 +91,36 @@
   }
 
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
+  }
+
+  /* Custom DOM overlay scrollbars (xterm, Monaco, etc.) */
+  .scrollbar,
+  .scrollbar.vertical,
+  .scrollbar.horizontal,
+  .xterm-scrollable-element > .scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+    background: transparent !important;
+  }
+
+  .scrollbar .slider,
+  .scrollbar.vertical .slider,
+  .scrollbar.horizontal .slider,
+  .xterm-scrollable-element .slider {
+    width: 6px !important;
+    height: 6px !important;
+    border-radius: 99px !important;
+    background: var(--color-studio-scrollbar) !important;
+    left: 0px !important;
+  }
+
+  .scrollbar .slider:hover,
+  .scrollbar.vertical .slider:hover,
+  .scrollbar.horizontal .slider:hover,
+  .xterm-scrollable-element .slider:hover {
+    background: var(--color-studio-scrollbar-hover) !important;
   }
 
   *::-webkit-scrollbar-track,

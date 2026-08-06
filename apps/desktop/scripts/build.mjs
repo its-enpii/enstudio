@@ -45,4 +45,13 @@ const r2 = spawnSync(process.execPath, [viteJs, 'build'], {
 console.log(`[build] vite exit: ${r2.status} signal: ${r2.signal}`)
 if (r2.status !== 0) process.exit(r2.status ?? 1)
 
+// Stage 3: bundle the terminal worker and preload separately. vite-plugin-electron
+// was removed entirely because it wraps entries in a `lib` IIFE which breaks
+// both the contextBridge preload target and the utilityProcess.fork target.
+const r3 = spawnSync(process.execPath, [path.resolve(__dirname, 'build-electron-extras.mjs')], {
+  cwd: __dirname,
+  stdio: 'inherit',
+})
+if (r3.status !== 0) process.exit(r3.status ?? 1)
+
 console.log('[build] all done')

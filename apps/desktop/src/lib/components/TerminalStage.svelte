@@ -1,592 +1,434 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte'
-  import { Terminal } from '@xterm/xterm'
-  import { FitAddon } from '@xterm/addon-fit'
+  import { fade, fly } from 'svelte/transition'
+  import type { TerminalHostEvent } from '../../../electron/terminal/types'
   import '@xterm/xterm/css/xterm.css'
   import { listSsh, type SshHostInfo } from '../enpii'
   import { state as app, fontStack, EDITOR_FONT_SIZE } from '../store.svelte'
-  import { xtermTheme } from '../theme'
   import { Icon } from '../icons'
-  import {
-    applyMirrorData,
-    commandToken,
-    createMirror,
-    ghostSuffix,
-    isAltScreen,
-    notePtyOutput,
-    pickBestMatch,
-    shouldShowGhost,
-    type LineMirror,
-  } from '../termGhost'
+  import { Button, Badge, Dropdown } from './ui'
+  import type { DropdownItem } from './ui'
 
-  type TerminalTab = { id: string; title: string; exited: boolean }
-  type PaneIds = [string | null, string | null]
-  type TerminalWorkspace = { tabs: TerminalTab[]; activeId: string | null; paneIds: PaneIds; paneTabs: [string[], string[]]; focusedPane: 0 | 1; nextTitle: number }
-  type GhostState = {
-    mirror: LineMirror
-    suffix: string
-    match: string | null
-    matches: string[]
-    menuOpen: boolean
-    selected: number
-    left: number
-    top: number
-    timer?: ReturnType<typeof setTimeout>
+  import type { CommandBlock, TerminalTab, TerminalApi } from '../terminal/types'
+  import { STALE_RUN_MS, FRONTEND_IDLE_MS } from '../terminal/constants'
+  import {
+    uid,
+    markerString,
+    markerNumber,
+    looksLikeShellPrompt,
+    formatDuration,
+    formatIdleSince,
+    stateLabel,
+    stateClasses,
+    blockStatusClass,
+    blockLeftAccent,
+    outputPreview,
+    detectStreamFollow,
+    pathTitle,
+  } from '../terminal/helpers'
+  import { loadHistory, pushHistory, canBrowseHistory } from '../terminal/commandHistory'
+  import { TabStore } from '../terminal/tabStore.svelte'
+  import { PtyBridge } from '../terminal/ptyBridge'
+  import { SurfaceManager } from '../terminal/surfaceManager'
+
+    let sshHosts = $state<SshHostInfo[]>([])
+  async function loadSshHosts(): Promise<void> {
+    try {
+      const data = await listSsh()
+      sshHosts = data.hosts ?? []
+    } catch {
+      sshHosts = []
+    }
   }
 
-  let tabs = $state<TerminalTab[]>([])
-  let activeId = $state<string | null>(null)
-  let paneIds = $state<PaneIds>([null, null])
-  let paneTabs = $state<[string[], string[]]>([[], []])
-  let focusedPane = $state<0 | 1>(0)
-  let editingId = $state<string | null>(null)
-  let editingTitle = $state('')
-  let renameInput = $state<HTMLInputElement>()
-  let primaryHost = $state<HTMLDivElement>()
-  let secondaryHost = $state<HTMLDivElement>()
-  /** Ghost UI for focused terminal (DOM overlay on pane). */
-  let ghostText = $state('')
-  let ghostLeft = $state(0)
-  let ghostTop = $state(0)
-  let ghostPane = $state<0 | 1>(0)
-  let ghostMenuOpen = $state(false)
-  let ghostMatches = $state<string[]>([])
-  let ghostSelected = $state(0)
-  let ghostVisible = $state(false)
-  let error = $state('')
+  const sshDropdownItems = $derived<DropdownItem[]>(
+    sshHosts.length > 0
+      ? sshHosts.map((h) => ({
+          id: h.host,
+          label: `ssh ${h.host}`,
+          description: `${h.user ? h.user + '@' : ''}${h.hostname || h.host}${h.port && h.port !== 22 ? ':' + h.port : ''}`,
+        }))
+      : [{ id: 'none', label: 'No SSH hosts configured', disabled: true }]
+  )
+
+  const api: TerminalApi | undefined = typeof window !== 'undefined' ? (window as any).enpiistudio?.terminal : undefined
+
+  const store = new TabStore()
+  const bridge = new PtyBridge(api)
+  const surfaces = new SurfaceManager(api)
+
+  let composerEl = $state<HTMLTextAreaElement>()
+  let stageEl = $state<HTMLDivElement>()
+  let stickBottom = $state(true)
+  let nowTick = $state(Date.now())
+  let activeSurfaceHost = $state<HTMLDivElement>()
+  let mountedSessionId = $state<string | null>(null)
+
   let currentProjectId: string | null = null
-  const workspaces = new Map<string, TerminalWorkspace>()
   let destroyed = false
   let resizeObserver: ResizeObserver | undefined
-  const terminals = new Map<string, Terminal>()
-  const fitAddons = new Map<string, FitAddon>()
-  const terminalSizes = new Map<string, { cols: number; rows: number }>()
-  const nudgedForFontKey = new Map<string, string>()
-  const pendingData = new Map<string, string>()
-  const creatingFor = new Set<string>()
-  const ghosts = new Map<string, GhostState>()
-  const api = window.enpiistudio.terminal
 
-  function workspaceFor(projectId: string): TerminalWorkspace {
-    const existing = workspaces.get(projectId)
-    if (existing) return existing
-    const workspace: TerminalWorkspace = { tabs: [], activeId: null, paneIds: [null, null], paneTabs: [[], []], focusedPane: 0, nextTitle: 1 }
-    workspaces.set(projectId, workspace)
-    return workspace
+  const staleRunTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const idleFinalizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function activeTab(): TerminalTab | null {
+    return store.activeTab()
   }
 
-  function syncWorkspace(): void {
-    if (!currentProjectId) return
-    const workspace = workspaceFor(currentProjectId)
-    workspace.tabs = tabs
-    workspace.activeId = activeId
-    workspace.paneIds = [...paneIds]
-    workspace.paneTabs = [ [...paneTabs[0]], [...paneTabs[1]] ]
-    workspace.focusedPane = focusedPane
+  function tabByPty(ptyId: string): TerminalTab | null {
+    const key = bridge.tabByPtyId.get(ptyId)
+    if (!key) return null
+    return store.findTab(key)
   }
 
-  function normalizePaneState(preferredId?: string): void {
-    const valid = new Set(tabs.map((tab) => tab.id))
-    const knownPaneTabs = paneTabs[0].some((id) => valid.has(id)) || paneTabs[1].some((id) => valid.has(id))
-    if (!knownPaneTabs && tabs.length) {
-      paneTabs = [tabs.filter((tab) => tab.id !== paneIds[1]).map((tab) => tab.id), paneIds[1] ? [paneIds[1]] : []]
-    } else {
-      paneTabs = [
-        [...new Set(paneTabs[0].filter((id) => valid.has(id)))],
-        [...new Set(paneTabs[1].filter((id) => valid.has(id)))],
-      ]
+  let tabs = $derived(store.tabs)
+  let activeId = $derived(store.activeId)
+  let error = $derived(store.error)
+  function finalizeRunningBlock(tabId: string, blockId: string, exitCode: number): void {
+    const tab = store.findTab(tabId)
+    if (!tab) return
+    const block = tab.blocks.find((b) => b.id === blockId)
+    if (!block || block.state !== 'running') return
+    store.applyBlockUpdate(tabId, blockId, {
+      state: exitCode === 0 ? 'success' : 'failed',
+      exitCode,
+      finishedAt: Date.now(),
+      durationMs: Date.now() - block.startedAt,
+      isLiveSurface: false,
+      output: block.output || (bridge.liveOutputByPtyId.get(tabId) ?? ''),
+    })
+    store.applyTabPatch(tabId, { runningCommandId: null })
+    cancelStaleTimer(tabId)
+    cancelIdleFinalize(tabId)
+    bridge.liveOutputByPtyId.delete(tabId)
+    bridge.blockByPtyId.delete(tabId)
+    if (mountedSessionId === tabId) unmountActiveSurface()
+    void scrollToBottom(true)
+  }
+
+  function startStaleTimer(tabId: string, blockId: string): void {
+    cancelStaleTimer(tabId)
+    const tab = store.findTab(tabId)
+    if (!tab) return
+    const block = tab.blocks.find((b) => b.id === blockId)
+    if (!block || block.isStreamFollow) return
+    const handle = setTimeout(() => {
+      const tab = store.findTab(tabId)
+      if (!tab) return
+      const block = tab.blocks.find((b) => b.id === blockId)
+      if (!block || block.state !== 'running' || block.isStreamFollow) return
+      store.applyBlockUpdate(tab.id, blockId, {
+        state: 'failed',
+        exitCode: undefined,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - block.startedAt,
+        isLiveSurface: false,
+        output: (block.output ?? '') + '\r\n\x1b[90m[command reached timeout without a final marker \u2013 may still be running]\x1b[0m\r\n',
+      })
+      store.applyTabPatch(tab.id, { runningCommandId: null })
+      cancelIdleFinalize(tab.id)
+      bridge.blockByPtyId.delete(tabId)
+      if (mountedSessionId === tabId) unmountActiveSurface()
+      void scrollToBottom(true)
+    }, STALE_RUN_MS)
+    staleRunTimers.set(tabId, handle)
+  }
+
+  function cancelStaleTimer(tabId: string): void {
+    const handle = staleRunTimers.get(tabId)
+    if (handle) {
+      clearTimeout(handle)
+      staleRunTimers.delete(tabId)
     }
-    let next: PaneIds = [
-      paneIds[0] && valid.has(paneIds[0]) ? paneIds[0] : null,
-      paneIds[1] && valid.has(paneIds[1]) ? paneIds[1] : null,
-    ]
-    if (!next[0] && next[1]) next = [next[1], null]
-    if (!next[0] && tabs.length) next = [preferredId && valid.has(preferredId) ? preferredId : tabs[0]!.id, null]
-    paneIds = next
-    for (const pane of [0, 1] as const) {
-      const id = paneIds[pane]
-      if (id && !paneTabs[pane].includes(id)) paneTabs[pane] = [...paneTabs[pane], id]
-    }
-    if (!paneIds[0]) {
-      focusedPane = 0
-      activeId = null
-    } else if (!paneIds[focusedPane]) {
-      focusedPane = 0
-      activeId = paneIds[0]
-    } else {
-      activeId = paneIds[focusedPane]
+  }
+
+  function cancelIdleFinalize(tabId: string): void {
+    const handle = idleFinalizeTimers.get(tabId)
+    if (handle) {
+      clearTimeout(handle)
+      idleFinalizeTimers.delete(tabId)
     }
   }
 
-  function hostForPane(pane: 0 | 1): HTMLDivElement | undefined {
-    return pane === 0 ? primaryHost : secondaryHost
+  function armIdleFinalize(tabId: string, blockId: string): void {
+    cancelIdleFinalize(tabId)
+    const handle = setTimeout(() => {
+      idleFinalizeTimers.delete(tabId)
+      const tab = store.findTab(tabId)
+      if (!tab) return
+      const block = tab.blocks.find((b) => b.id === blockId)
+      if (!block || block.state !== 'running') return
+      if (block.isStreamFollow) return
+      const last = bridge.lastPtyDataAt.get(tabId) ?? 0
+      const sinceLast = Date.now() - last
+      if (sinceLast < FRONTEND_IDLE_MS) {
+        const remaining = Math.max(100, FRONTEND_IDLE_MS - sinceLast)
+        idleFinalizeTimers.set(
+          tabId,
+          setTimeout(() => armIdleFinalize(tabId, blockId), remaining),
+        )
+        return
+      }
+      const buffered = bridge.liveOutputByPtyId.get(tabId) ?? ''
+      store.applyBlockUpdate(tab.id, blockId, {
+        state: 'success',
+        exitCode: 0,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - block.startedAt,
+        isLiveSurface: false,
+        output: (block.output ?? '') + buffered,
+      })
+      store.applyTabPatch(tab.id, { runningCommandId: null })
+      cancelStaleTimer(tab.id)
+      cancelIdleFinalize(tab.id)
+      bridge.liveOutputByPtyId.delete(tab.id)
+      bridge.blockByPtyId.delete(tab.id)
+      if (mountedSessionId === tab.id) unmountActiveSurface()
+      void scrollToBottom(true)
+    }, FRONTEND_IDLE_MS)
+    idleFinalizeTimers.set(tabId, handle)
   }
-
-  const resizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  const readyHosts = new Set<HTMLDivElement>()
-
-  function hostReady(host: HTMLDivElement | undefined): host is HTMLDivElement {
-    return Boolean(host && host.clientWidth > 80 && host.clientHeight > 40)
-  }
-
-  function fitPane(pane: 0 | 1, immediate = false): void {
-    const id = paneIds[pane]
-    const host = hostForPane(pane)
-    // Skip tiny/hidden hosts — fitting to ~20 cols wraps prompt then jumps (blink).
-    if (!id || !hostReady(host)) return
-    const fit = fitAddons.get(id)
-    const terminal = terminals.get(id)
-    if (!fit || !terminal) return
-    const apply = () => {
-      if (!hostReady(host)) return
-      // Snapshot host box before fit — if it shifts before our size settles we
-      // re-fit one more tick (webFrame zoom + font swap often change host size
-      // mid-measurement, leaving the terminal cropped).
-      const w0 = host.clientWidth
-      const h0 = host.clientHeight
-      const fontKey = `${fontStack(app.ui.fontFamily)}|${EDITOR_FONT_SIZE}|${app.ui.uiZoom}`
-      // Force a re-measure when font/zoom has changed since the last successful
-      // fit. xterm caches `_charSizeService` measurements and only re-measures
-      // when buffer cols/rows differ — so without this nudge, a stale
-      // (pre-font-load) cell.width keeps us locked at the wrong column count
-      // and the terminal stays visibly cropped on the right edge.
-      if (nudgedForFontKey.get(id) !== fontKey && terminal.cols > 0 && terminal.rows > 0) {
-        nudgedForFontKey.set(id, fontKey)
-        try {
-          terminal.resize(Math.max(2, terminal.cols + 1), terminal.rows)
-          terminal.resize(Math.max(2, terminal.cols - 1), terminal.rows)
-        } catch {
-          /* not yet mounted */
+  function applyPtyData(id: string, data: string): void {
+    const tab = tabByPty(id)
+    if (!tab || !data) return
+    bridge.lastPtyDataAt.set(tab.id, Date.now())
+    const blockId = tab.runningCommandId
+    if (blockId) {
+      const block = tab.blocks.find((b) => b.id === blockId)
+      if (block) {
+        const nextOutput = (block.output ?? '') + data
+        store.applyBlockUpdate(tab.id, blockId, { output: nextOutput })
+        if (!block.isStreamFollow && looksLikeShellPrompt(nextOutput)) {
+          finalizeRunningBlock(tab.id, block.id, 0)
+          return
         }
       }
-      try {
-        // Validate before fit(): fit() mutates browser-side xterm immediately.
-        // Returning afterward would leave xterm and node-pty at different sizes.
-        const proposed = fit.proposeDimensions()
-        if (!proposed || proposed.cols < 40 || proposed.rows < 10) return
-        fit.fit()
-        terminalSizes.set(id, { cols: terminal.cols, rows: terminal.rows })
-        void api.resize(id, terminal.cols, terminal.rows)
-        host.style.opacity = '1'
-        readyHosts.add(host)
-      } catch {
-        /* hidden or not mounted yet */
-      }
-      // Re-fit if host is still resizing (e.g. webFrame layout cascading in).
-      if (host.clientWidth !== w0 || host.clientHeight !== h0) {
-        requestAnimationFrame(() => fitPane(pane, true))
-      }
     }
-    // Debounce — TUI CLIs thrash on rapid resize; initial settle needs a beat.
-    if (immediate) {
-      const t = resizeTimers.get(id)
-      if (t) clearTimeout(t)
-      resizeTimers.delete(id)
-      apply()
+    const terminal = surfaces.terminals.get(id)
+    if (terminal) {
+      terminal.write(data)
+    } else {
+      const previous = bridge.liveOutputByPtyId.get(id) ?? ''
+      bridge.liveOutputByPtyId.set(id, previous + data)
+    }
+    requestAnimationFrame(() => scrollToBottom(false))
+  }
+
+  function applyPtyExit(id: string, exitCode: number): void {
+    const tab = tabByPty(id)
+    if (!tab) {
+      bridge.liveOutputByPtyId.delete(id)
+      cancelStaleTimer(id)
       return
     }
-    const existing = resizeTimers.get(id)
-    if (existing) clearTimeout(existing)
-    resizeTimers.set(
-      id,
-      setTimeout(() => {
-        resizeTimers.delete(id)
-        apply()
-      }, 100),
+    const blockId = tab.runningCommandId
+    if (blockId) {
+      const block = tab.blocks.find((b) => b.id === blockId)
+      if (block) {
+        store.applyBlockUpdate(tab.id, blockId, {
+          state: 'exited',
+          exitCode,
+          finishedAt: Date.now(),
+          isLiveSurface: false,
+          output: (block.output ?? '') + (bridge.liveOutputByPtyId.get(id) ?? ''),
+        })
+      }
+      store.applyTabPatch(tab.id, { runningCommandId: null, exited: true })
+    } else {
+      store.applyTabPatch(tab.id, { exited: true })
+    }
+    cancelStaleTimer(tab.id)
+    cancelIdleFinalize(tab.id)
+    bridge.liveOutputByPtyId.delete(id)
+    if (mountedSessionId === id) unmountActiveSurface()
+    if (surfaces.terminals.get(id)) {
+      surfaces.terminals.get(id)?.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)
+    }
+  }
+
+  function applyShellMarker(id: string, event: Extract<TerminalHostEvent, { type: 'shell_marker' }>): void {
+    const { marker } = event
+    const cwd = markerString(marker.payload, 'cwd')
+    const tab = tabByPty(id)
+    if (!tab) return
+    if (marker.event === 'prompt_ready') {
+      if (cwd) store.applyTabPatch(tab.id, { cwd })
+      return
+    }
+    if (marker.event === 'command_start') {
+      const command = markerString(marker.payload, 'command') ?? ''
+      const existing = tab.runningCommandId
+        ? tab.blocks.find((b) => b.id === tab.runningCommandId)
+        : undefined
+      if (existing && existing.state === 'running') {
+        store.applyBlockUpdate(tab.id, existing.id, {
+          command: command || existing.command,
+          cwd: cwd ?? existing.cwd,
+          isLiveSurface: true,
+          isStreamFollow: existing.isStreamFollow ?? detectStreamFollow(command || existing.command),
+        })
+        bridge.blockByPtyId.set(id, existing.id)
+        bridge.liveOutputByPtyId.delete(id)
+        if (cwd) store.applyTabPatch(tab.id, { cwd })
+        void tick().then(() => {
+          if (store.activeId === tab.id) void mountActiveSurface(id)
+          void scrollToBottom(true)
+        })
+        return
+      }
+      const block: CommandBlock = {
+        id: uid(),
+        sessionId: id,
+        command,
+        cwd: cwd ?? tab.cwd,
+        shell: tab.shell,
+        state: 'running',
+        startedAt: Date.now(),
+        output: '',
+        isLiveSurface: true,
+        isStreamFollow: detectStreamFollow(command),
+      }
+      store.applyTabPatch(tab.id, {
+        cwd: cwd ?? tab.cwd,
+        runningCommandId: block.id,
+        blocks: [...tab.blocks, block],
+      })
+      bridge.blockByPtyId.set(id, block.id)
+      bridge.liveOutputByPtyId.delete(id)
+      const term = surfaces.terminals.get(id); if (term) { term.reset(); term.clear(); term.write('\x1b[2J\x1b[3J\x1b[H'); }
+      void tick().then(() => {
+        if (store.activeId === tab.id) void mountActiveSurface(id)
+        void scrollToBottom(true)
+      })
+      return
+    }
+    if (marker.event === 'command_end') {
+      const exitCode = markerNumber(marker.payload, 'exitCode') ?? 1
+      const duration = markerNumber(marker.payload, 'durationMs')
+      const blockId = tab.runningCommandId ?? bridge.blockByPtyId.get(id)
+      if (blockId) {
+        store.applyBlockUpdate(tab.id, blockId, {
+          state: exitCode === 0 ? 'success' : 'failed',
+          exitCode,
+          durationMs: duration,
+          finishedAt: Date.now(),
+          isLiveSurface: false,
+          output: (tab.blocks.find((b) => b.id === blockId)?.output ?? '') + (bridge.liveOutputByPtyId.get(id) ?? ''),
+        })
+      }
+      store.applyTabPatch(tab.id, {
+        cwd: cwd ?? tab.cwd,
+        runningCommandId: null,
+      })
+      cancelStaleTimer(tab.id)
+      cancelIdleFinalize(tab.id)
+      bridge.blockByPtyId.delete(id)
+      bridge.liveOutputByPtyId.delete(id)
+      if (mountedSessionId === id) unmountActiveSurface()
+      void scrollToBottom(true)
+      return
+    }
+    if (marker.event === 'integration_error') {
+      const message = markerString(marker.payload, 'message') ?? 'Shell integration unavailable'
+      const blockId = tab.runningCommandId
+      if (blockId) {
+        store.applyBlockUpdate(tab.id, blockId, { state: 'integration_error', message })
+      } else {
+        const block: CommandBlock = {
+          id: uid(),
+          sessionId: id,
+          command: '[integration_error]',
+          cwd: cwd ?? tab.cwd,
+          shell: tab.shell,
+          state: 'integration_error',
+          startedAt: Date.now(),
+          output: '',
+          isLiveSurface: true,
+        }
+        store.applyTabPatch(tab.id, { blocks: [...tab.blocks, block] })
+      }
+      void message
+    }
+  }
+
+  function applyHostEvent(event: TerminalHostEvent): void {
+    if (!bridge.noteSequence(event.id, event.sequence)) return
+    if (event.type === 'data') applyPtyData(event.id, event.data)
+    else if (event.type === 'exit') applyPtyExit(event.id, event.exitCode)
+    else applyShellMarker(event.id, event)
+  }
+  function getFontFamily(): string {
+    return fontStack(app.ui.fontFamily)
+  }
+
+  function fitActiveSurface(immediate = false): void {
+    surfaces.fitSurface(
+      mountedSessionId,
+      activeSurfaceHost,
+      getFontFamily(),
+      EDITOR_FONT_SIZE,
+      app.ui.uiZoom,
+      immediate,
     )
   }
 
-  /**
-   * Aggressive re-fit: keep polling host size until it stops increasing (or
-   * we hit a frame cap). Catches webFrame zoom cascades where RO fires once
-   * but the host keeps growing for several frames. Call after zoom, font swap,
-   * or mode-switch — anywhere the layout might still be settling.
-   * Generation counter cancels superseded loops (e.g. fast back-to-back zooms).
-   */
-  const refitGenerations = [0, 0]
-  function refitUntilStable(pane: 0 | 1, maxFrames = 16): void {
-    const gen = ++refitGenerations[pane]
-    let frames = 0
-    let lastW = -1
-    let lastH = -1
-    const tick = (): void => {
-      if (gen !== refitGenerations[pane]) return // superseded
-      const host = hostForPane(pane)
-      if (!host || !hostReady(host)) return
-      const w = host.clientWidth
-      const h = host.clientHeight
-      // Only call fit when size actually changed — avoids resize spam on settling.
-      if (w !== lastW || h !== lastH) {
-        lastW = w
-        lastH = h
-        fitPane(pane, true)
-      }
-      frames += 1
-      if (frames < maxFrames) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
+  function refitUntilStable(maxFrames = 16): void {
+    surfaces.refitUntilStable(
+      mountedSessionId,
+      activeSurfaceHost,
+      getFontFamily(),
+      EDITOR_FONT_SIZE,
+      app.ui.uiZoom,
+      maxFrames,
+    )
   }
 
-  function fitVisible(immediate = false): void {
-    fitPane(0, immediate)
-    fitPane(1, immediate)
-  }
-
-  function ghostFor(id: string): GhostState {
-    let g = ghosts.get(id)
-    if (!g) {
-      g = {
-        mirror: createMirror(),
-        suffix: '',
-        match: null,
-        matches: [],
-        menuOpen: false,
-        selected: 0,
-        left: 0,
-        top: 0,
-      }
-      ghosts.set(id, g)
-    }
-    return g
-  }
-
-  function clearGhost(id: string, keepMirror = true): void {
-    const g = ghosts.get(id)
-    if (!g) return
-    if (g.timer) clearTimeout(g.timer)
-    g.timer = undefined
-    g.suffix = ''
-    g.match = null
-    g.matches = []
-    g.menuOpen = false
-    g.selected = 0
-    if (!keepMirror) g.mirror = createMirror()
-    if (activeId === id) syncGhostUi(id)
-  }
-
-  function cellMetrics(term: Terminal, host: HTMLDivElement): { cellW: number; cellH: number; padX: number; padY: number } {
-    const screen = host.querySelector('.xterm-screen') as HTMLElement | null
-    const cols = Math.max(term.cols, 1)
-    const rows = Math.max(term.rows, 1)
-    const w = screen?.clientWidth || host.clientWidth
-    const h = screen?.clientHeight || host.clientHeight
-    const padX = host.offsetLeft
-    const padY = host.offsetTop
-    return { cellW: w / cols, cellH: h / rows, padX, padY }
-  }
-
-  function positionGhost(id: string): void {
-    const g = ghosts.get(id)
-    const term = terminals.get(id)
-    if (!g || !term) return
-    const pane: 0 | 1 = paneIds[0] === id ? 0 : paneIds[1] === id ? 1 : focusedPane
-    const host = hostForPane(pane)
-    if (!host) return
-    const { cellW, cellH, padX, padY } = cellMetrics(term, host)
-    const buf = term.buffer.active
-    const viewportY = buf.viewportY ?? 0
-    g.left = padX + buf.cursorX * cellW
-    g.top = padY + (buf.cursorY - viewportY) * cellH
-  }
-
-  function syncGhostUi(id: string | null): void {
-    if (!id || id !== activeId) {
-      // Still allow show if id is on focused pane
-      if (!id || (paneIds[focusedPane] !== id && activeId !== id)) {
-        ghostVisible = false
-        ghostMenuOpen = false
-        return
-      }
-    }
-    const g = ghosts.get(id)
-    if (!g || (!g.suffix && !g.menuOpen)) {
-      ghostVisible = false
-      ghostMenuOpen = false
-      ghostText = ''
-      return
-    }
-    positionGhost(id)
-    ghostPane = paneIds[0] === id ? 0 : 1
-    ghostLeft = g.left
-    ghostTop = g.top
-    ghostText = g.suffix
-    ghostMatches = g.matches
-    ghostSelected = g.selected
-    ghostMenuOpen = g.menuOpen
-    ghostVisible = Boolean(g.suffix) || g.menuOpen
-  }
-
-  async function refreshGhost(id: string): Promise<void> {
-    const g = ghosts.get(id)
-    const term = terminals.get(id)
-    if (!g || !term) return
-    const tab = tabs.find((t) => t.id === id)
-    if (tab?.exited) {
-      clearGhost(id)
-      return
-    }
-    const alt = isAltScreen(term as unknown as { buffer: { active: { type?: string }; normal?: unknown } })
-    const token = commandToken(g.mirror)
-    if (!token || alt) {
-      g.suffix = ''
-      g.match = null
-      g.matches = []
-      if (!g.menuOpen) syncGhostUi(id)
-      else syncGhostUi(id)
-      return
-    }
-    try {
-      const matches = (await api.pathComplete?.(token)) ?? []
-      g.matches = matches
-      const best = pickBestMatch(matches, token)
-      if (shouldShowGhost({ altScreen: alt, token, match: best })) {
-        g.match = best
-        g.suffix = ghostSuffix(token, best!)
-      } else {
-        g.match = null
-        g.suffix = ''
-      }
-      if (g.selected >= g.matches.length) g.selected = 0
-    } catch {
-      g.suffix = ''
-      g.match = null
-      g.matches = []
-    }
-    syncGhostUi(id)
-  }
-
-  function scheduleGhost(id: string): void {
-    const g = ghostFor(id)
-    if (g.timer) clearTimeout(g.timer)
-    g.timer = setTimeout(() => {
-      g.timer = undefined
-      void refreshGhost(id)
-    }, 50)
-  }
-
-  function acceptGhost(id: string, which?: string): void {
-    const g = ghosts.get(id)
-    if (!g) return
-    const token = commandToken(g.mirror)
-    const match = which ?? (g.menuOpen && g.matches[g.selected] ? g.matches[g.selected] : g.match)
-    if (!token || !match) return
-    const suffix = ghostSuffix(token, match)
-    if (!suffix) return
-    applyMirrorData(g.mirror, suffix)
-    void api.write(id, suffix)
-    g.menuOpen = false
-    g.suffix = ''
-    g.match = null
-    g.matches = []
-    syncGhostUi(id)
-    scheduleGhost(id)
-  }
-
-  function copyTerminalSelection(term: Terminal): boolean {
-    if (!term.hasSelection()) return false
-    const text = term.getSelection()
-    if (!text) return false
-    void navigator.clipboard.writeText(text).catch(() => {})
-    return true
-  }
-
-  function wireGhost(id: string, terminal: Terminal): void {
-    const g = ghostFor(id)
-    // xterm selection copy (Ctrl/Cmd+C when text selected; else let shell get SIGINT via onData).
-    terminal.attachCustomKeyEventHandler((ev) => {
-      if (ev.type !== 'keydown') return true
-      const mod = ev.ctrlKey || ev.metaKey
-      if (mod && !ev.altKey && (ev.key === 'c' || ev.key === 'C')) {
-        if (copyTerminalSelection(terminal)) {
-          ev.preventDefault()
-          return false
-        }
-        return true
-      }
-      // Shift+Ctrl+C always copy selection (Windows terminal convention)
-      if (ev.ctrlKey && ev.shiftKey && (ev.key === 'c' || ev.key === 'C' || ev.code === 'KeyC')) {
-        if (copyTerminalSelection(terminal)) {
-          ev.preventDefault()
-          return false
-        }
-      }
-      // Ctrl/Cmd+V paste
-      if (mod && !ev.altKey && !ev.shiftKey && (ev.key === 'v' || ev.key === 'V')) {
-        ev.preventDefault()
-        void navigator.clipboard.readText().then((text) => {
-          if (text) void api.write(id, text)
-        }).catch(() => {})
-        return false
-      }
-      const hasGhost = Boolean(g.suffix) || g.menuOpen
-      if (ev.key === ' ' && ev.ctrlKey && !ev.altKey && !ev.metaKey) {
-        ev.preventDefault()
-        void (async () => {
-          await refreshGhost(id)
-          if (g.matches.length) {
-            g.menuOpen = true
-            g.selected = 0
-            if (!g.suffix && g.matches[0]) {
-              const token = commandToken(g.mirror)
-              if (token) {
-                g.match = g.matches[0]!
-                g.suffix = ghostSuffix(token, g.matches[0]!)
-              }
-            }
-            syncGhostUi(id)
-          }
-        })()
-        return false
-      }
-      if (!hasGhost) return true
-      if (ev.key === 'Escape') {
-        g.menuOpen = false
-        g.suffix = ''
-        g.match = null
-        syncGhostUi(id)
-        return false
-      }
-      if (g.menuOpen && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
-        ev.preventDefault()
-        const n = g.matches.length
-        if (!n) return false
-        g.selected = ev.key === 'ArrowDown' ? (g.selected + 1) % n : (g.selected - 1 + n) % n
-        const token = commandToken(g.mirror)
-        const m = g.matches[g.selected]
-        if (token && m) {
-          g.match = m
-          g.suffix = ghostSuffix(token, m)
-        }
-        syncGhostUi(id)
-        return false
-      }
-      if (ev.key === 'Tab' && !ev.altKey && !ev.metaKey) {
-        ev.preventDefault()
-        acceptGhost(id)
-        return false
-      }
-      if (ev.key === 'ArrowRight' && !ev.altKey && !ev.metaKey && !ev.ctrlKey && g.suffix && !g.menuOpen) {
-        // Only accept when mirror is "at end" — always true for our end-only mirror
-        ev.preventDefault()
-        acceptGhost(id)
-        return false
-      }
-      if (ev.key === 'Enter' && g.menuOpen) {
-        ev.preventDefault()
-        acceptGhost(id)
-        return false
-      }
-      if (ev.key === 'ArrowDown' && g.suffix && !g.menuOpen && g.matches.length > 1) {
-        ev.preventDefault()
-        g.menuOpen = true
-        g.selected = 0
-        syncGhostUi(id)
-        return false
-      }
-      return true
-    })
-    terminal.onData((data) => {
-      applyMirrorData(g.mirror, data)
-      void api.write(id, data)
-      // Reset menu on normal typing
-      if (g.menuOpen && data.length === 1 && data !== '\t') g.menuOpen = false
-      scheduleGhost(id)
-    })
-    // Right-click copy when selection exists
-    terminal.element?.addEventListener('contextmenu', (ev) => {
-      if (!terminal.hasSelection()) return
-      ev.preventDefault()
-      copyTerminalSelection(terminal)
-    })
-  }
-
-  async function mountPane(pane: 0 | 1): Promise<void> {
-    const id = paneIds[pane]
-    const host = hostForPane(pane)
-    if (!host) return
-    if (!id) {
-      host.replaceChildren()
-      host.style.opacity = '1'
-      return
-    }
-    const terminal = terminals.get(id)
+  async function mountActiveSurface(ptyId: string): Promise<void> {
+    if (!activeSurfaceHost) return
+    if (mountedSessionId === ptyId) return
+    unmountActiveSurface()
+    const terminal = surfaces.terminals.get(ptyId)
     if (!terminal) return
-    // Hide until first good fit — no wrapped-prompt flash
-    if (!readyHosts.has(host)) host.style.opacity = '0'
-    if (!terminal.element) terminal.open(host)
-    else if (host.firstElementChild !== terminal.element) host.replaceChildren(terminal.element)
-    await waitHostSize(pane)
-    // fonts.ready: wrong cell metrics → wrong cols → wrap blink
-    try {
-      await document.fonts?.ready
-    } catch {
-      /* ignore */
+    mountedSessionId = ptyId
+    activeSurfaceHost.style.opacity = '0'
+    if (!terminal.element) terminal.open(activeSurfaceHost)
+    else if (activeSurfaceHost.firstElementChild !== terminal.element) {
+      activeSurfaceHost.replaceChildren(terminal.element)
     }
+    await waitHostSize()
+    try { await document.fonts?.ready } catch { /* ignore */ }
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-    fitPane(pane, true)
-    // One more settle pass if layout still catching up
+    fitActiveSurface(true)
     await new Promise<void>((r) => requestAnimationFrame(() => r()))
-    fitPane(pane, true)
-    // Always reveal — blank forever worse than rare wrap
-    host.style.opacity = '1'
-    // Keep refitting until host size stops growing (catches webFrame/grid
-    // layouts that settle after our 2-RAF wait — leaves terminal cropped
-    // otherwise). Runs in the background, doesn't block mount.
-    refitUntilStable(pane)
-  }
-
-  async function activateTerminal(id: string, requestedPane: 0 | 1 = focusedPane): Promise<void> {
-    const visiblePane = paneIds.indexOf(id)
-    const pane = visiblePane >= 0 ? visiblePane as 0 | 1 : requestedPane
-    if (visiblePane < 0) {
-      paneIds[pane] = id
-      paneIds = [...paneIds]
-    }
-    activeId = id
-    focusedPane = pane
-    syncWorkspace()
-    await tick()
-    const terminal = terminals.get(id)
-    if (!terminal) return
-    await mountPane(pane)
+    fitActiveSurface(true)
+    activeSurfaceHost.style.opacity = '1'
     terminal.focus()
-    void refreshGhost(id)
+    refitUntilStable()
   }
 
-  async function connectSshByName(name: string): Promise<void> {
-    try {
-      const data = await listSsh()
-      const host = (data.hosts ?? []).find((h) => h.name === name)
-      if (!host) {
-        error = `SSH host not found: ${name}`
-        return
-      }
-      await launchSshHost(host)
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
+  function unmountActiveSurface(): void {
+    const host = activeSurfaceHost
+    const ptyId = mountedSessionId
+    if (!host) {
+      mountedSessionId = null
+      return
     }
+    if (ptyId) {
+      const terminal = surfaces.terminals.get(ptyId)
+      if (terminal?.element && host.contains(terminal.element)) {
+        host.replaceChildren()
+      }
+    }
+    mountedSessionId = null
   }
 
-  function onSshConnectEvent(e: Event): void {
-    const name = (e as CustomEvent<{ name?: string }>).detail?.name
-    if (name) void connectSshByName(name)
-  }
-
-  function measureHost(_pane: 0 | 1): { cols: number; rows: number } {
-    // Bootstrap conservatively; the first valid FitAddon measurement becomes
-    // authoritative before the host is revealed.
-    return { cols: 40, rows: 10 }
-  }
-
-  /** Wait until pane host has real layout (avoids tiny seed → jump-fit). */
-  async function waitHostSize(pane: 0 | 1, tries = 24): Promise<boolean> {
+  async function waitHostSize(tries = 24): Promise<boolean> {
     let lastW = 0
     let lastH = 0
     let stable = 0
     for (let i = 0; i < tries; i++) {
-      const host = hostForPane(pane)
-      if (hostReady(host)) {
-        // Need 2 consecutive equal measurements — layout mid-transition is the blink.
+      const host = activeSurfaceHost
+      if (surfaces.hostReady(host)) {
         if (host.clientWidth === lastW && host.clientHeight === lastH) {
           stable += 1
           if (stable >= 2) return true
@@ -603,208 +445,548 @@
       await tick()
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
     }
-    return hostReady(hostForPane(pane))
+    return surfaces.hostReady(activeSurfaceHost)
+  }
+  async function restoreTerminal(id: string, tabId: string): Promise<void> {
+    const existing = surfaces.terminals.get(id)
+    if (existing) return
+    if (!api) throw new Error('Terminal API not available')
+    bridge.restoringIds.add(id)
+    const terminal = surfaces.createSurface(id, 80, 24, getFontFamily(), EDITOR_FONT_SIZE)
+    bridge.resetSequence(id)
+    try {
+      const replay = await api.subscribe(id, 0)
+      if (replay.truncatedBeforeSequence !== undefined) {
+        terminal.write('\x1b[90m[earlier terminal output is no longer available]\x1b[0m\r\n')
+      }
+      for (const event of replay.events) applyHostEvent(event)
+      const pending = bridge.drainPending(id)
+      for (const event of pending) applyHostEvent(event)
+      store.applyTabPatch(tabId, {
+        cwd: replay.session.cwd,
+        shell: replay.session.shell,
+        exited: replay.session.status === 'exited',
+      })
+    } catch (err) {
+      surfaces.disposeSurface(id)
+      bridge.cleanupSession(id)
+      throw err
+    } finally {
+      bridge.restoringIds.delete(id)
+    }
   }
 
   async function addTerminal(
     cwd = app.activeProject?.path,
     projectId = currentProjectId,
-    pane: 0 | 1 = focusedPane,
-    opts?: { command?: string; args?: string[]; title?: string },
   ): Promise<void> {
-    if (!cwd) return
-    if (!projectId) return
-    // Don't spawn while Terminal stage is hidden — host is 0×0 → seed/fit thrash.
-    if (app.mode !== 'terminal' && !opts?.command) return
-    // Dedupe in-flight creates (shell / same vendor title)
-    const createKey = `${projectId}:${opts?.command ?? 'shell'}:${opts?.title ?? ''}`
-    if (creatingFor.has(createKey)) return
-    creatingFor.add(createKey)
-    const workspace = workspaceFor(projectId)
-    const targetPane: 0 | 1 = pane === 1 || paneIds[1] ? pane : 0
-    error = ''
+    if (!cwd || !projectId || !api) return
+    if (app.mode !== 'terminal') return
+    const createKey = `${projectId}:shell`
+    if (bridge.creatingFor.has(createKey)) return
+    bridge.creatingFor.add(createKey)
+    store.error = ''
     try {
-      await waitHostSize(targetPane)
-      try {
-        await document.fonts?.ready
-      } catch {
-        /* ignore */
-      }
-      const seed = measureHost(targetPane)
-      const created = await api.create(
-        cwd,
-        seed.cols,
-        seed.rows,
-        opts?.command ? { command: opts.command, args: opts.args ?? [] } : undefined,
-      )
-      if (destroyed) {
-        await api.kill(created.id)
-        return
-      }
-      const terminal = new Terminal({
-        cols: seed.cols,
-        rows: seed.rows,
-        cursorBlink: true,
-        cursorStyle: 'bar',
-        fontFamily: fontStack(app.ui.fontFamily),
-        fontSize: EDITOR_FONT_SIZE,
-        lineHeight: 1.25,
-        scrollback: 5_000,
-        // Disable bold → bright swap thrash some TUIs re-render on.
-        drawBoldTextInBrightColors: false,
-        theme: { ...xtermTheme },
+      await waitHostSize()
+      try { await document.fonts?.ready } catch { /* ignore */ }
+      const seed = surfaces.measureHost()
+      const created = await api.create(cwd, seed.cols, seed.rows, {
+        projectId,
+        purpose: 'terminal',
       })
-      const fit = new FitAddon()
-      terminal.loadAddon(fit)
-      wireGhost(created.id, terminal)
-      terminals.set(created.id, terminal)
-      fitAddons.set(created.id, fit)
-      terminalSizes.set(created.id, { cols: seed.cols, rows: seed.rows })
-      const buffered = pendingData.get(created.id)
-      if (buffered) {
-        terminal.write(buffered)
-        pendingData.delete(created.id)
-      }
-      const title =
-        opts?.title ??
-        (opts?.command ? opts.command : `Terminal ${workspace.nextTitle++}`)
-      workspace.tabs = [...workspace.tabs, { id: created.id, title, exited: false }]
-      workspace.paneTabs[targetPane] = [...workspace.paneTabs[targetPane], created.id]
-      if (currentProjectId === projectId) {
-        tabs = workspace.tabs
-        paneTabs = [ [...workspace.paneTabs[0]], [...workspace.paneTabs[1]] ]
-        activeId = created.id
-        workspace.activeId = created.id
-        await activateTerminal(created.id, targetPane)
-      }
+      store.seedTabForNewPty(created.id, created.cwd, created.shell)
+      bridge.tabByPtyId.set(created.id, created.id)
+      surfaces.createSurface(created.id, seed.cols, seed.rows, getFontFamily(), EDITOR_FONT_SIZE)
+      bridge.resetSequence(created.id)
+      const pending = bridge.drainPending(created.id)
+      for (const event of pending) applyHostEvent(event)
+      store.activeId = created.id
+      await activateTab(created.id)
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
+      store.error = err instanceof Error ? err.message : String(err)
     } finally {
-      creatingFor.delete(createKey)
+      bridge.creatingFor.delete(createKey)
     }
+  }
+
+  async function activateTab(tabId: string): Promise<void> {
+    if (!store.tabs.some((tab) => tab.id === tabId)) return
+    store.activeId = tabId
+    await tick()
+    const tab = store.findTab(tabId)
+    if (!tab) return
+    if (tab.runningCommandId && surfaces.terminals.has(tabId)) {
+      await mountActiveSurface(tabId)
+    } else {
+      unmountActiveSurface()
+    }
+    void scrollToBottom(false)
+  }
+
+  async function restartActiveShell(): Promise<void> {
+    const tab = activeTab()
+    if (!tab || !api) return
+    store.error = ''
+    const oldPtyId = tab.id
+    const cwd = tab.cwd || app.activeProject?.path
+    const projectId = currentProjectId
+    if (!cwd || !projectId) {
+      store.error = 'Cannot restart shell \u2013 no working directory.'
+      return
+    }
+    unmountActiveSurface()
+    surfaces.disposeSurface(oldPtyId)
+    bridge.cleanupSession(oldPtyId)
+    cancelStaleTimer(oldPtyId)
+    cancelIdleFinalize(oldPtyId)
+    try {
+      await api.kill(oldPtyId).catch(() => {})
+    } catch { /* already gone */ }
+    const savedBlocks = [...tab.blocks]
+    const savedHistory = [...tab.history]
+    const savedComposer = tab.composer
+    store.removeTab(oldPtyId)
+    try {
+      await waitHostSize()
+      try { await document.fonts?.ready } catch { /* ignore */ }
+      const seed = surfaces.measureHost()
+      const created = await api.create(cwd, seed.cols, seed.rows, {
+        projectId,
+        purpose: 'terminal',
+      })
+      const newTab = store.seedTabForNewPty(created.id, created.cwd, created.shell)
+      bridge.tabByPtyId.set(created.id, created.id)
+      store.applyTabPatch(newTab.id, {
+        blocks: savedBlocks,
+        history: savedHistory,
+        composer: savedComposer,
+      })
+      surfaces.createSurface(created.id, seed.cols, seed.rows, getFontFamily(), EDITOR_FONT_SIZE)
+      bridge.resetSequence(created.id)
+      const pending = bridge.drainPending(created.id)
+      for (const event of pending) applyHostEvent(event)
+      store.activeId = created.id
+      await activateTab(created.id)
+    } catch (err) {
+      store.error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function closeTab(tabId: string): Promise<void> {
+    if (!api) return
+    const tab = store.findTab(tabId)
+    if (!tab) return
+    if (mountedSessionId === tabId) unmountActiveSurface()
+    surfaces.disposeSurface(tabId)
+    bridge.cleanupSession(tabId)
+    cancelStaleTimer(tabId)
+    cancelIdleFinalize(tabId)
+    store.removeTab(tabId)
+    try { await api.kill(tabId) } catch { /* already gone */ }
+    if (store.activeId === tabId || !store.tabs.some((t) => t.id === store.activeId)) {
+      store.activeId = store.tabs[0]?.id ?? null
+      if (store.activeId) await activateTab(store.activeId)
+    }
+  }
+  async function connectSshByName(name: string): Promise<void> {
+    if (!api) return
+    try {
+      const { hosts } = await listSsh()
+      const match = hosts.find((h: SshHostInfo) => h.name.toLowerCase() === name.toLowerCase() || h.host.toLowerCase() === name.toLowerCase())
+      if (match) await launchSshHost(match)
+      else store.error = `SSH host "${name}" not found`
+    } catch (err) {
+      store.error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  function onSshConnectEvent(e: Event): void {
+    const detail = (e as CustomEvent<{ name?: string; host?: string }>).detail
+    const target = detail?.name || detail?.host
+    if (target) void connectSshByName(target)
   }
 
   async function launchSshHost(host: SshHostInfo): Promise<void> {
-    error = ''
+    if (!api || !app.activeProject) return
+    store.error = ''
+    const createKey = `ssh:${host.host}`
+    if (bridge.creatingFor.has(createKey)) return
+    bridge.creatingFor.add(createKey)
     try {
-      const plan = (await window.enpiistudio.enpii.request('ssh.plan', { host: host.name })) as {
-        command: string
-        args: string[]
-      }
-      await addTerminal(app.activeProject?.path, currentProjectId, focusedPane, {
-        command: plan.command,
-        args: plan.args,
-        title: `ssh:${host.name}`,
+      const cwd = app.activeProject.path
+      const seed = surfaces.measureHost()
+      const created = await api.create(cwd, seed.cols, seed.rows, {
+        projectId: currentProjectId ?? undefined,
+        purpose: 'terminal',
       })
+      const newTab = store.seedTabForNewPty(created.id, created.cwd, created.shell)
+      bridge.tabByPtyId.set(created.id, created.id)
+      store.applyTabPatch(created.id, { title: `ssh:${host.host}` })
+      surfaces.createSurface(created.id, seed.cols, seed.rows, getFontFamily(), EDITOR_FONT_SIZE)
+      bridge.resetSequence(created.id)
+      store.activeId = created.id
+      await activateTab(created.id)
+
+      const sshArgs: string[] = []
+      if (host.user) sshArgs.push(`-l ${host.user}`)
+      if (host.port && host.port !== 22) sshArgs.push(`-p ${host.port}`)
+      if (host.identityFile) sshArgs.push(`-i "${host.identityFile}"`)
+      sshArgs.push(host.hostname || host.host)
+
+      const sshCmd = `ssh ${sshArgs.join(' ')}`
+
+      const block: CommandBlock = {
+        id: uid(),
+        sessionId: created.id,
+        command: sshCmd,
+        cwd: created.cwd,
+        shell: created.shell,
+        state: 'running',
+        startedAt: Date.now(),
+        output: '',
+        isLiveSurface: true,
+      }
+
+      store.applyTabPatch(created.id, {
+        blocks: [block],
+        runningCommandId: block.id,
+      })
+      bridge.blockByPtyId.set(created.id, block.id)
+
+      await new Promise<void>((r) => setTimeout(r, 150))
+      const term = surfaces.terminals.get(created.id)
+      if (term) { term.reset(); term.clear(); }
+      await api.write(created.id, `${sshCmd}\r\n`)
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
+      store.error = err instanceof Error ? err.message : String(err)
+    } finally {
+      bridge.creatingFor.delete(createKey)
     }
   }
 
-  async function closeTerminal(id: string): Promise<void> {
-    const index = tabs.findIndex((tab) => tab.id === id)
-    const wasVisible = paneIds.includes(id)
-    const timer = resizeTimers.get(id)
-    if (timer) clearTimeout(timer)
-    resizeTimers.delete(id)
-    await api.kill(id)
-    terminals.get(id)?.dispose()
-    terminals.delete(id)
-    fitAddons.delete(id)
-    terminalSizes.delete(id)
-    pendingData.delete(id)
-    nudgedForFontKey.delete(id)
-    clearGhost(id, false)
-    ghosts.delete(id)
-    tabs = tabs.filter((tab) => tab.id !== id)
-    paneTabs = [paneTabs[0].filter((tabId) => tabId !== id), paneTabs[1].filter((tabId) => tabId !== id)]
-    paneIds = paneIds.map((paneId) => paneId === id ? null : paneId) as PaneIds
-    if (wasVisible && paneIds[1]) paneIds = [paneIds[1], null]
-    normalizePaneState((tabs[index] ?? tabs[index - 1] ?? tabs[0])?.id)
-    syncWorkspace()
-    await tick()
-    await mountPane(0)
-    await mountPane(1)
-  }
-
-  async function splitTerminal(): Promise<void> {
-    if (paneIds[1]) {
-      await activateTerminal(paneIds[1], 1)
-      return
-    }
-    if (!paneIds[0]) await addTerminal(app.activeProject?.path, currentProjectId, 0)
-    if (!paneIds[1]) await addTerminal(app.activeProject?.path, currentProjectId, 1)
-  }
-
-  async function focusPane(pane: 0 | 1): Promise<void> {
-    const id = paneIds[pane]
-    if (id) await activateTerminal(id, pane)
-  }
-
-  function startRename(tab: TerminalTab): void {
-    editingId = tab.id
-    editingTitle = tab.title
-    void tick().then(() => {
-      renameInput?.focus()
-      renameInput?.select()
+  function pushTabHistory(tab: TerminalTab, text: string): void {
+    const current = tab.history.length > 0 ? tab.history : loadHistory()
+    const updated = pushHistory(current, text)
+    store.applyTabPatch(tab.id, {
+      history: updated,
+      historyIndex: -1,
+      historyDraft: '',
     })
   }
 
-  function finishRename(save: boolean): void {
-    const tab = tabs.find((item) => item.id === editingId)
-    const title = editingTitle.trim()
-    if (save && tab && title) tab.title = title
-    editingId = null
-    syncWorkspace()
+  function applyComposerText(tabId: string, text: string, el: HTMLTextAreaElement | undefined): void {
+    store.applyTabPatch(tabId, { composer: text })
+    if (el) {
+      el.value = text
+      const pos = text.length
+      el.setSelectionRange(pos, pos)
+      void tick().then(() => el.focus())
+    }
   }
 
-  async function switchProject(projectId: string, cwd: string): Promise<void> {
-    syncWorkspace()
-    currentProjectId = projectId
-    const workspace = workspaceFor(projectId)
-    tabs = workspace.tabs
-    activeId = workspace.activeId
-    paneIds = [...workspace.paneIds]
-    paneTabs = [ [...workspace.paneTabs[0]], [...workspace.paneTabs[1]] ]
-    focusedPane = workspace.focusedPane
-    normalizePaneState()
-    readyHosts.clear()
-    if (primaryHost) primaryHost.style.opacity = '0'
-    if (secondaryHost) secondaryHost.style.opacity = '0'
-    primaryHost?.replaceChildren()
-    secondaryHost?.replaceChildren()
-    await tick()
-    if (destroyed || currentProjectId !== projectId) return
-    // Only mount/create when Terminal mode is visible — else host is display:none.
-    if (app.mode !== 'terminal') return
-    if (paneIds[0] && terminals.has(paneIds[0])) {
-      await mountPane(0)
-      await mountPane(1)
-      if (activeId) await activateTerminal(activeId, focusedPane)
-    } else if (tabs.length === 0) {
-      await addTerminal(cwd, projectId)
+  function historyOlder(tab: TerminalTab): void {
+    const list = tab.history.length > 0 ? tab.history : loadHistory()
+    if (list.length === 0) return
+    if (tab.history.length !== list.length) {
+      store.applyTabPatch(tab.id, { history: list })
     }
+    if (tab.historyIndex < 0) {
+      store.applyTabPatch(tab.id, { historyDraft: tab.composer, historyIndex: list.length - 1 })
+      applyComposerText(tab.id, list[list.length - 1] ?? '', composerEl)
+    } else if (tab.historyIndex > 0) {
+      store.applyTabPatch(tab.id, { historyIndex: tab.historyIndex - 1 })
+      applyComposerText(tab.id, list[tab.historyIndex - 1] ?? '', composerEl)
+    }
+  }
+
+  function historyNewer(tab: TerminalTab): void {
+    if (tab.historyIndex < 0) return
+    const list = tab.history.length > 0 ? tab.history : loadHistory()
+    if (tab.historyIndex < list.length - 1) {
+      store.applyTabPatch(tab.id, { historyIndex: tab.historyIndex + 1 })
+      applyComposerText(tab.id, list[tab.historyIndex + 1] ?? '', composerEl)
+      return
+    }
+    store.applyTabPatch(tab.id, { historyIndex: -1 })
+    applyComposerText(tab.id, tab.historyDraft, composerEl)
+  }
+  async function runComposer(): Promise<void> {
+    const tab = activeTab()
+    if (!tab) return
+    if (tab.runningCommandId) return
+    const liveText = (composerEl?.value ?? '').replace(/\r\n/g, '\n').trimEnd()
+    const text = liveText || tab.composer.replace(/\r\n/g, '\n').trimEnd()
+    if (!text) return
+
+    pushTabHistory(tab, text)
+
+    const block: CommandBlock = {
+      id: uid(),
+      sessionId: tab.id,
+      command: text,
+      cwd: tab.cwd,
+      shell: tab.shell,
+      state: 'running',
+      startedAt: Date.now(),
+      output: '',
+      isLiveSurface: true,
+      isStreamFollow: detectStreamFollow(text),
+    }
+    store.applyTabPatch(tab.id, {
+      blocks: [...tab.blocks, block],
+      runningCommandId: block.id,
+      composer: '',
+    })
+    if (composerEl) composerEl.value = ''
+    bridge.blockByPtyId.set(tab.id, block.id)
+    bridge.liveOutputByPtyId.delete(tab.id)
+    const term = surfaces.terminals.get(tab.id); if (term) { term.reset(); term.clear(); term.write('\x1b[2J\x1b[3J\x1b[H'); }
+    bridge.lastPtyDataAt.set(tab.id, Date.now())
+    startStaleTimer(tab.id, block.id)
+    armIdleFinalize(tab.id, block.id)
+    if (store.activeId === tab.id) {
+      await tick()
+      void mountActiveSurface(tab.id)
+      void scrollToBottom(true)
+    }
+
+    if (!api) {
+      const startedAt = Date.now()
+      setTimeout(() => {
+        const current = activeTab()
+        if (!current) return
+        const existing = current.blocks.find((b) => b.id === block.id)
+        if (!existing || existing.state !== 'running') return
+        const mockOutput = text === 'docker compose ps'
+          ? 'NAME                IMAGE             COMMAND                  SERVICE   CREATED       STATUS\nnew_sidbm-app-1      new_sidbm-app      "sidbm-entrypoint \u2026"    app       46 hours ago  Up 21 hours\nnew_sidbm-mysql-1    mysql:8.4          "docker-entrypoint\u2026"    mysql     7 days ago    Up 47 hours\n'
+          : `[preview] Command "${text}" finished (no backend).\n`
+        store.applyBlockUpdate(current.id, block.id, {
+          state: 'success',
+          exitCode: 0,
+          finishedAt: Date.now(),
+          durationMs: Date.now() - startedAt,
+          isLiveSurface: false,
+          output: mockOutput,
+        })
+        store.applyTabPatch(current.id, { runningCommandId: null })
+        cancelStaleTimer(current.id)
+        cancelIdleFinalize(current.id)
+        bridge.blockByPtyId.delete(tab.id)
+        if (mountedSessionId === current.id) unmountActiveSurface()
+        void scrollToBottom(true)
+      }, 450)
+      return
+    }
+
+    if (tab.exited) {
+      store.error = 'This shell session has exited \u2013 click + to start a new terminal.'
+      store.applyBlockUpdate(tab.id, block.id, {
+        state: 'failed',
+        exitCode: 1,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - block.startedAt,
+        isLiveSurface: false,
+      })
+      store.applyTabPatch(tab.id, { runningCommandId: null })
+      cancelStaleTimer(tab.id)
+      cancelIdleFinalize(tab.id)
+      bridge.blockByPtyId.delete(tab.id)
+      return
+    }
+
+    const payload = text.endsWith('\n') ? text.replace(/\r?\n/g, '\r\n') : `${text}\r\n`
+    try {
+      await api.write(tab.id, payload)
+    } catch (err) {
+      store.error = err instanceof Error ? err.message : String(err)
+      store.applyBlockUpdate(tab.id, block.id, {
+        state: 'failed',
+        exitCode: 1,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - block.startedAt,
+        isLiveSurface: false,
+      })
+      store.applyTabPatch(tab.id, { runningCommandId: null })
+      cancelStaleTimer(tab.id)
+      cancelIdleFinalize(tab.id)
+      bridge.blockByPtyId.delete(tab.id)
+    }
+  }
+  async function stopRunning(): Promise<void> {
+    const tab = activeTab()
+    if (!tab || !api) return
+    if (!tab.runningCommandId) return
+    const blockId = tab.runningCommandId
+    const runningBlock = tab.blocks.find((b) => b.id === blockId)
+    const wasStreamFollow = Boolean(runningBlock?.isStreamFollow)
+    const sendInterrupt = (key: string): void => {
+      void api.write(tab.id, key).catch((err: unknown) => {
+        store.error = err instanceof Error ? err.message : String(err)
+      })
+    }
+    sendInterrupt('\x03')
+    setTimeout(() => {
+      const current = activeTab()
+      if (!current || current.id !== tab.id) return
+      if (!current.runningCommandId) return
+      sendInterrupt('\x03')
+    }, 1500)
+    setTimeout(() => {
+      const current = activeTab()
+      if (!current || current.id !== tab.id) return
+      const block = current.blocks.find((b) => b.id === blockId)
+      if (!block || block.state !== 'running') return
+      const tail = '\r\n\x1b[90m[interrupted by user]\x1b[0m\r\n'
+      if (wasStreamFollow) {
+        store.applyBlockUpdate(current.id, blockId, {
+          state: 'failed',
+          exitCode: 130,
+          finishedAt: Date.now(),
+          durationMs: Date.now() - block.startedAt,
+          isLiveSurface: false,
+          output: (block.output ?? '') + tail,
+        })
+        store.applyTabPatch(current.id, { runningCommandId: null })
+        cancelStaleTimer(current.id)
+        cancelIdleFinalize(current.id)
+        bridge.blockByPtyId.delete(current.id)
+        if (mountedSessionId === current.id) unmountActiveSurface()
+        void scrollToBottom(true)
+        void restartActiveShell()
+        return
+      }
+      store.applyBlockUpdate(current.id, blockId, {
+        state: 'failed',
+        exitCode: 130,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - block.startedAt,
+        isLiveSurface: false,
+        output: (block.output ?? '') + tail,
+      })
+      store.applyTabPatch(current.id, { runningCommandId: null })
+      cancelStaleTimer(current.id)
+      cancelIdleFinalize(current.id)
+      bridge.blockByPtyId.delete(current.id)
+      if (mountedSessionId === current.id) unmountActiveSurface()
+      void scrollToBottom(true)
+    }, 4000)
+  }
+
+    async function sendProcessInput(): Promise<void> {
+    const tab = activeTab()
+    if (!tab || !api || !tab.runningCommandId) return
+    const text = (composerEl?.value ?? tab.composer).replace(/\r\n/g, '\n')
+    const payload = text ? `${text}\r\n` : '\r\n'
+    store.applyTabPatch(tab.id, { composer: '' })
+    if (composerEl) composerEl.value = ''
+    try {
+      await api.write(tab.id, payload)
+    } catch (err) {
+      store.error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  function onComposerKeydown(event: KeyboardEvent): void {
+    const tab = activeTab()
+    if (!tab) return
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      if (tab.runningCommandId) {
+        void sendProcessInput()
+      } else {
+        void runComposer()
+      }
+      return
+    }
+    if (event.key === 'c' && event.ctrlKey && tab.runningCommandId) {
+      event.preventDefault()
+      void stopRunning()
+      return
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      const el = composerEl
+      if (!el) return
+      const pos = el.selectionStart ?? 0
+      if (canBrowseHistory(tab.composer, pos, tab.historyIndex, event.key)) {
+        event.preventDefault()
+        if (event.key === 'ArrowUp') historyOlder(tab)
+        else historyNewer(tab)
+      }
+    }
+  }
+
+  function onComposerInput(): void {
+    const el = composerEl
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
+  function onStageScroll(): void {
+    const el = stageEl
+    if (!el) return
+    const tolerance = 32
+    stickBottom = el.scrollHeight - el.scrollTop - el.clientHeight < tolerance
+  }
+
+  async function scrollToBottom(force = false): Promise<void> {
+    if (!stickBottom && !force) return
+    await tick()
+    const el = stageEl
+    if (el) el.scrollTop = el.scrollHeight
+  }
+
+  function jumpToBottom(): void {
+    stickBottom = true
+    void scrollToBottom(true)
+  }
+  async function switchProject(projectId: string, cwd: string): Promise<void> {
+    if (!api) return
+    currentProjectId = projectId
+    store.error = ''
+    unmountActiveSurface()
+    const existing = [...store.tabs]
+    store.tabs = []
+    store.activeId = null
+    for (const tab of existing) {
+      await api.kill(tab.id).catch(() => {})
+      surfaces.disposeSurface(tab.id)
+      bridge.cleanupSession(tab.id)
+      cancelStaleTimer(tab.id)
+      cancelIdleFinalize(tab.id)
+    }
+    let liveSessions: Awaited<ReturnType<typeof api.list>> = []
+    try {
+      liveSessions = await api.list(projectId, 'terminal')
+    } catch {
+      liveSessions = []
+    }
+    for (const session of liveSessions) {
+      store.seedTabForNewPty(session.id, session.cwd, session.shell)
+      bridge.tabByPtyId.set(session.id, session.id)
+      try {
+        await restoreTerminal(session.id, session.id)
+      } catch {
+        store.removeTab(session.id)
+        bridge.tabByPtyId.delete(session.id)
+      }
+    }
+    if (store.tabs.length === 0) {
+      await addTerminal(cwd, projectId)
+      return
+    }
+    store.activeId = store.tabs[0]!.id
+    await activateTab(store.activeId)
   }
 
   async function onTerminalVisible(): Promise<void> {
     if (destroyed || app.mode !== 'terminal') return
-    const projectId = currentProjectId ?? app.activeProjectId
-    const cwd = app.activeProject?.path
-    if (!projectId || !cwd) return
     await tick()
-    await waitHostSize(0)
+    await waitHostSize()
     if (destroyed || app.mode !== 'terminal') return
-    if (paneIds[0] && terminals.has(paneIds[0])) {
-      await mountPane(0)
-      await mountPane(1)
-      if (activeId) terminals.get(activeId)?.focus()
-    } else if (tabs.length === 0) {
-      await addTerminal(cwd, projectId)
-    } else if (paneIds[0] && !terminals.has(paneIds[0])) {
-      // Workspace restored but PTY gone (reload) — fresh shell
-      await addTerminal(cwd, projectId)
-    } else {
-      fitVisible(true)
+    if (store.activeId) await activateTab(store.activeId)
+    else if (store.tabs.length === 0 && app.activeProject && currentProjectId) {
+      await addTerminal(app.activeProject.path, currentProjectId)
     }
   }
 
@@ -815,367 +997,372 @@
     untrack(() => void switchProject(projectId, cwd))
   })
 
-  // Entering Terminal mode: host unhides → wait stable size → mount/fit once.
   $effect(() => {
-    const mode = app.mode
-    if (mode !== 'terminal') {
-      // Leave: drop ready flag so next enter re-hides until fit
-      readyHosts.clear()
+    if (app.mode !== 'terminal') {
+      unmountActiveSurface()
       return
     }
     untrack(() => void onTerminalVisible())
   })
 
-  // Live mono family + re-fit after UI zoom (CSS zoom changes host px box).
   $effect(() => {
-    const family = fontStack(app.ui.fontFamily)
+    const family = getFontFamily()
     void app.ui.uiZoom
-    for (const terminal of terminals.values()) {
+    for (const terminal of surfaces.terminals.values()) {
       terminal.options.fontFamily = family
       terminal.options.fontSize = EDITOR_FONT_SIZE
-      // Force renderer to re-measure cell metrics — without this, FitAddon
-      // reads stale css.cell.width/height from before the font swap and
-      // computes wrong cols (terminal stays "cropped" until the next paint).
       try {
         terminal.refresh(0, Math.max(0, terminal.rows - 1))
-      } catch {
-        /* not yet mounted */
-      }
+      } catch { /* not yet mounted */ }
     }
-    // Defer one frame: webFrame.setZoomFactor reflows asynchronously, so an
-    // immediate fit would measure the pre-zoom box and crop the terminal.
-    untrack(() => {
-      requestAnimationFrame(() => {
-        refitUntilStable(0)
-        refitUntilStable(1)
+    if (mountedSessionId) {
+      untrack(() => {
+        requestAnimationFrame(() => refitUntilStable())
       })
+    }
+  })
+
+  $effect(() => {
+    const tabId = store.activeId
+    if (!tabId) return
+    if (!store.tabs.some((t) => t.id === tabId)) return
+    untrack(() => void activateTab(tabId))
+    void tick().then(() => {
+      composerEl?.focus({ preventScroll: true })
     })
+  })
+
+  $effect(() => {
+    const tab = activeTab()
+    if (!tab) return
+    void tab.blocks.length
+    if (mountedSessionId) return
+    void scrollToBottom(false)
+  })
+
+  $effect(() => {
+    const host = activeSurfaceHost
+    const obs = resizeObserver
+    if (!host || !obs) return
+    obs.observe(host)
+    return () => obs.unobserve(host)
   })
 
   onMount(() => {
-    // Warm PATH cache once (non-blocking).
+    if (!api) return
     void api.pathComplete?.('').catch(() => {})
-    const offData = api.onData(({ id, data }) => {
-      const terminal = terminals.get(id)
-      const g = ghosts.get(id)
-      if (g) notePtyOutput(g.mirror, data)
-      if (terminal) {
-        terminal.write(data)
-        // Reposition ghost after paint
-        requestAnimationFrame(() => {
-          if (g?.suffix || g?.menuOpen) {
-            positionGhost(id)
-            if (activeId === id || paneIds[focusedPane] === id) syncGhostUi(id)
-          }
-        })
-      } else pendingData.set(id, `${pendingData.get(id) ?? ''}${data}`)
-    })
-    const offExit = api.onExit(({ id, exitCode }) => {
-      for (const workspace of workspaces.values()) {
-        const tab = workspace.tabs.find((item) => item.id === id)
-        if (tab) tab.exited = true
+    const tickHandle = setInterval(() => {
+      nowTick = Date.now()
+    }, 500)
+    const offData = api.onData((event) => {
+      if (event.purpose !== 'terminal') return
+      const hostEvent: TerminalHostEvent = { type: 'data', ...event } as any
+      if (bridge.restoringIds.has(event.id) || !surfaces.terminals.has(event.id)) {
+        bridge.queueHostEvent(hostEvent)
+        return
       }
-      clearGhost(id, false)
-      ghosts.delete(id)
-      terminals.get(id)?.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)
+      applyHostEvent(hostEvent)
+    })
+    const offExit = api.onExit((event) => {
+      if (event.purpose !== 'terminal') return
+      const hostEvent: TerminalHostEvent = { type: 'exit', ...event } as any
+      if (bridge.restoringIds.has(event.id) || !surfaces.terminals.has(event.id)) {
+        bridge.queueHostEvent(hostEvent)
+        return
+      }
+      applyHostEvent(hostEvent)
+    })
+    const offShellMarker = api.onShellMarker((event) => {
+      if (event.purpose !== 'terminal') return
+      const hostEvent: TerminalHostEvent = { type: 'shell_marker', ...event } as any
+      if (bridge.restoringIds.has(event.id) || !surfaces.terminals.has(event.id)) {
+        bridge.queueHostEvent(hostEvent)
+        return
+      }
+      applyHostEvent(hostEvent)
     })
     window.addEventListener('enpiistudio:terminal-ssh', onSshConnectEvent)
-    // Re-fit once webFrame finishes its reflow (terminal cells stay cropped
-    // until the host box is at its post-zoom dimensions).
-    const onZoomApplied = () => {
-      if (app.mode !== 'terminal') return
-      refitUntilStable(0)
-      refitUntilStable(1)
-    }
-    window.addEventListener('enpiistudio:zoom-applied', onZoomApplied)
-    resizeObserver = new ResizeObserver(() => {
-      // ResizeObserver fires during layout pass — the host may still grow.
-      // Use the stable loop instead of the 100ms debounce so we catch the
-      // final settled size even on a slow webFrame cascade.
-      refitUntilStable(0)
-      refitUntilStable(1)
-    })
+    resizeObserver = new ResizeObserver(() => refitUntilStable())
     return () => {
       offData()
       offExit()
+      offShellMarker()
       window.removeEventListener('enpiistudio:terminal-ssh', onSshConnectEvent)
-      window.removeEventListener('enpiistudio:zoom-applied', onZoomApplied)
       resizeObserver?.disconnect()
-    }
-  })
-
-  // Re-bind observer when hosts mount (bind:this is late vs onMount)
-  $effect(() => {
-    const a = primaryHost
-    const b = secondaryHost
-    const obs = resizeObserver
-    if (!obs) return
-    if (a) obs.observe(a)
-    if (b) obs.observe(b)
-    return () => {
-      if (a) obs.unobserve(a)
-      if (b) obs.unobserve(b)
+      clearInterval(tickHandle)
     }
   })
 
   onDestroy(() => {
     destroyed = true
-    for (const t of resizeTimers.values()) clearTimeout(t)
-    resizeTimers.clear()
-    for (const g of ghosts.values()) if (g.timer) clearTimeout(g.timer)
-    ghosts.clear()
-    for (const id of terminals.keys()) void api.kill(id)
-    for (const terminal of terminals.values()) terminal.dispose()
-    terminals.clear()
-    nudgedForFontKey.clear()
-    workspaces.clear()
+    for (const timer of staleRunTimers.values()) clearTimeout(timer)
+    staleRunTimers.clear()
+    for (const timer of idleFinalizeTimers.values()) clearTimeout(timer)
+    idleFinalizeTimers.clear()
+    surfaces.destroy()
+    bridge.destroy()
+    store.clear()
+    mountedSessionId = null
   })
 </script>
 
 
-<div class="relative flex h-full min-h-0 flex-col p-0">
-  <div class="absolute right-0 top-0 z-[6] flex items-center justify-end gap-2 px-2 pt-1.5">
+<div
+  class="grid h-full min-h-0 grid-rows-[36px_minmax(0,1fr)_auto] bg-transparent"
+  role="region"
+  aria-label="Terminal stage"
+>
+  <!-- Top Header / Tab bar -->
+  <header
+    class="relative z-30 flex h-9 shrink-0 items-center gap-0 overflow-x-auto border-b border-white/5 bg-transparent px-2.5"
+    role="tablist"
+    aria-label="Terminal sessions"
+  >
+    {#each tabs as tab (tab.id)}
+      {@const isActive = tab.id === activeId}
+      <div
+        class="flex h-7 items-center gap-1 rounded-md border px-2 transition-colors {isActive
+          ? 'border-border-subtle bg-black/35 text-white'
+          : 'border-transparent text-studio-text-dim hover:text-white'}"
+      >
+        <button
+          type="button"
+          class="flex items-center gap-1.5 font-mono text-xs"
+          role="tab"
+          aria-selected={isActive}
+          title={tab.cwd || tab.title}
+          onclick={() => {
+            store.activeId = tab.id
+            void activateTab(tab.id)
+          }}
+        >
+          <span class="size-1.5 rounded-lg {tab.exited ? 'bg-studio-text-dim' : tab.runningCommandId ? 'bg-studio-gold animate-pulse' : 'bg-studio-success'}"></span>
+          {tab.title}
+        </button>
+        <button
+          type="button"
+          class="grid size-5 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-error"
+          aria-label={`Close ${tab.title}`}
+          title={`Close ${tab.title}`}
+          onclick={(e) => {
+            e.stopPropagation()
+            void closeTab(tab.id)
+          }}
+        ><Icon name="close" size={11} /></button>
+      </div>
+    {/each}
     <button
       type="button"
-      class="grid size-7 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
-      aria-label="Split terminal"
-      title="Split terminal"
-      onclick={() => void splitTerminal()}><Icon name="diff" size={14} /></button
-    >
-  </div>
-  <section
-    class="relative min-h-0 flex-1 overflow-hidden {paneIds[1]
-      ? 'grid grid-cols-2'
-      : 'grid grid-cols-1'}"
-  >
-    {#if error}
-      <div class="absolute inset-x-0 top-10 z-10 p-3.5 font-mono text-[11px] text-studio-error">{error}</div>
+      class="ml-1 grid size-7 shrink-0 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-white"
+      aria-label="New terminal"
+      title="New terminal"
+      onclick={() => void addTerminal(app.activeProject?.path, currentProjectId)}
+    ><Icon name="plus" size={14} /></button>
+    {#if activeTab()?.exited}
+      <button
+        type="button"
+        class="ml-1 grid h-7 shrink-0 place-items-center rounded-md border border-studio-error/40 bg-studio-error/10 px-2 text-[10px] font-semibold text-studio-error hover:bg-studio-error/20"
+        aria-label="Restart shell in this tab"
+        title="Shell process exited ? click to spawn a fresh shell with the same working directory."
+        onclick={() => void restartActiveShell()}
+      >Restart shell</button>
     {/if}
-    <div
-      class="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] overflow-hidden {focusedPane === 0
-        ? 'ring-1 ring-inset ring-studio-purple/40'
-        : ''}"
-      onfocusin={() => void focusPane(0)}
-    >
-      <div
-        class="flex h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
-        role="tablist"
-        aria-label="Primary terminal pane"
-      >
-        {#each paneTabs[0] as id (id)}
-          {@const tab = tabs.find((item) => item.id === id)}
-          {#if tab}
-            <div
-              class="flex h-full items-center border-r border-white/5 {tab.id === activeId
-                ? 'border-b-2 border-b-studio-purple bg-studio-purple/20'
-                : 'border-b-2 border-b-transparent'}"
-            >
-              {#if editingId === tab.id}
-                <input
-                  class="mx-1 rounded border border-studio-purple/75 bg-black/38 px-1.5 py-0.5 font-mono text-[10px] text-studio-text outline-none"
-                  bind:this={renameInput}
-                  bind:value={editingTitle}
-                  aria-label="Terminal name"
-                  onblur={() => finishRename(true)}
-                  onkeydown={(event) => {
-                    if (event.key === 'Enter') finishRename(true)
-                    if (event.key === 'Escape') finishRename(false)
-                  }}
-                />
-              {:else}
-                <button
-                  type="button"
-                  class="flex items-center gap-1.5 px-1.5 pl-2.5 font-mono text-[10px] {tab.id === activeId
-                    ? 'text-studio-text'
-                    : 'text-studio-text-dim hover:text-studio-text'}"
-                  role="tab"
-                  aria-selected={tab.id === activeId}
-                  onclick={() => void activateTerminal(tab.id, 0)}
-                  ondblclick={() => startRename(tab)}
-                >
-                  <span
-                    class="size-1.5 rounded-lg {tab.exited ? 'bg-studio-text-dim' : 'bg-studio-success'}"
-                  ></span>
-                  {tab.title}
-                </button>
-              {/if}
-              <button
-                type="button"
-                class="mx-1 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
-                aria-label={`Close ${tab.title}`}
-                onclick={() => void closeTerminal(tab.id)}><Icon name="close" size={12} /></button
-              >
-            </div>
-          {/if}
-        {/each}
-        <button
-          type="button"
-          class="ml-1.5 grid size-7 shrink-0 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
-          aria-label="New terminal"
-          title="New terminal"
-          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}
-          ><Icon name="plus" size={14} /></button
-        >
+  </header>
+
+  <!-- Middle Scrollable Area: command history for active tab -->
+  <div class="relative min-h-0 overflow-hidden">
+    {#if error}
+      <div class="absolute inset-x-0 top-2 z-10 mx-3 rounded-md border border-studio-error/40 bg-studio-error/10 px-3 py-2 font-mono text-[11px] text-studio-error">
+        {error}
       </div>
-      <div class="relative min-h-0">
-        {#if paneTabs[0].length === 0 && !error}
-          <button
-            type="button"
-            class="absolute left-1/2 top-1/2 z-10 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/12 bg-studio-card text-studio-text shadow-md hover:border-studio-gold/40 hover:text-studio-gold"
-            aria-label="New terminal"
-            title="New terminal"
-            onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 0)}
-          >
-            <Icon name="plus" size={18} />
-          </button>
-        {/if}
-        <div class="relative h-full min-h-0 w-full bg-[#0b0c10] p-3">
-          <div
-            class="h-full min-h-0 min-w-0 w-full transition-opacity duration-75"
-            style="opacity:0"
-            bind:this={primaryHost}
-          ></div>
-          {#if ghostVisible && ghostPane === 0}
-            <div
-              class="pointer-events-none absolute z-[4] font-mono whitespace-pre text-studio-text-dim/50"
-              style="left:{ghostLeft}px;top:{ghostTop}px;font-size:{EDITOR_FONT_SIZE}px;line-height:1.25;font-family:{fontStack(app.ui.fontFamily)}"
-            >{ghostText}</div>
-            {#if ghostMenuOpen && ghostMatches.length}
-              <div
-                class="absolute z-[5] max-h-48 min-w-[10rem] overflow-auto rounded-md border border-border-subtle bg-studio-card py-1 shadow-lg"
-                style="left:{ghostLeft}px;top:{ghostTop + EDITOR_FONT_SIZE * 1.25 + 4}px"
-                role="listbox"
-              >
-                {#each ghostMatches as m, i (m)}
-                  <button
-                    type="button"
-                    class="block w-full px-2.5 py-1 text-left font-mono text-[11px] {i === ghostSelected
-                      ? 'bg-studio-purple/25 text-studio-text'
-                      : 'text-studio-text-dim hover:bg-white/6 hover:text-studio-text'}"
-                    role="option"
-                    aria-selected={i === ghostSelected}
-                    onclick={() => activeId && acceptGhost(activeId, m)}
-                  >{m}</button>
-                {/each}
-              </div>
-            {/if}
-          {/if}
+    {/if}
+    {#if !activeTab()}
+      <div class="grid h-full place-items-center px-6 text-center text-studio-text-dim">
+        <div>
+          <div class="mx-auto mb-3 grid size-10 place-items-center rounded-lg bg-studio-purple text-sm font-bold text-white">E</div>
+          <div class="mb-1 text-sm font-semibold text-studio-gold">No terminal session</div>
+          <div class="max-w-sm text-[12px]">Open a project, then click + to start a terminal session.</div>
         </div>
       </div>
-    </div>
-    <div
-      class="min-h-0 min-w-0 overflow-hidden border-l border-white/8 {paneIds[1]
-        ? 'grid grid-rows-[36px_minmax(0,1fr)]'
-        : 'hidden'} {focusedPane === 1 ? 'ring-1 ring-inset ring-studio-purple/40' : ''}"
-      onfocusin={() => void focusPane(1)}
-    >
+    {:else}
+      {@const tab = activeTab()!}
       <div
-        class="flex h-9 min-w-0 items-center overflow-x-auto border-b border-border-subtle bg-studio-panel/95"
-        role="tablist"
-        aria-label="Secondary terminal pane"
+        class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto studio-scrollbar p-3 select-text"
+        bind:this={stageEl}
+        onscroll={onStageScroll}
+        role="log"
+        aria-label="Command history"
       >
-        {#each paneTabs[1] as id (id)}
-          {@const tab = tabs.find((item) => item.id === id)}
-          {#if tab}
-            <div
-              class="flex h-full items-center border-r border-white/5 {tab.id === activeId
-                ? 'border-b-2 border-b-studio-purple bg-studio-purple/20'
-                : 'border-b-2 border-b-transparent'}"
-            >
-              {#if editingId === tab.id}
-                <input
-                  class="mx-1 rounded border border-studio-purple/75 bg-black/38 px-1.5 py-0.5 font-mono text-[10px] text-studio-text outline-none"
-                  bind:this={renameInput}
-                  bind:value={editingTitle}
-                  aria-label="Terminal name"
-                  onblur={() => finishRename(true)}
-                  onkeydown={(event) => {
-                    if (event.key === 'Enter') finishRename(true)
-                    if (event.key === 'Escape') finishRename(false)
-                  }}
-                />
-              {:else}
-                <button
-                  type="button"
-                  class="flex items-center gap-1.5 px-1.5 pl-2.5 font-mono text-[10px] {tab.id === activeId
-                    ? 'text-studio-text'
-                    : 'text-studio-text-dim hover:text-studio-text'}"
-                  role="tab"
-                  aria-selected={tab.id === activeId}
-                  onclick={() => void activateTerminal(tab.id, 1)}
-                  ondblclick={() => startRename(tab)}
-                >
-                  <span
-                    class="size-1.5 rounded-lg {tab.exited ? 'bg-studio-text-dim' : 'bg-studio-success'}"
-                  ></span>
-                  {tab.title}
-                </button>
-              {/if}
-              <button
-                type="button"
-                class="mx-1 grid size-7 place-items-center rounded-md text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
-                aria-label={`Close ${tab.title}`}
-                onclick={() => void closeTerminal(tab.id)}><Icon name="close" size={12} /></button
-              >
-            </div>
-          {/if}
-        {/each}
-        <button
-          type="button"
-          class="ml-1.5 grid size-7 shrink-0 place-items-center rounded text-studio-text-dim hover:bg-white/10 hover:text-studio-text"
-          aria-label="New terminal in split pane"
-          title="New terminal in split pane"
-          onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}
-          ><Icon name="plus" size={14} /></button
-        >
-      </div>
-      <div class="relative min-h-0">
-        {#if paneIds[1] && paneTabs[1].length === 0 && !error}
-          <button
-            type="button"
-            class="absolute left-1/2 top-1/2 z-10 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/12 bg-studio-card text-studio-text shadow-md hover:border-studio-gold/40 hover:text-studio-gold"
-            aria-label="New terminal in split pane"
-            title="New terminal in split pane"
-            onclick={() => void addTerminal(app.activeProject?.path, currentProjectId, 1)}
+        {#each tab.blocks as block (block.id)}
+          {@const isLiveXterm = block.isLiveSurface && block.state === 'running' && tab.runningCommandId === block.id && tab.id === activeId}
+          <article
+            class="flex shrink-0 flex-col overflow-hidden rounded-lg border border-l-2 font-mono text-xs shadow-sm transition-colors {blockLeftAccent(block.state)} {blockStatusClass(block.state)}"
+            in:fly={{ y: 6, duration: 140 }}
+            out:fade={{ duration: 100 }}
           >
-            <Icon name="plus" size={18} />
-          </button>
-        {/if}
-        <div class="relative h-full min-h-0 w-full bg-[#0b0c10] p-3">
-          <div
-            class="h-full min-h-0 min-w-0 w-full transition-opacity duration-75"
-            style="opacity:0"
-            bind:this={secondaryHost}
-          ></div>
-          {#if ghostVisible && ghostPane === 1}
-            <div
-              class="pointer-events-none absolute z-[4] font-mono whitespace-pre text-studio-text-dim/50"
-              style="left:{ghostLeft}px;top:{ghostTop}px;font-size:{EDITOR_FONT_SIZE}px;line-height:1.25;font-family:{fontStack(app.ui.fontFamily)}"
-            >{ghostText}</div>
-            {#if ghostMenuOpen && ghostMatches.length}
-              <div
-                class="absolute z-[5] max-h-48 min-w-[10rem] overflow-auto rounded-md border border-border-subtle bg-studio-card py-1 shadow-lg"
-                style="left:{ghostLeft}px;top:{ghostTop + EDITOR_FONT_SIZE * 1.25 + 4}px"
-                role="listbox"
+            <!-- Metadata header -->
+            <div class="flex shrink-0 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-white/5 px-3 py-1.5 text-xs">
+              <span
+                class="min-w-0 max-w-full truncate text-studio-text"
+                title={block.cwd}
+              >{block.cwd || '?'}</span>
+              <span class="shrink-0 rounded bg-white/8 px-1.5 py-0.5 text-studio-text-dim text-[11px]">{block.shell}</span>
+              <span
+                class="shrink-0 rounded px-1.5 py-0.5 text-[11px] {stateClasses(block.state)}"
+                aria-label="Status"
+                title={block.isStreamFollow ? 'Long-running command ? only Stop or shell exit will end this block' : undefined}
               >
-                {#each ghostMatches as m, i (m)}
+                {#if block.state === 'running'}
+                  <span class="inline-flex items-center gap-1">
+                    <span class="size-1.5 animate-pulse rounded-full bg-studio-gold"></span>
+                    {block.isStreamFollow ? 'streaming' : 'running'}
+                  </span>
+                {:else}
+                  {stateLabel(block.state, block.exitCode)}
+                {/if}
+              </span>
+              {#if block.state === 'running'}
+                <span class="shrink-0 text-studio-text-dim text-[11px]" data-running-elapsed>{formatDuration(nowTick - block.startedAt)}</span>
+                {#if tab.runningCommandId === block.id}
                   <button
                     type="button"
-                    class="block w-full px-2.5 py-1 text-left font-mono text-[11px] {i === ghostSelected
-                      ? 'bg-studio-purple/25 text-studio-text'
-                      : 'text-studio-text-dim hover:bg-white/6 hover:text-studio-text'}"
-                    role="option"
-                    aria-selected={i === ghostSelected}
-                    onclick={() => activeId && acceptGhost(activeId, m)}
-                  >{m}</button>
-                {/each}
+                    class="ml-auto inline-flex items-center gap-1 rounded border border-studio-error/35 bg-studio-error/10 px-1.5 py-0.5 text-[11px] font-semibold text-studio-error transition-colors hover:bg-studio-error/20"
+                    title={block.isStreamFollow
+                      ? 'Send Ctrl+C to stop this stream-follow command'
+                      : 'Send Ctrl+C to interrupt this command'}
+                    aria-label="Stop running command"
+                    onclick={(e) => {
+                      e.stopPropagation()
+                      void stopRunning()
+                    }}
+                  >
+                    <Icon name="stop" size={10} />
+                    <span>Stop</span>
+                  </button>
+                {/if}
+              {:else if block.durationMs !== undefined}
+                <span class="shrink-0 text-studio-text-dim text-[11px]">{formatDuration(block.durationMs)}</span>
+              {/if}
+              {#if block.finishedAt}
+                <span class="shrink-0 text-studio-text-dim/70 text-[11px]">{new Date(block.finishedAt).toLocaleTimeString()}</span>
+              {/if}
+            </div>
+
+            <!-- Command row -->
+            <div class="flex shrink-0 items-start gap-2 px-3 py-1.5">
+              <span class="grid size-5 shrink-0 select-none place-items-center rounded bg-white/10 text-xs font-bold text-studio-text-dim" aria-hidden="true">&gt;</span>
+              <pre class="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs text-studio-text">{block.command || '?'}</pre>
+            </div>
+
+            <!-- Live xterm surface (only for the running block of active tab) -->
+            {#if isLiveXterm}
+              <div
+                class="h-80 min-h-[220px] max-h-[500px] w-full min-w-0 flex-1 overflow-hidden border-t border-white/5 bg-black/30 p-2"
+                bind:this={activeSurfaceHost}
+              ></div>
+            {:else if block.output}
+              <!-- Output preview for completed or non-surface blocks -->
+              <div class="max-h-[600px] flex-1 overflow-auto studio-scrollbar border-t border-white/5 px-3 py-2 text-xs leading-relaxed text-studio-text-dim whitespace-pre font-mono selection:bg-studio-purple/40"
+              >{outputPreview(
+                block.output,
+                block.isStreamFollow && block.state === 'running' ? Number.POSITIVE_INFINITY : 10000,
+                block.command.trim(),
+              )}</div>
+            {:else}
+              <div class="shrink-0 border-t border-white/5 px-3 py-2 text-xs italic text-studio-text-dim/70">
+                {#if block.state === 'running'}
+                  Waiting for command output?
+                  <span class="ml-1 inline-block w-1.5 h-3 align-middle bg-studio-gold animate-pulse"></span>
+                {:else}
+                  No output
+                {/if}
               </div>
             {/if}
+          </article>
+        {/each}
+        {#if tab.blocks.length === 0}
+          <div class="grid place-items-center rounded-lg border border-dashed border-white/8 py-10 text-center text-[12px] text-studio-text-dim">
+            <div>
+              <div class="mb-1 text-studio-text">No commands yet</div>
+              <div>Type a command below and press Enter to run it.</div>
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Jump-to-bottom FAB -->
+      {#if !stickBottom && tab.blocks.length > 0}
+        <button
+          type="button"
+          class="absolute bottom-3 left-1/2 z-[5] grid size-8 -translate-x-1/2 place-items-center rounded-full border border-white/12 bg-studio-panel text-studio-text shadow-md hover:border-studio-gold/50 hover:text-studio-gold"
+          aria-label="Scroll to latest"
+          title="Scroll to latest"
+          onclick={jumpToBottom}
+        ><Icon name="arrow-down" size={14} /></button>
+      {/if}
+    {/if}
+  </div>
+
+  <!-- Bottom Composer Bar -->
+  <footer class="z-20 shrink-0 border-t border-border-subtle bg-studio-sidebar px-3 py-2.5">
+    {#if activeTab()}
+      {@const tab = activeTab()!}
+      {@const running = Boolean(tab.runningCommandId)}
+      <div
+        class="composer-inner relative flex items-end gap-2 rounded-xl border border-border-subtle bg-studio-dark p-2.5 transition-colors focus-within:border-studio-purple/50 shadow-sm"
+        role="group"
+        aria-label="Terminal command composer"
+      >
+        <span
+          class="grid size-7 shrink-0 select-none place-items-center rounded-lg bg-studio-purple/20 font-mono text-sm font-bold text-studio-purple"
+          aria-hidden="true"
+        >&gt;</span>
+        <textarea
+          class="min-h-[28px] max-h-48 flex-1 resize-none bg-transparent py-1 font-mono text-sm leading-relaxed text-studio-text outline-none placeholder:text-studio-text-dim"
+          rows="1"
+          bind:this={composerEl}
+          placeholder={running
+            ? 'Input is going to the running process... (Enter to send)'
+            : 'Type a command and press Enter (Shift+Enter for newline)'}
+          bind:value={tab.composer}
+          onkeydown={onComposerKeydown}
+          oninput={onComposerInput}
+          aria-label="Terminal command"
+          title="Enter to run • Shift+Enter for newline • ↑/↓ for history"
+        ></textarea>
+        <Button
+          variant={running ? 'danger' : 'primary'}
+          size="sm"
+          disabled={!running && !tab.composer.trim()}
+          aria-label={running ? 'Stop running process (Ctrl+C)' : 'Run command'}
+          title={running ? 'Send Ctrl+C to running process' : 'Run command (Enter)'}
+          onclick={() => (running ? void stopRunning() : void runComposer())}
+        >
+          {#if running}
+            <Icon name="stop" size={14} />
+            <span>Stop</span>
+          {:else}
+            <Icon name="send" size={14} />
+            <span>Run</span>
           {/if}
+        </Button>
+      </div>
+      <div class="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-studio-text-dim">
+        <div class="flex items-center gap-1.5 min-w-0 truncate font-mono">
+          <span class="truncate font-medium text-studio-text-body" title={tab.cwd}>{tab.cwd || '?'}</span>
+          <span class="text-white/20">•</span>
+          <span class="shrink-0 text-studio-lavender-muted">{tab.shell}</span>
+        </div>
+        <div class="flex items-center gap-2 font-mono text-[10px] text-studio-text-dim/80 shrink-0">
+          <span><kbd class="rounded bg-white/8 px-1 py-0.5 border border-white/10 text-studio-text-body font-sans">Enter</kbd> run</span>
+          <span class="text-white/20">•</span>
+          <span><kbd class="rounded bg-white/8 px-1 py-0.5 border border-white/10 text-studio-text-body font-sans">Shift+Enter</kbd> newline</span>
+          <span class="text-white/20">•</span>
+          <span><kbd class="rounded bg-white/8 px-1 py-0.5 border border-white/10 text-studio-text-body font-sans">↑/↓</kbd> history</span>
         </div>
       </div>
-    </div>
-  </section>
+    {/if}
+  </footer>
 </div>
 
 <!-- xterm injects .xterm; host needs height chain -->
@@ -1186,5 +1373,58 @@
   }
   :global(.xterm-viewport) {
     overflow-y: auto !important;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-studio-scrollbar, rgba(255, 255, 255, 0.18)) transparent;
+  }
+  :global(.studio-scrollbar) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-studio-scrollbar, rgba(255, 255, 255, 0.18)) transparent;
+  }
+  :global(.xterm-viewport::-webkit-scrollbar),
+  :global(.studio-scrollbar::-webkit-scrollbar) {
+    width: 6px !important;
+    height: 6px !important;
+  }
+  :global(.xterm-viewport::-webkit-scrollbar-track),
+  :global(.xterm-viewport::-webkit-scrollbar-corner),
+  :global(.xterm-viewport::-webkit-resizer),
+  :global(.studio-scrollbar::-webkit-scrollbar-track),
+  :global(.studio-scrollbar::-webkit-scrollbar-corner),
+  :global(.studio-scrollbar::-webkit-resizer) {
+    background: transparent !important;
+  }
+  :global(.xterm-viewport::-webkit-scrollbar-thumb),
+  :global(.studio-scrollbar::-webkit-scrollbar-thumb) {
+    background: var(--color-studio-scrollbar, rgba(255, 255, 255, 0.18)) !important;
+    border-radius: 99px !important;
+    border: 2px solid transparent !important;
+    background-clip: padding-box !important;
+  }
+  :global(.xterm-viewport::-webkit-scrollbar-thumb:hover),
+  :global(.studio-scrollbar::-webkit-scrollbar-thumb:hover) {
+    background: var(--color-studio-scrollbar-hover, rgba(255, 255, 255, 0.28)) !important;
+    background-clip: padding-box !important;
+    border: 2px solid transparent !important;
+  }
+  :global(.xterm .scrollbar),
+  :global(.xterm .scrollbar.vertical),
+  :global(.xterm .scrollbar.horizontal),
+  :global(.xterm .xterm-scrollable-element > .scrollbar) {
+    width: 6px !important;
+    height: 6px !important;
+    background: transparent !important;
+  }
+  :global(.xterm .scrollbar .slider),
+  :global(.xterm .scrollbar.vertical .slider),
+  :global(.xterm .scrollbar.horizontal .slider),
+  :global(.xterm .xterm-scrollable-element .slider) {
+    width: 6px !important;
+    border-radius: 99px !important;
+    background: var(--color-studio-scrollbar, rgba(255, 255, 255, 0.18)) !important;
+    left: 0px !important;
+  }
+  :global(.xterm .scrollbar .slider:hover),
+  :global(.xterm .xterm-scrollable-element .slider:hover) {
+    background: var(--color-studio-scrollbar-hover, rgba(255, 255, 255, 0.28)) !important;
   }
 </style>

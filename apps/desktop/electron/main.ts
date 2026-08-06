@@ -12,19 +12,18 @@ import {
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import * as pty from 'node-pty'
 import os from 'node:os'
 import { EnpiiClient } from './enpiiClient'
 import { listPathBins, pathComplete } from './pathBins'
+import { TerminalHost } from './terminal/terminalHost'
+import type { TerminalCreateParams, VendorProviderOverride } from './terminal/types'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let mainWindow: BrowserWindow | null = null
 const enpii = new EnpiiClient()
-const terminals = new Map<string, pty.IPty>()
 type DownloadStatus = 'progressing' | 'completed' | 'cancelled' | 'interrupted'
 type DownloadSummary = {
   id: string
@@ -40,51 +39,6 @@ const downloadItems = new Map<string, DownloadItem>()
 const downloads = new Map<string, DownloadSummary>()
 const downloadSessions = new WeakSet<Session>()
 let rendererMode = 'agent'
-
-/**
- * node-pty on Windows needs a real .exe path — bare `ssh` / `claude` → "File not found:".
- * Resolve via known dirs + where.exe; leave absolute/relative paths alone.
- */
-function resolveSpawnCommand(command: string): string {
-  const raw = command.trim()
-  if (!raw) return raw
-  if (process.platform !== 'win32') return raw
-  if (path.isAbsolute(raw) || raw.includes('/') || raw.includes('\\') || raw.includes(':')) {
-    return raw
-  }
-  const bare = raw.replace(/\.(exe|cmd|bat)$/i, '')
-  const systemRoot = process.env.SystemRoot || 'C:\\Windows'
-  const known = [
-    path.join(systemRoot, 'System32', 'OpenSSH', `${bare}.exe`),
-    path.join(systemRoot, 'System32', `${bare}.exe`),
-    path.join(systemRoot, 'SysWOW64', `${bare}.exe`),
-  ]
-  for (const candidate of known) {
-    if (fs.existsSync(candidate)) return candidate
-  }
-  try {
-    const out = execFileSync('where.exe', [raw], {
-      encoding: 'utf8',
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line && fs.existsSync(line))
-    if (out) return out
-  } catch {
-    /* not on PATH */
-  }
-  // Last resort: append .exe so ConPTY search is less ambiguous
-  return raw.toLowerCase().endsWith('.exe') ? raw : `${raw}.exe`
-}
-
-function cleanEnv(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  )
-}
 
 /** Minimal Settings read (json + simple toml keys). Priority matches agent-core. */
 function readProviderLite(cwd: string): { baseUrl?: string; apiKey?: string; model?: string } {
@@ -151,8 +105,6 @@ function readProviderLite(cwd: string): { baseUrl?: string; apiKey?: string; mod
   }
 }
 
-type VendorProviderOverride = { baseUrl?: string; apiKey?: string; model?: string }
-
 /** Env + argv flags so vendor CLIs follow enpii Settings (base URL / model / key). */
 function vendorProviderInject(
   command: string,
@@ -196,16 +148,29 @@ function vendorProviderInject(
   return { env, args: nextArgs }
 }
 
-function killTerminals(): void {
-  for (const terminal of terminals.values()) {
-    try {
-      terminal.kill()
-    } catch {
-      /* already exited */
+const terminalHost = new TerminalHost({
+  homeDirectory: () => app.getPath('home'),
+  runtimeDirectory: () => app.getPath('temp'),
+  broadcast: ({ channel, payload }) => broadcast(channel, payload),
+  injectVendorProvider: vendorProviderInject,
+  // Snapshot the live Node.js env here, BEFORE Vite's bundling mangles
+  // `process.env` into a static object literal in the emitted bundle.
+  // We read it through `Function('return process.env')` so Vite/Rollup
+  // can't statically fold it to an empty object during build.
+  parentEnv: (Function('return process.env')() as NodeJS.ProcessEnv),
+  workerBundlePath: async () => {
+    // Bundled worker sits next to main.cjs when run from vite dist-electron;
+    // in dev mode the worker source is co-located and we let vite-plugin-electron
+    // produce the bundle alongside main.cjs.
+    const candidates = [
+      path.join(__dirname, 'terminalWorker.cjs'),
+    ]
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate
     }
-  }
-  terminals.clear()
-}
+    throw new Error(`terminal worker bundle not found in ${__dirname}`)
+  },
+})
 
 /** Standard Edit roles so Ctrl/Cmd+C/V/X/A work outside inputs (Windows Electron needs this). */
 function installAppMenu(): void {
@@ -304,8 +269,12 @@ function createWindow(): void {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    // open DevTools only when explicitly requested
-    if (process.env.ENPII_DEVTOOLS === '1') {
+    // open DevTools only when explicitly requested. `process.env.ENPII_DEVTOOLS`
+    // is mangled by Vite at build time (replaced with a static empty object),
+    // so we read the real runtime env via `Function('return process.env')()`
+    // which Vite cannot statically analyze.
+    const liveEnv = (Function('return process.env')() as NodeJS.ProcessEnv)
+    if (liveEnv.ENPII_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools({ mode: 'detach' })
     }
   } else {
@@ -552,9 +521,47 @@ async function setupAutoUpdater(): Promise<void> {
   // autoUpdater.setFeedURL({ provider: 'github', owner: 'its-enpii', repo: 'enstudio' })
 }
 
+function readWindowsEnv(): NodeJS.ProcessEnv {
+  // Electron on Windows doesn't inherit the user's PATH/ComSpec when
+  // launched by `pnpm dev` → node → electron.exe. node-pty then spawns
+  // cmd.exe without PATH so commands like `docker`, `npm`, `git` fail
+  // with "is not recognized". Read the canonical Windows PATH from BOTH
+  // the user (HKCU\Environment) and system
+  // (HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment)
+  // registries — that's what `cmd.exe` would expose to a fresh console —
+  // and merge them into process.env before we hand it to the worker.
+  if (process.platform !== 'win32') return process.env
+  const { execFileSync } = require('node:child_process') as typeof import('node:child_process')
+  const readReg = (key: string, value: string): string | undefined => {
+    try {
+      const raw = execFileSync('reg.exe', ['query', key, '/v', value], {
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      const match = raw.match(new RegExp(`${value}\\s+REG_(?:SZ|EXPAND_SZ)\\s+(.+?)\\r?\\n`))
+      return match?.[1]?.trim() || undefined
+    } catch {
+      return undefined
+    }
+  }
+  const userPath = readReg('HKCU\\Environment', 'PATH')
+  const systemPath = readReg('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path')
+  const merged = [process.env.PATH, systemPath, userPath].filter((p): p is string => Boolean(p)).join(';')
+  if (merged) process.env.PATH = merged
+  process.env.ComSpec = process.env.ComSpec ?? (process.env.SystemRoot ?? 'C:\\Windows') + '\\System32\\cmd.exe'
+  // eslint-disable-next-line no-console
+  console.log('[main] resolved PATH length=', process.env.PATH?.length, 'has docker:', process.env.PATH?.toLowerCase().includes('docker'))
+  return process.env
+}
+
 app.whenReady().then(() => {
+  readWindowsEnv()
   installAppMenu()
   enpii.start()
+  void terminalHost.start().catch((err: unknown) => {
+    console.error('[terminalHost] failed to start', err)
+  })
 
   enpii.on('log', (line: string) => {
     broadcast('enpii:log', line)
@@ -630,79 +637,35 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'terminal:create',
-    (
-      _evt,
-      params?: {
-        cwd?: string
-        cols?: number
-        rows?: number
-        /** Optional program to run instead of login shell (vendor CLI host). */
-        command?: string
-        args?: string[]
-        /** Inject Settings baseUrl/model/apiKey into env + --model for vendor CLIs. */
-        injectProvider?: boolean
-        /** Per-launch override (vendor config modal). Falls back to Settings file/env. */
-        provider?: VendorProviderOverride
-      },
-    ) => {
-      const cwd = path.resolve(params?.cwd ?? app.getPath('home'))
-      if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
-        throw new Error(`terminal cwd not found: ${cwd}`)
-      }
-      const defaultShell =
-        process.platform === 'win32'
-          ? process.env.COMSPEC ?? 'powershell.exe'
-          : process.env.SHELL ?? '/bin/bash'
-      const requested = params?.command?.trim() || defaultShell
-      const command = resolveSpawnCommand(requested)
-      let args = Array.isArray(params?.args) ? params!.args!.map(String) : []
-      let extraEnv: Record<string, string> = {}
-      if (params?.injectProvider && params?.command?.trim()) {
-        const injected = vendorProviderInject(command, cwd, args, params.provider)
-        extraEnv = injected.env
-        args = injected.args
-      }
-      if (params?.command?.trim() && !fs.existsSync(command) && !command.includes(path.sep)) {
-        throw new Error(`Command not found: ${requested}`)
-      }
-      const id = randomUUID()
-      const terminal = pty.spawn(command, args, {
-        name: 'xterm-256color',
-        cwd,
-        cols: Math.max(2, params?.cols ?? 80),
-        rows: Math.max(1, params?.rows ?? 24),
-        env: {
-          ...cleanEnv(),
-          ...extraEnv,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-        },
-      })
-      terminals.set(id, terminal)
-      terminal.onData((data) => broadcast('terminal:data', { id, data }))
-      terminal.onExit(({ exitCode, signal }) => {
-        terminals.delete(id)
-        broadcast('terminal:exit', { id, exitCode, signal })
-      })
-      return { id, shell: path.basename(command), cwd, command, args }
+    async (_evt, params?: TerminalCreateParams) => {
+      await terminalHost.start()
+      return terminalHost.create(params)
     },
   )
 
-  ipcMain.handle('terminal:write', (_evt, id: string, data: string) => {
-    terminals.get(id)?.write(data)
+  ipcMain.handle('terminal:write', (_evt, id: unknown, data: unknown) => {
+    terminalHost.write(id, data)
   })
 
-  ipcMain.handle('terminal:resize', (_evt, id: string, cols: number, rows: number) => {
-    terminals.get(id)?.resize(Math.max(2, cols), Math.max(1, rows))
+  ipcMain.handle('terminal:resize', (_evt, id: unknown, cols: unknown, rows: unknown) => {
+    terminalHost.resize(id, cols, rows)
   })
 
-  ipcMain.handle('terminal:kill', (_evt, id: string) => {
-    const terminal = terminals.get(id)
-    if (!terminal) return
-    terminals.delete(id)
-    terminal.kill()
+  ipcMain.handle('terminal:kill', (_evt, id: unknown) => {
+    terminalHost.kill(id)
   })
 
+  ipcMain.handle('terminal:list', (_evt, projectId?: unknown, purpose?: unknown) => {
+    return terminalHost.list(projectId, purpose)
+  })
+
+  ipcMain.handle('terminal:subscribe', (_evt, id: unknown, afterSequence?: unknown) => {
+    return terminalHost.subscribe(id, afterSequence)
+  })
+
+  ipcMain.handle('terminal:acknowledge', (_evt, id: unknown, sequence: unknown) => {
+    terminalHost.acknowledge(id, sequence)
+  })
   /** PATH command basenames (cached). Optional prefix → filtered completions. */
   ipcMain.handle('terminal:pathComplete', (_evt, prefix?: string) => {
     const p = typeof prefix === 'string' ? prefix : ''
@@ -818,12 +781,12 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  killTerminals()
+  terminalHost.killAll()
   enpii.stop()
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', () => {
-  killTerminals()
+  terminalHost.killAll()
   enpii.stop()
 })

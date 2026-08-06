@@ -125,6 +125,8 @@
       await tick()
       const seed = measureVendorHost()
       const created = await termApi.create(app.activeProject.path, seed.cols, seed.rows, {
+        projectId: app.activeProject.id,
+        purpose: 'vendor',
         command: cli.command,
         args: cli.args,
         injectProvider: true,
@@ -250,7 +252,8 @@ void tick().then(() => focusComposer())
   
   onMount(() => {
     if (!termApi) return
-    const offData = termApi.onData(({ id, data }) => {
+    const offData = termApi.onData(({ id, purpose, data }) => {
+      if (purpose !== 'vendor') return
       for (const entry of vendorTerms.values()) {
         if (entry.ptyId === id) {
           entry.term.write(data)
@@ -259,7 +262,8 @@ void tick().then(() => focusComposer())
       }
       vendorPending.set(id, `${vendorPending.get(id) ?? ''}${data}`)
     })
-    const offExit = termApi.onExit(({ id, exitCode }) => {
+    const offExit = termApi.onExit(({ id, purpose, exitCode }) => {
+      if (purpose !== 'vendor') return
       for (const entry of vendorTerms.values()) {
         if (entry.ptyId !== id) continue
         entry.term.write(`\r\n\x1b[90m[process exited ${exitCode}]\x1b[0m\r\n`)

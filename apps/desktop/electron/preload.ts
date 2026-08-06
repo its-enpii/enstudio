@@ -1,4 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils, webFrame } from 'electron'
+import type {
+  TerminalCreateParams,
+  TerminalCreateResult,
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalSessionSnapshot,
+  TerminalShellMarkerEvent,
+  TerminalSubscriptionSnapshot,
+} from './terminal/types'
 
 export type EnpiiEventHandler = (payload: unknown) => void
 
@@ -39,14 +48,11 @@ const api = {
       cwd: string,
       cols: number,
       rows: number,
-      opts?: {
-        command?: string
-        args?: string[]
-        injectProvider?: boolean
-        provider?: { baseUrl?: string; apiKey?: string; model?: string }
-      },
+      opts?: Omit<TerminalCreateParams, 'cwd' | 'cols' | 'rows'>,
     ) =>
       ipcRenderer.invoke('terminal:create', {
+        projectId: opts?.projectId,
+        purpose: opts?.purpose,
         cwd,
         cols,
         rows,
@@ -54,22 +60,33 @@ const api = {
         args: opts?.args,
         injectProvider: opts?.injectProvider,
         provider: opts?.provider,
-      }) as Promise<{ id: string; shell: string; cwd: string; command?: string; args?: string[] }>,
+      } satisfies TerminalCreateParams) as Promise<TerminalCreateResult>,
     write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data) as Promise<void>,
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows) as Promise<void>,
     kill: (id: string) => ipcRenderer.invoke('terminal:kill', id) as Promise<void>,
+    list: (projectId?: string, purpose?: 'terminal' | 'vendor') =>
+      ipcRenderer.invoke('terminal:list', projectId, purpose) as Promise<TerminalSessionSnapshot[]>,
+    subscribe: (id: string, afterSequence = 0) =>
+      ipcRenderer.invoke('terminal:subscribe', id, afterSequence) as Promise<TerminalSubscriptionSnapshot>,
+    acknowledge: (id: string, sequence: number) =>
+      ipcRenderer.invoke('terminal:acknowledge', id, sequence) as Promise<void>,
     /** PATH command complete. With prefix → up to 25 matches; empty → sample list. */
     pathComplete: (prefix?: string) =>
       ipcRenderer.invoke('terminal:pathComplete', prefix ?? '') as Promise<string[]>,
-    onData: (handler: (payload: { id: string; data: string }) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, payload: { id: string; data: string }) => handler(payload)
+    onData: (handler: (payload: TerminalDataEvent) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: TerminalDataEvent) => handler(payload)
       ipcRenderer.on('terminal:data', listener)
       return () => ipcRenderer.removeListener('terminal:data', listener)
     },
-    onExit: (handler: (payload: { id: string; exitCode: number; signal?: number }) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, payload: { id: string; exitCode: number; signal?: number }) => handler(payload)
+    onExit: (handler: (payload: TerminalExitEvent) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: TerminalExitEvent) => handler(payload)
       ipcRenderer.on('terminal:exit', listener)
       return () => ipcRenderer.removeListener('terminal:exit', listener)
+    },
+    onShellMarker: (handler: (payload: TerminalShellMarkerEvent) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: TerminalShellMarkerEvent) => handler(payload)
+      ipcRenderer.on('terminal:shellMarker', listener)
+      return () => ipcRenderer.removeListener('terminal:shellMarker', listener)
     },
   },
   app: {
