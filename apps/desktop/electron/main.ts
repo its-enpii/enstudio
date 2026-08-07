@@ -40,7 +40,17 @@ const downloads = new Map<string, DownloadSummary>()
 const downloadSessions = new WeakSet<Session>()
 let rendererMode = 'agent'
 
-type VendorLiteConfig = { baseUrl?: string; apiKey?: string; model?: string }
+type VendorLiteConfig = {
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+  sonnetModel?: string
+  haikuModel?: string
+  opusModel?: string
+  maxThinkingTokens?: string
+  customModelEnv?: string
+  customCliFlags?: string
+}
 
 function readVendorSection(rawToml: string, sectionKey: string): VendorLiteConfig {
   const get = (keys: string[]) => {
@@ -54,6 +64,12 @@ function readVendorSection(rawToml: string, sectionKey: string): VendorLiteConfi
     baseUrl: get(['baseUrl', 'base_url']),
     apiKey: get(['apiKey', 'api_key']),
     model: get(['model']),
+    sonnetModel: get(['sonnetModel', 'sonnet_model']),
+    haikuModel: get(['haikuModel', 'haiku_model']),
+    opusModel: get(['opusModel', 'opus_model']),
+    maxThinkingTokens: get(['maxThinkingTokens', 'max_thinking_tokens']),
+    customModelEnv: get(['customModelEnv', 'custom_model_env']),
+    customCliFlags: get(['customCliFlags', 'custom_cli_flags']),
   }
 }
 
@@ -147,6 +163,17 @@ function vendorProviderInject(
 ): { env: Record<string, string>; args: string[] } {
   const bin = path.basename(command).replace(/\.(cmd|exe)$/i, '').toLowerCase()
   const vendorName = bin === 'claude' ? 'claude' : bin === 'codex' ? 'codex' : bin === 'opencode' ? 'opencode' : bin === 'gemini' ? 'gemini' : 'enpii'
+
+  const home = process.env.ENPII_HOME?.trim() || path.join(os.homedir(), '.enpiistudio')
+  const tomlUserFile = path.join(home, 'config.toml')
+  const tomlProjFile = path.join(cwd, '.enpii', 'config.toml')
+  const userTomlRaw = fs.existsSync(tomlUserFile) ? fs.readFileSync(tomlUserFile, 'utf8') : ''
+  const projTomlRaw = fs.existsSync(tomlProjFile) ? fs.readFileSync(tomlProjFile, 'utf8') : ''
+
+  const vUserMain = userTomlRaw ? readVendorSection(userTomlRaw, `vendors.${vendorName}.main`) : {}
+  const vProjMain = projTomlRaw ? readVendorSection(projTomlRaw, `vendors.${vendorName}.main`) : {}
+  const vMain = { ...vUserMain, ...vProjMain }
+
   const file = readProviderLite(cwd, vendorName, 'main')
   const subFile = readProviderLite(cwd, vendorName, 'subagent')
   const cfg = {
@@ -163,9 +190,10 @@ function vendorProviderInject(
       env.CLAUDE_MODEL = cfg.model
       env.ANTHROPIC_MODEL = cfg.model
     }
-    if (subFile.model) {
-      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = subFile.model
-    }
+    if (vMain.sonnetModel) env.ANTHROPIC_DEFAULT_SONNET_MODEL = vMain.sonnetModel
+    if (vMain.haikuModel || subFile.model) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = vMain.haikuModel || subFile.model
+    if (vMain.opusModel) env.ANTHROPIC_DEFAULT_OPUS_MODEL = vMain.opusModel
+    if (vMain.maxThinkingTokens) env.MAX_THINKING_TOKENS = vMain.maxThinkingTokens
   } else if (vendorName === 'codex' || vendorName === 'opencode') {
     if (cfg.baseUrl) {
       env.OPENAI_BASE_URL = cfg.baseUrl
@@ -186,11 +214,31 @@ function vendorProviderInject(
     if (cfg.model) env.ENPII_MODEL = cfg.model
   }
 
+  // Parse customModelEnv (KEY=VALUE lines)
+  if (vMain.customModelEnv) {
+    const lines = vMain.customModelEnv.split(/\r?\n/)
+    for (const line of lines) {
+      const eq = line.indexOf('=')
+      if (eq > 0) {
+        const k = line.slice(0, eq).trim()
+        const v = line.slice(eq + 1).trim()
+        if (k && v) env[k] = v
+      }
+    }
+  }
+
   const nextArgs = [...args]
   const hasModelFlag = nextArgs.some((a) => a === '--model' || a === '-m' || a.startsWith('--model='))
   if (cfg.model && !hasModelFlag) {
     nextArgs.push('--model', cfg.model)
   }
+
+  // Parse customCliFlags (space delimited)
+  if (vMain.customCliFlags) {
+    const extraFlags = vMain.customCliFlags.split(/\s+/).map((f) => f.trim()).filter(Boolean)
+    nextArgs.push(...extraFlags)
+  }
+
   return { env, args: nextArgs }
 }
 

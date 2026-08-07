@@ -56,6 +56,12 @@
     models: string[]
     dialect: string
     hasKey: boolean
+    sonnetModel?: string
+    haikuModel?: string
+    opusModel?: string
+    maxThinkingTokens?: string
+    customModelEnv?: string
+    customCliFlags?: string
   }
 
   let vendorsState = $state<Record<VendorKey, { main: VendorState; subagent: VendorState }>>({
@@ -88,6 +94,12 @@
   let modelDraft = $state('')
   let dialect = $state('openai')
   let permissionMode = $state('ask')
+  let sonnetModel = $state('')
+  let haikuModel = $state('')
+  let opusModel = $state('')
+  let maxThinkingTokens = $state('')
+  let customModelEnv = $state('')
+  let customCliFlags = $state('')
   let denyGlobsText = $state('')
   let allowRulesText = $state('')
   /** PII/secret redact on tool results + model output (default on in core). */
@@ -377,6 +389,12 @@
             models: normalizeModelList(vVal.main.models, vVal.main.model ?? ''),
             dialect: vVal.main.dialect ?? 'openai',
             hasKey: Boolean(vVal.main.hasKey),
+            sonnetModel: vVal.main.sonnetModel ?? '',
+            haikuModel: vVal.main.haikuModel ?? '',
+            opusModel: vVal.main.opusModel ?? '',
+            maxThinkingTokens: vVal.main.maxThinkingTokens ?? '',
+            customModelEnv: vVal.main.customModelEnv ?? '',
+            customCliFlags: vVal.main.customCliFlags ?? '',
           }
         }
         if (vVal.subagent) {
@@ -387,6 +405,12 @@
             models: normalizeModelList(vVal.subagent.models, vVal.subagent.model ?? ''),
             dialect: vVal.subagent.dialect ?? 'openai',
             hasKey: Boolean(vVal.subagent.hasKey),
+            sonnetModel: vVal.subagent.sonnetModel ?? '',
+            haikuModel: vVal.subagent.haikuModel ?? '',
+            opusModel: vVal.subagent.opusModel ?? '',
+            maxThinkingTokens: vVal.subagent.maxThinkingTokens ?? '',
+            customModelEnv: vVal.subagent.customModelEnv ?? '',
+            customCliFlags: vVal.subagent.customCliFlags ?? '',
           }
         }
       }
@@ -545,6 +569,13 @@
       vendorsState.enpii.main.dialect = knownDialect ?? 'openai'
       if (apiKey.trim()) vendorsState.enpii.main.apiKey = apiKey.trim()
 
+      vendorsState[activeVendor][activeTarget].sonnetModel = sonnetModel.trim()
+      vendorsState[activeVendor][activeTarget].haikuModel = haikuModel.trim()
+      vendorsState[activeVendor][activeTarget].opusModel = opusModel.trim()
+      vendorsState[activeVendor][activeTarget].maxThinkingTokens = maxThinkingTokens.trim()
+      vendorsState[activeVendor][activeTarget].customModelEnv = customModelEnv.trim()
+      vendorsState[activeVendor][activeTarget].customCliFlags = customCliFlags.trim()
+
       const vendorsPayload: Record<string, any> = {}
       for (const [vK, vVal] of Object.entries(vendorsState)) {
         vendorsPayload[vK] = {
@@ -554,6 +585,12 @@
             model: vVal.main.model.trim(),
             models: normalizeModelList(vVal.main.models, vVal.main.model),
             dialect: vVal.main.dialect as ProviderDialect,
+            sonnetModel: vVal.main.sonnetModel?.trim(),
+            haikuModel: vVal.main.haikuModel?.trim(),
+            opusModel: vVal.main.opusModel?.trim(),
+            maxThinkingTokens: vVal.main.maxThinkingTokens?.trim(),
+            customModelEnv: vVal.main.customModelEnv?.trim(),
+            customCliFlags: vVal.main.customCliFlags?.trim(),
           },
           subagent: {
             baseUrl: vVal.subagent.baseUrl.trim(),
@@ -561,6 +598,12 @@
             model: vVal.subagent.model.trim(),
             models: normalizeModelList(vVal.subagent.models, vVal.subagent.model),
             dialect: vVal.subagent.dialect as ProviderDialect,
+            sonnetModel: vVal.subagent.sonnetModel?.trim(),
+            haikuModel: vVal.subagent.haikuModel?.trim(),
+            opusModel: vVal.subagent.opusModel?.trim(),
+            maxThinkingTokens: vVal.subagent.maxThinkingTokens?.trim(),
+            customModelEnv: vVal.subagent.customModelEnv?.trim(),
+            customCliFlags: vVal.subagent.customCliFlags?.trim(),
           },
         }
       }
@@ -688,12 +731,18 @@
               disabled={saving}
               hint="Pilih vendor agent yang ingin dikonfigurasi"
               onchange={(val) => {
-                if (activeVendor === 'enpii' && activeTarget === 'main') {
-                  vendorsState.enpii.main.baseUrl = baseUrl
-                  vendorsState.enpii.main.model = model
-                  vendorsState.enpii.main.models = models
-                  vendorsState.enpii.main.dialect = dialect
-                }
+                vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
+                vendorsState[activeVendor][activeTarget].model = model
+                vendorsState[activeVendor][activeTarget].models = models
+                vendorsState[activeVendor][activeTarget].dialect = dialect
+                vendorsState[activeVendor][activeTarget].apiKey = apiKey
+                vendorsState[activeVendor][activeTarget].sonnetModel = sonnetModel
+                vendorsState[activeVendor][activeTarget].haikuModel = haikuModel
+                vendorsState[activeVendor][activeTarget].opusModel = opusModel
+                vendorsState[activeVendor][activeTarget].maxThinkingTokens = maxThinkingTokens
+                vendorsState[activeVendor][activeTarget].customModelEnv = customModelEnv
+                vendorsState[activeVendor][activeTarget].customCliFlags = customCliFlags
+
                 activeVendor = val as VendorKey
                 activeTarget = 'main'
                 const targetState = vendorsState[activeVendor].main
@@ -703,6 +752,12 @@
                 dialect = targetState.dialect || (activeVendor === 'claude' ? 'anthropic' : 'openai')
                 hasKey = targetState.hasKey || (activeVendor === 'enpii' ? hasKey : false)
                 apiKey = targetState.apiKey
+                sonnetModel = targetState.sonnetModel ?? ''
+                haikuModel = targetState.haikuModel ?? ''
+                opusModel = targetState.opusModel ?? ''
+                maxThinkingTokens = targetState.maxThinkingTokens ?? ''
+                customModelEnv = targetState.customModelEnv ?? ''
+                customCliFlags = targetState.customCliFlags ?? ''
               }}
             />
 
@@ -729,6 +784,12 @@
                   vendorsState[activeVendor][activeTarget].models = models
                   vendorsState[activeVendor][activeTarget].dialect = dialect
                   vendorsState[activeVendor][activeTarget].apiKey = apiKey
+                  vendorsState[activeVendor][activeTarget].sonnetModel = sonnetModel
+                  vendorsState[activeVendor][activeTarget].haikuModel = haikuModel
+                  vendorsState[activeVendor][activeTarget].opusModel = opusModel
+                  vendorsState[activeVendor][activeTarget].maxThinkingTokens = maxThinkingTokens
+                  vendorsState[activeVendor][activeTarget].customModelEnv = customModelEnv
+                  vendorsState[activeVendor][activeTarget].customCliFlags = customCliFlags
 
                   activeTarget = val as TargetKey
                   const targetState = vendorsState[activeVendor][activeTarget]
@@ -738,6 +799,12 @@
                   dialect = targetState.dialect || vendorsState[activeVendor].main.dialect
                   hasKey = targetState.hasKey
                   apiKey = targetState.apiKey
+                  sonnetModel = targetState.sonnetModel ?? ''
+                  haikuModel = targetState.haikuModel ?? ''
+                  opusModel = targetState.opusModel ?? ''
+                  maxThinkingTokens = targetState.maxThinkingTokens ?? ''
+                  customModelEnv = targetState.customModelEnv ?? ''
+                  customCliFlags = targetState.customCliFlags ?? ''
                 }}
               />
             {/if}
@@ -851,6 +918,60 @@
                   onclick={addModel}
                 >{t('common.add')}</Button>
               </div>
+            </div>
+
+            <!-- Vendor Specific Model Specification & Advanced Overrides -->
+            {#if activeVendor === 'claude'}
+              <div class="flex flex-col gap-4 border-t border-border-subtle pt-4">
+                <div class="text-xs font-semibold text-studio-purple">Claude Model Tier Overrides</div>
+                <TextInput
+                  label="Sonnet Model Specification (ANTHROPIC_DEFAULT_SONNET_MODEL)"
+                  bind:value={sonnetModel}
+                  placeholder="e.g. claude-3-7-sonnet-20241022"
+                  disabled={saving}
+                  hint="Override spesifik rilis Sonnet yang digunakan Claude Code"
+                />
+                <TextInput
+                  label="Haiku / Fast Model Specification (ANTHROPIC_DEFAULT_HAIKU_MODEL)"
+                  bind:value={haikuModel}
+                  placeholder="e.g. claude-3-5-haiku-20241022"
+                  disabled={saving}
+                  hint="Override spesifik rilis Haiku untuk pencarian & sub-tasks"
+                />
+                <TextInput
+                  label="Opus / Heavy Model Specification (ANTHROPIC_DEFAULT_OPUS_MODEL)"
+                  bind:value={opusModel}
+                  placeholder="e.g. claude-3-opus-20240229"
+                  disabled={saving}
+                  hint="Override spesifik rilis Opus yang digunakan untuk tugas berat"
+                />
+                <TextInput
+                  label="Extended Thinking Budget (MAX_THINKING_TOKENS)"
+                  bind:value={maxThinkingTokens}
+                  placeholder="e.g. 4000"
+                  disabled={saving}
+                  hint="Batas token reasoning / thinking untuk model Claude 3.7 Sonnet"
+                />
+              </div>
+            {/if}
+
+            <div class="flex flex-col gap-4 border-t border-border-subtle pt-4">
+              <div class="text-xs font-semibold text-studio-purple">Custom Model Environment Variables & Flags</div>
+              <Textarea
+                label="Custom Model Environment Variables (KEY=VALUE)"
+                bind:value={customModelEnv}
+                placeholder="TEMPERATURE=0.2
+OPENAI_ORGANIZATION=org-xxx"
+                disabled={saving}
+                hint="Environment variables model/API tambahan (satu pasangan KEY=VALUE per baris)"
+              />
+              <TextInput
+                label="Custom CLI Execution Flags"
+                bind:value={customCliFlags}
+                placeholder="e.g. --verbose --thinking-budget=4000"
+                disabled={saving}
+                hint="Flag argumen CLI tambahan yang diteruskan langsung ke executable CLI"
+              />
             </div>
           </div>
           <div class="flex flex-col gap-5 border-t border-border-subtle pt-4">

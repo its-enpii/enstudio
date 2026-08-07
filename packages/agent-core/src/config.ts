@@ -23,6 +23,12 @@ export interface SingleVendorConfig {
   model: string
   models: string[]
   dialect: 'openai' | 'anthropic'
+  sonnetModel?: string
+  haikuModel?: string
+  opusModel?: string
+  maxThinkingTokens?: string
+  customModelEnv?: string
+  customCliFlags?: string
 }
 
 export interface VendorPairConfig {
@@ -247,6 +253,12 @@ function parseVendorsFromToml(table: TomlTable): VendorsConfig | undefined {
     const modelsArr = tomlStringArray(secTable, "models") ?? tomlStringArray(secTable, "model_list")
     const dialectRaw = tomlString(secTable, "dialect", "api_dialect")
     const dialect = dialectRaw === "anthropic" || dialectRaw === "openai" ? dialectRaw : "openai"
+    const sonnetModel = tomlString(secTable, "sonnetModel", "sonnet_model")
+    const haikuModel = tomlString(secTable, "haikuModel", "haiku_model")
+    const opusModel = tomlString(secTable, "opusModel", "opus_model")
+    const maxThinkingTokens = tomlString(secTable, "maxThinkingTokens", "max_thinking_tokens")
+    const customModelEnv = tomlString(secTable, "customModelEnv", "custom_model_env")
+    const customCliFlags = tomlString(secTable, "customCliFlags", "custom_cli_flags")
 
     const single: SingleVendorConfig = {
       baseUrl,
@@ -254,6 +266,12 @@ function parseVendorsFromToml(table: TomlTable): VendorsConfig | undefined {
       model,
       models: normalizeModels(modelsArr, model),
       dialect,
+      sonnetModel,
+      haikuModel,
+      opusModel,
+      maxThinkingTokens,
+      customModelEnv,
+      customCliFlags,
     }
     const currentPair = vendors[vendorName!] ?? { main: { baseUrl: "", apiKey: "", model: "", models: [], dialect: "openai" } }
     if (target === "main") {
@@ -447,6 +465,12 @@ function toTomlTable(cfg: ProviderConfig): TomlTable {
           model: vConfig.main.model,
           models: normalizeModels(vConfig.main.models, vConfig.main.model),
           dialect: vConfig.main.dialect,
+          ...(vConfig.main.sonnetModel ? { sonnetModel: vConfig.main.sonnetModel } : {}),
+          ...(vConfig.main.haikuModel ? { haikuModel: vConfig.main.haikuModel } : {}),
+          ...(vConfig.main.opusModel ? { opusModel: vConfig.main.opusModel } : {}),
+          ...(vConfig.main.maxThinkingTokens ? { maxThinkingTokens: vConfig.main.maxThinkingTokens } : {}),
+          ...(vConfig.main.customModelEnv ? { customModelEnv: vConfig.main.customModelEnv } : {}),
+          ...(vConfig.main.customCliFlags ? { customCliFlags: vConfig.main.customCliFlags } : {}),
         }
       }
       if (vConfig.subagent) {
@@ -456,6 +480,12 @@ function toTomlTable(cfg: ProviderConfig): TomlTable {
           model: vConfig.subagent.model,
           models: normalizeModels(vConfig.subagent.models, vConfig.subagent.model),
           dialect: vConfig.subagent.dialect,
+          ...(vConfig.subagent.sonnetModel ? { sonnetModel: vConfig.subagent.sonnetModel } : {}),
+          ...(vConfig.subagent.haikuModel ? { haikuModel: vConfig.subagent.haikuModel } : {}),
+          ...(vConfig.subagent.opusModel ? { opusModel: vConfig.subagent.opusModel } : {}),
+          ...(vConfig.subagent.maxThinkingTokens ? { maxThinkingTokens: vConfig.subagent.maxThinkingTokens } : {}),
+          ...(vConfig.subagent.customModelEnv ? { customModelEnv: vConfig.subagent.customModelEnv } : {}),
+          ...(vConfig.subagent.customCliFlags ? { customCliFlags: vConfig.subagent.customCliFlags } : {}),
         }
       }
     }
