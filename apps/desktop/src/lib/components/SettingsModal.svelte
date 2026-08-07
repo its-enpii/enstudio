@@ -853,7 +853,6 @@
                 description={t('settings.permissions.streamTokensDesc')}
               />
             </div>
-          </div>
         {:else if section === 'permissions'}
           <div class="flex flex-col gap-5">
             <SmartSelect
