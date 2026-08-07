@@ -7,7 +7,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { ProviderConfig } from './config.js'
+import { getVendorSubagentProvider, type ProviderConfig } from './config.js'
 import {
   gitWorktreeAdd,
   gitWorktreeApply,
@@ -208,6 +208,8 @@ export async function spawnSubAgent(opts: {
    * Parent is not blocked. Default false (sync await, legacy).
    */
   async?: boolean
+  vendor?: string
+  model?: string
   emit?: SubAgentEmit
   parentSessionId?: string
   signal?: AbortSignal
@@ -254,6 +256,11 @@ export async function spawnSubAgent(opts: {
     }
   }
 
+  const vendor = opts.vendor ?? 'enpii'
+  const effectiveConfig = getVendorSubagentProvider(opts.config, vendor)
+  if (opts.model?.trim()) {
+    effectiveConfig.model = opts.model.trim()
+  }
   const now = new Date().toISOString()
   const meta: SessionMeta = {
     id: crypto.randomUUID(),

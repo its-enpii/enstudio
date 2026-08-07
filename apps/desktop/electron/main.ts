@@ -40,8 +40,25 @@ const downloads = new Map<string, DownloadSummary>()
 const downloadSessions = new WeakSet<Session>()
 let rendererMode = 'agent'
 
-/** Minimal Settings read (json + simple toml keys). Priority matches agent-core. */
-function readProviderLite(cwd: string): { baseUrl?: string; apiKey?: string; model?: string } {
+type VendorLiteConfig = { baseUrl?: string; apiKey?: string; model?: string }
+
+function readVendorSection(rawToml: string, sectionKey: string): VendorLiteConfig {
+  const get = (keys: string[]) => {
+    for (const key of keys) {
+      const m = rawToml.match(new RegExp(`^\\s*\[${sectionKey.replace(/\./g, '\\.')}\][\\s\\S]*?^\\s*${key}\\s*=\\s*"([^"]*)"`, 'm'))
+      if (m?.[1] !== undefined) return m[1]
+    }
+    return undefined
+  }
+  return {
+    baseUrl: get(['baseUrl', 'base_url']),
+    apiKey: get(['apiKey', 'api_key']),
+    model: get(['model']),
+  }
+}
+
+/** Minimal Settings read (json + simple toml keys + vendor sections). Priority matches agent-core. */
+function readProviderLite(cwd: string, vendorName?: string, target: 'main' | 'subagent' = 'main'): { baseUrl?: string; apiKey?: string; model?: string } {
   const fromJson = (file: string) => {
     try {
       const data = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
@@ -85,10 +102,26 @@ function readProviderLite(cwd: string): { baseUrl?: string; apiKey?: string; mod
   }
   const home = process.env.ENPII_HOME?.trim() || path.join(os.homedir(), '.enpiistudio')
   // later wins
+  const tomlUserFile = path.join(home, 'config.toml')
+  const tomlProjFile = path.join(cwd, '.enpii', 'config.toml')
+  const userTomlRaw = fs.existsSync(tomlUserFile) ? fs.readFileSync(tomlUserFile, 'utf8') : ''
+  const projTomlRaw = fs.existsSync(tomlProjFile) ? fs.readFileSync(tomlProjFile, 'utf8') : ''
+
+  const vName = vendorName ?? 'enpii'
+  const vUserMain = userTomlRaw ? readVendorSection(userTomlRaw, `vendors.${vName}.main`) : {}
+  const vUserSub = userTomlRaw ? readVendorSection(userTomlRaw, `vendors.${vName}.subagent`) : {}
+  const vProjMain = projTomlRaw ? readVendorSection(projTomlRaw, `vendors.${vName}.main`) : {}
+  const vProjSub = projTomlRaw ? readVendorSection(projTomlRaw, `vendors.${vName}.subagent`) : {}
+
+  const vUserTarget = target === 'subagent' ? (vUserSub.baseUrl || vUserSub.model || vUserSub.apiKey ? vUserSub : vUserMain) : vUserMain
+  const vProjTarget = target === 'subagent' ? (vProjSub.baseUrl || vProjSub.model || vProjSub.apiKey ? vProjSub : vProjMain) : vProjMain
+
   const layers = [
     fromJson(path.join(home, 'config.json')),
-    fromToml(path.join(home, 'config.toml')),
-    fromToml(path.join(cwd, '.enpii', 'config.toml')),
+    fromToml(tomlUserFile),
+    vUserTarget,
+    fromToml(tomlProjFile),
+    vProjTarget,
   ]
   const merged = layers.reduce<{ baseUrl?: string; apiKey?: string; model?: string }>(
     (acc, cur) => ({
@@ -112,7 +145,10 @@ function vendorProviderInject(
   args: string[],
   override?: VendorProviderOverride,
 ): { env: Record<string, string>; args: string[] } {
-  const file = readProviderLite(cwd)
+  const bin = path.basename(command).replace(/\.(cmd|exe)$/i, '').toLowerCase()
+  const vendorName = bin === 'claude' ? 'claude' : bin === 'codex' ? 'codex' : bin === 'opencode' ? 'opencode' : bin === 'gemini' ? 'gemini' : 'enpii'
+  const file = readProviderLite(cwd, vendorName, 'main')
+  const subFile = readProviderLite(cwd, vendorName, 'subagent')
   const cfg = {
     baseUrl: override?.baseUrl?.trim() || file.baseUrl,
     apiKey: override?.apiKey?.trim() || file.apiKey,
@@ -137,7 +173,11 @@ function vendorProviderInject(
     env.ANTHROPIC_MODEL = cfg.model
     env.ENPII_MODEL = cfg.model
   }
-  const bin = path.basename(command).replace(/\.(cmd|exe)$/i, '')
+  if (subFile.model) {
+    env.SUBAGENT_MODEL = subFile.model
+    env.CLAUDE_SUBAGENT_MODEL = subFile.model
+    env.OPENAI_SUBAGENT_MODEL = subFile.model
+  }
   const nextArgs = [...args]
   const hasModelFlag = nextArgs.some((a) => a === '--model' || a === '-m' || a.startsWith('--model='))
   if (cfg.model && !hasModelFlag) {

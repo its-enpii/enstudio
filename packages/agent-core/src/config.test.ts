@@ -223,3 +223,39 @@ test('assertProviderReady passes when all required fields populated', () => {
     }),
   )
 })
+
+test('saveProviderConfig supports vendors main and subagent configurations', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enpii-vendors-'))
+  const prevHome = process.env.ENPII_HOME
+  try {
+    process.env.ENPII_HOME = dir
+    delete process.env.ENPII_API_KEY
+    delete process.env.ENPII_BASE_URL
+    delete process.env.ENPII_MODEL
+    delete process.env.ENPII_DIALECT
+
+    const current = loadProviderConfig()
+    const next = saveProviderConfig(current, {
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-main',
+      model: 'gpt-5.4',
+      vendors: {
+        claude: {
+          main: { baseUrl: 'https://api.anthropic.com', apiKey: 'sk-ant-main', model: 'claude-3-7-sonnet', models: ['claude-3-7-sonnet'], dialect: 'anthropic' },
+          subagent: { baseUrl: 'https://api.anthropic.com', apiKey: 'sk-ant-sub', model: 'claude-3-5-haiku', models: ['claude-3-5-haiku'], dialect: 'anthropic' },
+        },
+      },
+    })
+    assert.equal(next.vendors?.claude?.main?.model, 'claude-3-7-sonnet')
+    assert.equal(next.vendors?.claude?.subagent?.model, 'claude-3-5-haiku')
+
+    const loaded = loadProviderConfig()
+    assert.equal(loaded.vendors?.claude?.main?.model, 'claude-3-7-sonnet')
+    assert.equal(loaded.vendors?.claude?.subagent?.model, 'claude-3-5-haiku')
+    assert.equal(loaded.vendors?.claude?.subagent?.apiKey, 'sk-ant-sub')
+  } finally {
+    if (prevHome === undefined) delete process.env.ENPII_HOME
+    else process.env.ENPII_HOME = prevHome
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

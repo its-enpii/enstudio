@@ -43,6 +43,43 @@
 
   type Section = 'provider' | 'permissions' | 'network' | 'appearance' | 'keybindings' | 'updates'
 
+    type VendorKey = 'enpii' | 'claude' | 'codex' | 'opencode' | 'gemini'
+  type TargetKey = 'main' | 'subagent'
+
+  let activeVendor = $state<VendorKey>('enpii')
+  let activeTarget = $state<TargetKey>('main')
+
+  type VendorState = {
+    baseUrl: string
+    apiKey: string
+    model: string
+    models: string[]
+    dialect: string
+    hasKey: boolean
+  }
+
+  let vendorsState = $state<Record<VendorKey, { main: VendorState; subagent: VendorState }>>({
+    enpii: {
+      main: { baseUrl: '', apiKey: '', model: '', models: [], dialect: 'openai', hasKey: false },
+      subagent: { baseUrl: '', apiKey: '', model: 'gpt-5.4-mini', models: ['gpt-5.4-mini', 'gpt-5.4'], dialect: 'openai', hasKey: false },
+    },
+    claude: {
+      main: { baseUrl: 'https://api.anthropic.com', apiKey: '', model: 'claude-3-7-sonnet', models: ['claude-3-7-sonnet', 'claude-3-5-haiku'], dialect: 'anthropic', hasKey: false },
+      subagent: { baseUrl: 'https://api.anthropic.com', apiKey: '', model: 'claude-3-5-haiku', models: ['claude-3-5-haiku'], dialect: 'anthropic', hasKey: false },
+    },
+    codex: {
+      main: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4', models: ['gpt-5.4', 'gpt-5.4-mini'], dialect: 'openai', hasKey: false },
+      subagent: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4-mini', models: ['gpt-5.4-mini'], dialect: 'openai', hasKey: false },
+    },
+    opencode: {
+      main: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4', models: ['gpt-5.4', 'gpt-5.4-mini'], dialect: 'openai', hasKey: false },
+      subagent: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4-mini', models: ['gpt-5.4-mini'], dialect: 'openai', hasKey: false },
+    },
+    gemini: {
+      main: { baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '', model: 'gemini-2.5-flash', models: ['gemini-2.5-flash', 'gemini-2.5-pro'], dialect: 'openai', hasKey: false },
+      subagent: { baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '', model: 'gemini-2.5-flash', models: ['gemini-2.5-flash'], dialect: 'openai', hasKey: false },
+    },
+  })
   let section = $state<Section>('provider')
   let baseUrl = $state('')
   let apiKey = $state('')
@@ -327,6 +364,38 @@
     hasKey = cfg.hasKey
     envOverrides = { ...cfg.envOverrides }
     apiKey = ''
+
+    if (cfg.vendors) {
+      for (const [vK, vVal] of Object.entries(cfg.vendors)) {
+        if (!vVal || !(vK in vendorsState)) continue
+        const key = vK as VendorKey
+        if (vVal.main) {
+          vendorsState[key].main = {
+            baseUrl: vVal.main.baseUrl ?? '',
+            apiKey: '',
+            model: vVal.main.model ?? '',
+            models: normalizeModelList(vVal.main.models, vVal.main.model ?? ''),
+            dialect: vVal.main.dialect ?? 'openai',
+            hasKey: Boolean(vVal.main.hasKey),
+          }
+        }
+        if (vVal.subagent) {
+          vendorsState[key].subagent = {
+            baseUrl: vVal.subagent.baseUrl ?? '',
+            apiKey: '',
+            model: vVal.subagent.model ?? '',
+            models: normalizeModelList(vVal.subagent.models, vVal.subagent.model ?? ''),
+            dialect: vVal.subagent.dialect ?? 'openai',
+            hasKey: Boolean(vVal.subagent.hasKey),
+          }
+        }
+      }
+    }
+    vendorsState.enpii.main.baseUrl = baseUrl
+    vendorsState.enpii.main.model = model
+    vendorsState.enpii.main.models = models
+    vendorsState.enpii.main.dialect = dialect
+    vendorsState.enpii.main.hasKey = hasKey
   }
 
   // Keep local drafts in sync with store when toggled in Settings
@@ -470,6 +539,32 @@
       if (!baseUrl.trim()) throw new Error('Base URL is required')
       if (!activeModel) throw new Error('Add at least one model and set default')
       const modelList = normalizeModelList(models, activeModel)
+      vendorsState.enpii.main.baseUrl = baseUrl.trim()
+      vendorsState.enpii.main.model = activeModel
+      vendorsState.enpii.main.models = modelList
+      vendorsState.enpii.main.dialect = knownDialect ?? 'openai'
+      if (apiKey.trim()) vendorsState.enpii.main.apiKey = apiKey.trim()
+
+      const vendorsPayload: Record<string, any> = {}
+      for (const [vK, vVal] of Object.entries(vendorsState)) {
+        vendorsPayload[vK] = {
+          main: {
+            baseUrl: vVal.main.baseUrl.trim(),
+            apiKey: vVal.main.apiKey.trim(),
+            model: vVal.main.model.trim(),
+            models: normalizeModelList(vVal.main.models, vVal.main.model),
+            dialect: vVal.main.dialect as ProviderDialect,
+          },
+          subagent: {
+            baseUrl: vVal.subagent.baseUrl.trim(),
+            apiKey: vVal.subagent.apiKey.trim(),
+            model: vVal.subagent.model.trim(),
+            models: normalizeModelList(vVal.subagent.models, vVal.subagent.model),
+            dialect: vVal.subagent.dialect as ProviderDialect,
+          },
+        }
+      }
+
       patch = {
         baseUrl: baseUrl.trim(),
         model: activeModel,
@@ -479,6 +574,7 @@
         denyGlobs,
         allowRules,
         guardrails,
+        vendors: vendorsPayload as any,
       }
       if (apiKey.trim()) patch.apiKey = apiKey.trim()
 
@@ -570,8 +666,93 @@
       <div class="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
         {#if section === 'provider'}
           <div class="flex flex-col gap-5">
+            <!-- Vendor Selection Header Tabs -->
+            <div class="flex flex-col gap-2 border-b border-border-subtle pb-3">
+              <div class="text-[11px] font-medium uppercase tracking-wider text-studio-text-dim">Agent Vendor / CLI Engine</div>
+              <div class="flex flex-wrap gap-1.5">
+                {#each [
+                  { id: 'enpii', label: 'Enpii Agent' },
+                  { id: 'claude', label: 'Claude Code CLI' },
+                  { id: 'codex', label: 'Codex CLI' },
+                  { id: 'opencode', label: 'OpenCode CLI' },
+                  { id: 'gemini', label: 'Gemini CLI' }
+                ] as v}
+                  <button
+                    type="button"
+                    class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors {activeVendor === v.id ? 'bg-studio-purple/20 text-studio-purple border border-studio-purple/40' : 'bg-studio-dark text-studio-text-dim hover:text-studio-text border border-border-subtle'}"
+                    onclick={() => {
+                      if (activeVendor === 'enpii' && activeTarget === 'main') {
+                        vendorsState.enpii.main.baseUrl = baseUrl
+                        vendorsState.enpii.main.model = model
+                        vendorsState.enpii.main.models = models
+                        vendorsState.enpii.main.dialect = dialect
+                      }
+                      activeVendor = v.id as VendorKey
+                      const targetState = vendorsState[activeVendor][activeTarget]
+                      baseUrl = targetState.baseUrl || (activeVendor === 'enpii' ? baseUrl : '')
+                      model = targetState.model || (activeVendor === 'enpii' ? model : '')
+                      models = targetState.models.length ? targetState.models : (activeVendor === 'enpii' ? models : [])
+                      dialect = targetState.dialect || 'openai'
+                      hasKey = targetState.hasKey || (activeVendor === 'enpii' ? hasKey : false)
+                      apiKey = targetState.apiKey
+                    }}
+                  >
+                    {v.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Target Selection Sub-Tabs (Main Agent vs Sub-Agent) -->
+            <div class="flex items-center gap-2 rounded-lg bg-studio-dark/50 p-1 border border-border-subtle">
+              <button
+                type="button"
+                class="flex-1 rounded-md py-1 text-center text-xs font-medium transition-colors {activeTarget === 'main' ? 'bg-studio-purple/25 text-studio-text shadow-sm' : 'text-studio-text-dim hover:text-studio-text'}"
+                onclick={() => {
+                  vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
+                  vendorsState[activeVendor][activeTarget].model = model
+                  vendorsState[activeVendor][activeTarget].models = models
+                  vendorsState[activeVendor][activeTarget].dialect = dialect
+                  vendorsState[activeVendor][activeTarget].apiKey = apiKey
+
+                  activeTarget = 'main'
+                  const targetState = vendorsState[activeVendor].main
+                  baseUrl = targetState.baseUrl
+                  model = targetState.model
+                  models = targetState.models
+                  dialect = targetState.dialect
+                  hasKey = targetState.hasKey
+                  apiKey = targetState.apiKey
+                }}
+              >
+                Main Agent
+              </button>
+              <button
+                type="button"
+                class="flex-1 rounded-md py-1 text-center text-xs font-medium transition-colors {activeTarget === 'subagent' ? 'bg-studio-purple/25 text-studio-text shadow-sm' : 'text-studio-text-dim hover:text-studio-text'}"
+                onclick={() => {
+                  vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
+                  vendorsState[activeVendor][activeTarget].model = model
+                  vendorsState[activeVendor][activeTarget].models = models
+                  vendorsState[activeVendor][activeTarget].dialect = dialect
+                  vendorsState[activeVendor][activeTarget].apiKey = apiKey
+
+                  activeTarget = 'subagent'
+                  const targetState = vendorsState[activeVendor].subagent
+                  baseUrl = targetState.baseUrl || vendorsState[activeVendor].main.baseUrl
+                  model = targetState.model || vendorsState[activeVendor].main.model
+                  models = targetState.models.length ? targetState.models : vendorsState[activeVendor].main.models
+                  dialect = targetState.dialect || vendorsState[activeVendor].main.dialect
+                  hasKey = targetState.hasKey
+                  apiKey = targetState.apiKey
+                }}
+              >
+                Sub-Agent
+              </button>
+            </div>
+
             <TextInput
-              label={t('settings.provider.baseUrl')}
+              label={`${activeVendor.toUpperCase()} ${activeTarget === 'subagent' ? 'Sub-Agent' : 'Main Agent'} ${t('settings.provider.baseUrl')}`}
               bind:value={baseUrl}
               placeholder="https://api.openai.com/v1"
               autocomplete="off"
@@ -631,6 +812,7 @@
                   <span class="text-[11px] text-studio-text-dim">{t('settings.provider.addModel')}</span>
                 {/each}
               </div>
+
               <div class="flex items-end gap-2">
                 <TextInput
                   class="min-w-0 flex-1"
@@ -655,8 +837,8 @@
                 >{t('common.add')}</Button>
               </div>
             </div>
-
-            <div class="flex flex-col gap-5 border-t border-border-subtle pt-4">
+          </div>
+          <div class="flex flex-col gap-5 border-t border-border-subtle pt-4">
               <NumberInput
                 label={t('settings.permissions.maxTurns')}
                 bind:value={maxTurns}

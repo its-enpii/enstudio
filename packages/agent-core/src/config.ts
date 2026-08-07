@@ -15,7 +15,55 @@ import { parseToml, stringifyToml, tomlString, tomlStringArray, type TomlTable }
 export type PermissionMode = 'read_only' | 'ask' | 'autopilot_workspace' | 'full'
 export type { GuardrailsConfig, GuardRule }
 
+export type VendorKind = 'enpii' | 'claude' | 'codex' | 'opencode' | 'gemini'
+
+export interface SingleVendorConfig {
+  baseUrl: string
+  apiKey: string
+  model: string
+  models: string[]
+  dialect: 'openai' | 'anthropic'
+}
+
+export interface VendorPairConfig {
+  main: SingleVendorConfig
+  subagent?: SingleVendorConfig
+}
+
+export type VendorsConfig = Partial<Record<VendorKind | string, VendorPairConfig>>
+
+export type PublicSingleVendorConfig = Omit<SingleVendorConfig, 'apiKey'> & { hasKey: boolean }
+export type PublicVendorPairConfig = {
+  main: PublicSingleVendorConfig
+  subagent?: PublicSingleVendorConfig
+}
+export type PublicVendorsConfig = Partial<Record<VendorKind | string, PublicVendorPairConfig>>
+
+export const DEFAULT_VENDORS: Record<VendorKind, VendorPairConfig> = {
+  enpii: {
+    main: { baseUrl: '', apiKey: '', model: '', models: [], dialect: 'openai' },
+    subagent: { baseUrl: '', apiKey: '', model: 'gpt-5.4-mini', models: ['gpt-5.4-mini', 'gpt-5.4'], dialect: 'openai' },
+  },
+  claude: {
+    main: { baseUrl: 'https://api.anthropic.com', apiKey: '', model: 'claude-3-7-sonnet', models: ['claude-3-7-sonnet', 'claude-3-5-haiku', 'claude-3-5-sonnet'], dialect: 'anthropic' },
+    subagent: { baseUrl: 'https://api.anthropic.com', apiKey: '', model: 'claude-3-5-haiku', models: ['claude-3-5-haiku', 'claude-3-7-sonnet'], dialect: 'anthropic' },
+  },
+  codex: {
+    main: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4', models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'], dialect: 'openai' },
+    subagent: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4-mini', models: ['gpt-5.4-mini', 'gpt-5.4'], dialect: 'openai' },
+  },
+  opencode: {
+    main: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4', models: ['gpt-5.4', 'gpt-5.4-mini'], dialect: 'openai' },
+    subagent: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.4-mini', models: ['gpt-5.4-mini'], dialect: 'openai' },
+  },
+  gemini: {
+    main: { baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '', model: 'gemini-2.5-flash', models: ['gemini-2.5-flash', 'gemini-2.5-pro'], dialect: 'openai' },
+    subagent: { baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '', model: 'gemini-2.5-flash', models: ['gemini-2.5-flash'], dialect: 'openai' },
+  },
+}
+
 export interface ProviderConfig {
+  vendors?: VendorsConfig
   baseUrl: string
   apiKey: string
   /** Active / default model id. */
@@ -36,6 +84,7 @@ export interface ProviderConfig {
 }
 
 export type PublicProviderConfig = Omit<ProviderConfig, 'apiKey'> & {
+  vendors?: PublicVendorsConfig
   hasKey: boolean
   /** true when corresponding ENPII_* env is set (env wins over file on load) */
   envOverrides: {
@@ -182,6 +231,41 @@ function parseGuardrails(raw: unknown): GuardrailsConfig | undefined {
   })
 }
 
+
+function parseVendorsFromToml(table: TomlTable): VendorsConfig | undefined {
+  const vendors: VendorsConfig = {}
+  for (const key of Object.keys(table)) {
+    const match = /^vendors\.([^.]+)\.(main|subagent)$/.exec(key)
+    if (!match) continue
+    const [, vendorName, target] = match
+    const sec = table[key]
+    if (!sec || typeof sec !== "object" || Array.isArray(sec)) continue
+    const secTable = sec as TomlTable
+    const baseUrl = tomlString(secTable, "baseUrl", "base_url") ?? ""
+    const apiKey = tomlString(secTable, "apiKey", "api_key") ?? ""
+    const model = tomlString(secTable, "model") ?? ""
+    const modelsArr = tomlStringArray(secTable, "models") ?? tomlStringArray(secTable, "model_list")
+    const dialectRaw = tomlString(secTable, "dialect", "api_dialect")
+    const dialect = dialectRaw === "anthropic" || dialectRaw === "openai" ? dialectRaw : "openai"
+
+    const single: SingleVendorConfig = {
+      baseUrl,
+      apiKey,
+      model,
+      models: normalizeModels(modelsArr, model),
+      dialect,
+    }
+    const currentPair = vendors[vendorName!] ?? { main: { baseUrl: "", apiKey: "", model: "", models: [], dialect: "openai" } }
+    if (target === "main") {
+      currentPair.main = single
+    } else if (target === "subagent") {
+      currentPair.subagent = single
+    }
+    vendors[vendorName!] = currentPair
+  }
+  return Object.keys(vendors).length ? vendors : undefined
+}
+
 function partialFromToml(table: TomlTable): Partial<ProviderConfig> {
   const dialectRaw = tomlString(table, 'dialect', 'api_dialect')
   const modeRaw =
@@ -230,7 +314,8 @@ function readTomlFile(file: string): Partial<ProviderConfig> {
   try {
     if (!fs.existsSync(file)) return {}
     const raw = fs.readFileSync(file, 'utf8')
-    return partialFromToml(parseToml(raw))
+    const parsed = parseToml(raw)
+    return { ...partialFromToml(parsed), vendors: parseVendorsFromToml(parsed) }
   } catch {
     return {}
   }
@@ -250,6 +335,7 @@ function mergePartial(...parts: Partial<ProviderConfig>[]): Partial<ProviderConf
     if (p.allowRules !== undefined) {
       out.allowRules = mergeAllowRules(out.allowRules, p.allowRules)
     }
+    if (p.vendors !== undefined) out.vendors = p.vendors
     if (p.guardrails !== undefined) out.guardrails = p.guardrails
   }
   return out
@@ -282,6 +368,7 @@ export function loadProviderConfig(projectRoot?: string): ProviderConfig {
         ? process.env.ENPII_DIALECT
         : file.dialect ?? DEFAULTS.dialect,
     permissionMode: file.permissionMode ?? DEFAULTS.permissionMode,
+    vendors: file.vendors,
     denyGlobs: file.denyGlobs,
     allowRules: file.allowRules,
     guardrails: file.guardrails,
@@ -309,6 +396,7 @@ export function publicConfig(cfg: ProviderConfig): PublicProviderConfig {
 }
 
 export interface ProviderConfigPatch {
+  vendors?: VendorsConfig
   baseUrl?: string
   /** omit or empty string = leave existing key; non-empty = replace */
   apiKey?: string
@@ -349,6 +437,29 @@ function toTomlTable(cfg: ProviderConfig): TomlTable {
     dialect: cfg.dialect,
     permissionMode: cfg.permissionMode,
   }
+  if (cfg.vendors) {
+    for (const [vName, vConfig] of Object.entries(cfg.vendors)) {
+      if (!vConfig) continue
+      if (vConfig.main) {
+        t[`vendors.${vName}.main`] = {
+          baseUrl: vConfig.main.baseUrl,
+          apiKey: vConfig.main.apiKey || '',
+          model: vConfig.main.model,
+          models: normalizeModels(vConfig.main.models, vConfig.main.model),
+          dialect: vConfig.main.dialect,
+        }
+      }
+      if (vConfig.subagent) {
+        t[`vendors.${vName}.subagent`] = {
+          baseUrl: vConfig.subagent.baseUrl,
+          apiKey: vConfig.subagent.apiKey || '',
+          model: vConfig.subagent.model,
+          models: normalizeModels(vConfig.subagent.models, vConfig.subagent.model),
+          dialect: vConfig.subagent.dialect,
+        }
+      }
+    }
+  }
   if (cfg.denyGlobs?.length) t.denyGlobs = cfg.denyGlobs
   if (cfg.allowRules?.length) {
     t.permissions = { allow: cfg.allowRules }
@@ -383,6 +494,7 @@ export function saveProviderConfig(
         : current.denyGlobs,
     allowRules:
       patch.allowRules !== undefined ? parseAllowRules(patch.allowRules) : current.allowRules,
+    vendors: patch.vendors !== undefined ? patch.vendors : current.vendors,
     guardrails: patch.guardrails !== undefined ? resolveGuardrailsConfig(patch.guardrails) : current.guardrails,
   }
 
@@ -436,5 +548,53 @@ export function assertProviderReady(cfg: ProviderConfig): void {
     throw new Error(
       'No API key. Open Settings or set ENPII_API_KEY / ~/.enpiistudio/config.toml',
     )
+  }
+}
+
+export function getVendorProvider(
+  cfg: ProviderConfig,
+  vendor: string = 'enpii',
+  target: 'main' | 'subagent' = 'main',
+): SingleVendorConfig {
+  const v = cfg.vendors?.[vendor]
+  const targetConfig = target === 'subagent' ? (v?.subagent ?? v?.main) : v?.main
+  const rootAsSingle: SingleVendorConfig = {
+    baseUrl: cfg.baseUrl,
+    apiKey: cfg.apiKey,
+    model: cfg.model,
+    models: cfg.models,
+    dialect: cfg.dialect,
+  }
+  const def = DEFAULT_VENDORS[vendor as VendorKind]
+  const base = target === 'subagent' ? (def?.subagent ?? def?.main ?? rootAsSingle) : (def?.main ?? rootAsSingle)
+
+  if (!targetConfig) {
+    return {
+      baseUrl: base.baseUrl || rootAsSingle.baseUrl,
+      apiKey: base.apiKey || rootAsSingle.apiKey,
+      model: base.model || rootAsSingle.model,
+      models: base.models?.length ? base.models : rootAsSingle.models,
+      dialect: base.dialect || rootAsSingle.dialect,
+    }
+  }
+
+  return {
+    baseUrl: targetConfig.baseUrl?.trim() || v?.main?.baseUrl?.trim() || rootAsSingle.baseUrl,
+    apiKey: targetConfig.apiKey?.trim() || v?.main?.apiKey?.trim() || rootAsSingle.apiKey,
+    model: targetConfig.model?.trim() || v?.main?.model?.trim() || rootAsSingle.model,
+    models: targetConfig.models?.length ? targetConfig.models : rootAsSingle.models,
+    dialect: targetConfig.dialect || v?.main?.dialect || rootAsSingle.dialect,
+  }
+}
+
+export function getVendorSubagentProvider(cfg: ProviderConfig, vendor: string = 'enpii'): ProviderConfig {
+  const sub = getVendorProvider(cfg, vendor, 'subagent')
+  return {
+    ...cfg,
+    baseUrl: sub.baseUrl,
+    apiKey: sub.apiKey,
+    model: sub.model,
+    models: sub.models,
+    dialect: sub.dialect,
   }
 }
