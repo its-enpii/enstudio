@@ -705,16 +705,33 @@
               }}
             />
 
-            <!-- Target Selection using SmartSelect -->
+            <!-- Target Selection using SmartSelect dynamically styled for each Vendor -->
             <SmartSelect
-              label="Config Target (Agent Layer)"
+              label="Model Tier / Target Role"
               bind:value={activeTarget}
-              options={[
-                { value: 'main', label: 'Main Agent', description: 'Pengaturan utama yang digunakan saat turn prompt diajukan' },
-                { value: 'subagent', label: 'Sub-Agent (Optional Override)', description: activeVendor === 'enpii' ? 'Model & endpoint untuk sub-agent terisolasi di EnStudio' : 'Model sekunder untuk vendor CLI (otomatis fallback ke Main Agent jika tidak diisi)' },
-              ]}
+              options={
+                activeVendor === 'claude'
+                  ? [
+                      { value: 'main', label: 'Primary Model (e.g. Sonnet / Opus)', description: 'Model utama untuk analisis kompleks & coding (ANTHROPIC_MODEL)' },
+                      { value: 'subagent', label: 'Fast / Sub-task Model (e.g. Haiku)', description: 'Model cepat untuk pencarian, background sub-task, & fungsi pembantu (CLAUDE_SUBAGENT_MODEL)' },
+                    ]
+                  : activeVendor === 'codex' || activeVendor === 'opencode'
+                    ? [
+                        { value: 'main', label: 'Primary Model (e.g. GPT-5.4 / Codex)', description: 'Model utama untuk eksekusi perintah & prompt utama (OPENAI_MODEL)' },
+                        { value: 'subagent', label: 'Fast / Small Model (e.g. GPT-5.4-mini)', description: 'Model kecil/ringan untuk tugas sekunder (OPENAI_SUBAGENT_MODEL)' },
+                      ]
+                    : activeVendor === 'gemini'
+                      ? [
+                          { value: 'main', label: 'Primary Model (e.g. Gemini Pro)', description: 'Model utama Gemini untuk analisis & penulisan kode' },
+                          { value: 'subagent', label: 'Fast Model (e.g. Gemini Flash)', description: 'Model cepat Gemini Flash untuk eksekusi tugas ringan' },
+                        ]
+                      : [
+                          { value: 'main', label: 'Main Agent', description: 'Model utama EnStudio untuk eksekusi prompt utama' },
+                          { value: 'subagent', label: 'Sub-Agent (Worktree Isolated)', description: 'Model khusus sub-agent terisolasi di Git worktree' },
+                        ]
+              }
               disabled={saving}
-              hint={activeTarget === 'subagent' && activeVendor !== 'enpii' ? 'Vendor CLI akan otomatis menggunakan Main Model jika Sub-Agent tidak diisi' : ''}
+              hint={activeTarget === 'subagent' && activeVendor !== 'enpii' ? 'Vendor CLI akan otomatis menggunakan Primary Model jika Fast/Sub-task Model tidak diisi' : ''}
               onchange={(val) => {
                 vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
                 vendorsState[activeVendor][activeTarget].model = model
