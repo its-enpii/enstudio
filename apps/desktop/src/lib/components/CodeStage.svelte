@@ -27,7 +27,7 @@
   import { syncCodePanel } from '../code-panel.svelte'
 
   type Entry = { kind: 'd' | 'f'; name: string; path: string; depth: number }
-  type CodeTab = { path: string; content: string; originalContent: string; preview?: boolean }
+  type CodeTab = { path: string; content: string; originalContent: string; preview?: boolean; scrollTop?: number; scrollLeft?: number; cursorAnchor?: number; cursorHead?: number }
   type CodeWorkspace = {
     children: Record<string, Entry[]>
     expanded: Record<string, boolean>
@@ -134,7 +134,10 @@
 
   async function switchProject(projectId: string): Promise<void> {
     const token = ++switchToken
-    if (currentProjectId) workspaces.set(currentProjectId, workspaceSnapshot())
+    if (currentProjectId) {
+      syncCurrentTab()
+      workspaces.set(currentProjectId, workspaceSnapshot())
+    }
     currentProjectId = projectId
     const workspace = workspaces.get(projectId) ?? emptyWorkspace()
     workspaces.set(projectId, workspace)
@@ -262,7 +265,16 @@
   function syncCurrentTab(): void {
     if (!selectedPath) return
     const tab = tabs.find((item) => item.path === selectedPath)
-    if (tab) tab.content = content
+    if (tab) {
+      tab.content = content
+      if (editorView) {
+        tab.scrollTop = editorView.scrollDOM.scrollTop
+        tab.scrollLeft = editorView.scrollDOM.scrollLeft
+        const main = editorView.state.selection.main
+        tab.cursorAnchor = main.anchor
+        tab.cursorHead = main.head
+      }
+    }
   }
 
   async function activateTab(tab: CodeTab): Promise<void> {
@@ -534,9 +546,20 @@
     if (!editorHost) return
     const language = await languageFor(file)
     if (!editorHost || selectedPath !== file) return
+
+    const tab = tabs.find((item) => item.path === file)
+    const initialSelection =
+      tab && typeof tab.cursorAnchor === 'number' && typeof tab.cursorHead === 'number'
+        ? {
+            anchor: Math.min(Math.max(0, tab.cursorAnchor), doc.length),
+            head: Math.min(Math.max(0, tab.cursorHead), doc.length),
+          }
+        : undefined
+
     editorView = new EditorView({
       state: EditorState.create({
         doc,
+        selection: initialSelection,
         extensions: [
           lineNumbers(),
           history(),
@@ -569,6 +592,14 @@
                 }
               }
             }
+            if (update.selectionSet && selectedPath) {
+              const currentTab = tabs.find((item) => item.path === selectedPath)
+              if (currentTab) {
+                const main = update.state.selection.main
+                currentTab.cursorAnchor = main.anchor
+                currentTab.cursorHead = main.head
+              }
+            }
             if (update.docChanged || update.selectionSet) {
               const main = update.state.selection.main
               if (!selectedPath || main.empty) {
@@ -594,6 +625,27 @@
       }),
       parent: editorHost,
     })
+
+    const onScroll = () => {
+      if (!selectedPath || !editorView) return
+      const currentTab = tabs.find((item) => item.path === selectedPath)
+      if (currentTab) {
+        currentTab.scrollTop = editorView.scrollDOM.scrollTop
+        currentTab.scrollLeft = editorView.scrollDOM.scrollLeft
+      }
+    }
+    editorView.scrollDOM.addEventListener('scroll', onScroll, { passive: true })
+
+    if (tab && (typeof tab.scrollTop === 'number' || typeof tab.scrollLeft === 'number')) {
+      const targetTop = tab.scrollTop ?? 0
+      const targetLeft = tab.scrollLeft ?? 0
+      requestAnimationFrame(() => {
+        if (editorView?.scrollDOM) {
+          editorView.scrollDOM.scrollTop = targetTop
+          editorView.scrollDOM.scrollLeft = targetLeft
+        }
+      })
+    }
   }
 
   function goToLine(line: number): void {
