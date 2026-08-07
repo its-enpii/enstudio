@@ -155,35 +155,41 @@ function vendorProviderInject(
     model: override?.model?.trim() || file.model,
   }
   const env: Record<string, string> = {}
-  if (cfg.baseUrl) {
-    env.OPENAI_BASE_URL = cfg.baseUrl
-    env.OPENAI_API_BASE = cfg.baseUrl
-    env.ANTHROPIC_BASE_URL = cfg.baseUrl
-    env.ENPII_BASE_URL = cfg.baseUrl
+
+  if (vendorName === 'claude') {
+    if (cfg.baseUrl) env.ANTHROPIC_BASE_URL = cfg.baseUrl
+    if (cfg.apiKey) env.ANTHROPIC_API_KEY = cfg.apiKey
+    if (cfg.model) {
+      env.CLAUDE_MODEL = cfg.model
+      env.ANTHROPIC_MODEL = cfg.model
+    }
+    if (subFile.model) {
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = subFile.model
+    }
+  } else if (vendorName === 'codex' || vendorName === 'opencode') {
+    if (cfg.baseUrl) {
+      env.OPENAI_BASE_URL = cfg.baseUrl
+      env.OPENAI_API_BASE = cfg.baseUrl
+    }
+    if (cfg.apiKey) env.OPENAI_API_KEY = cfg.apiKey
+    if (cfg.model) env.OPENAI_MODEL = cfg.model
+  } else if (vendorName === 'gemini') {
+    if (cfg.baseUrl) env.GEMINI_BASE_URL = cfg.baseUrl
+    if (cfg.apiKey) {
+      env.GEMINI_API_KEY = cfg.apiKey
+      env.GOOGLE_API_KEY = cfg.apiKey
+    }
+    if (cfg.model) env.GEMINI_MODEL = cfg.model
+  } else {
+    if (cfg.baseUrl) env.ENPII_BASE_URL = cfg.baseUrl
+    if (cfg.apiKey) env.ENPII_API_KEY = cfg.apiKey
+    if (cfg.model) env.ENPII_MODEL = cfg.model
   }
-  if (cfg.apiKey) {
-    env.OPENAI_API_KEY = cfg.apiKey
-    env.ANTHROPIC_API_KEY = cfg.apiKey
-    env.GOOGLE_API_KEY = cfg.apiKey
-    env.GEMINI_API_KEY = cfg.apiKey
-    env.ENPII_API_KEY = cfg.apiKey
-  }
-  if (cfg.model) {
-    env.OPENAI_MODEL = cfg.model
-    env.ANTHROPIC_MODEL = cfg.model
-    env.ENPII_MODEL = cfg.model
-  }
-  if (subFile.model) {
-    env.SUBAGENT_MODEL = subFile.model
-    env.CLAUDE_SUBAGENT_MODEL = subFile.model
-    env.OPENAI_SUBAGENT_MODEL = subFile.model
-  }
+
   const nextArgs = [...args]
   const hasModelFlag = nextArgs.some((a) => a === '--model' || a === '-m' || a.startsWith('--model='))
   if (cfg.model && !hasModelFlag) {
-    if (bin === 'claude' || bin === 'codex' || bin === 'opencode' || bin === 'gemini' || bin === 'aider') {
-      nextArgs.push('--model', cfg.model)
-    }
+    nextArgs.push('--model', cfg.model)
   }
   return { env, args: nextArgs }
 }
