@@ -666,98 +666,80 @@
       <div class="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
         {#if section === 'provider'}
           <div class="flex flex-col gap-5">
-            <!-- Vendor Selection Header Tabs -->
-            <div class="flex flex-col gap-2 border-b border-border-subtle pb-3">
-              <div class="text-[11px] font-medium uppercase tracking-wider text-studio-text-dim">Agent Vendor / CLI Engine</div>
-              <div class="flex flex-wrap gap-1.5">
-                {#each [
-                  { id: 'enpii', label: 'Enpii Agent' },
-                  { id: 'claude', label: 'Claude Code CLI' },
-                  { id: 'codex', label: 'Codex CLI' },
-                  { id: 'opencode', label: 'OpenCode CLI' },
-                  { id: 'gemini', label: 'Gemini CLI' }
-                ] as v}
-                  <button
-                    type="button"
-                    class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors {activeVendor === v.id ? 'bg-studio-purple/20 text-studio-purple border border-studio-purple/40' : 'bg-studio-dark text-studio-text-dim hover:text-studio-text border border-border-subtle'}"
-                    onclick={() => {
-                      if (activeVendor === 'enpii' && activeTarget === 'main') {
-                        vendorsState.enpii.main.baseUrl = baseUrl
-                        vendorsState.enpii.main.model = model
-                        vendorsState.enpii.main.models = models
-                        vendorsState.enpii.main.dialect = dialect
-                      }
-                      activeVendor = v.id as VendorKey
-                      const targetState = vendorsState[activeVendor][activeTarget]
-                      baseUrl = targetState.baseUrl || (activeVendor === 'enpii' ? baseUrl : '')
-                      model = targetState.model || (activeVendor === 'enpii' ? model : '')
-                      models = targetState.models.length ? targetState.models : (activeVendor === 'enpii' ? models : [])
-                      dialect = targetState.dialect || 'openai'
-                      hasKey = targetState.hasKey || (activeVendor === 'enpii' ? hasKey : false)
-                      apiKey = targetState.apiKey
-                    }}
-                  >
-                    {v.label}
-                  </button>
-                {/each}
+            <!-- Information Banner explaining CLI Overrides -->
+            <div class="rounded-lg border border-studio-purple/30 bg-studio-purple/10 p-3.5 text-xs text-studio-text">
+              <div class="font-semibold text-studio-purple">CLI Environment & Model Overrides</div>
+              <div class="mt-1 text-studio-text-dim">
+                Pengaturan di bawah meng-override Base URL, API Key, dan Model secara otomatis saat PTY Terminal/Agent dijalankan di EnStudio. Pengaturan Vendor CLI tidak mengubah file config asli milik vendor di sistem.
               </div>
             </div>
 
-            <!-- Target Selection Sub-Tabs (Main Agent vs Sub-Agent) -->
-            <div class="flex items-center gap-2 rounded-lg bg-studio-dark/50 p-1 border border-border-subtle">
-              <button
-                type="button"
-                class="flex-1 rounded-md py-1 text-center text-xs font-medium transition-colors {activeTarget === 'main' ? 'bg-studio-purple/25 text-studio-text shadow-sm' : 'text-studio-text-dim hover:text-studio-text'}"
-                onclick={() => {
-                  vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
-                  vendorsState[activeVendor][activeTarget].model = model
-                  vendorsState[activeVendor][activeTarget].models = models
-                  vendorsState[activeVendor][activeTarget].dialect = dialect
-                  vendorsState[activeVendor][activeTarget].apiKey = apiKey
+            <!-- Vendor Selection using SmartSelect -->
+            <SmartSelect
+              label="Agent Vendor / CLI Engine"
+              bind:value={activeVendor}
+              options={[
+                { value: 'enpii', label: 'Enpii Agent (Native Engine)', description: 'Engine utama EnStudio dengan dukungan full multi-agent & worktree' },
+                { value: 'claude', label: 'Claude Code CLI', description: 'Terminal harness resmi Anthropic Claude Code (claude)' },
+                { value: 'codex', label: 'Codex CLI', description: 'Terminal harness OpenAI Codex CLI (codex)' },
+                { value: 'opencode', label: 'OpenCode CLI', description: 'Terminal harness OpenCode (opencode)' },
+                { value: 'gemini', label: 'Gemini CLI', description: 'Terminal harness Google Gemini CLI (gemini)' },
+              ]}
+              disabled={saving}
+              hint="Pilih vendor agent yang ingin dikonfigurasi"
+              onchange={(val) => {
+                if (activeVendor === 'enpii' && activeTarget === 'main') {
+                  vendorsState.enpii.main.baseUrl = baseUrl
+                  vendorsState.enpii.main.model = model
+                  vendorsState.enpii.main.models = models
+                  vendorsState.enpii.main.dialect = dialect
+                }
+                activeVendor = val as VendorKey
+                const targetState = vendorsState[activeVendor][activeTarget]
+                baseUrl = targetState.baseUrl || (activeVendor === 'enpii' ? baseUrl : '')
+                model = targetState.model || (activeVendor === 'enpii' ? model : '')
+                models = targetState.models.length ? targetState.models : (activeVendor === 'enpii' ? models : [])
+                dialect = targetState.dialect || (activeVendor === 'claude' ? 'anthropic' : 'openai')
+                hasKey = targetState.hasKey || (activeVendor === 'enpii' ? hasKey : false)
+                apiKey = targetState.apiKey
+              }}
+            />
 
-                  activeTarget = 'main'
-                  const targetState = vendorsState[activeVendor].main
-                  baseUrl = targetState.baseUrl
-                  model = targetState.model
-                  models = targetState.models
-                  dialect = targetState.dialect
-                  hasKey = targetState.hasKey
-                  apiKey = targetState.apiKey
-                }}
-              >
-                Main Agent
-              </button>
-              <button
-                type="button"
-                class="flex-1 rounded-md py-1 text-center text-xs font-medium transition-colors {activeTarget === 'subagent' ? 'bg-studio-purple/25 text-studio-text shadow-sm' : 'text-studio-text-dim hover:text-studio-text'}"
-                onclick={() => {
-                  vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
-                  vendorsState[activeVendor][activeTarget].model = model
-                  vendorsState[activeVendor][activeTarget].models = models
-                  vendorsState[activeVendor][activeTarget].dialect = dialect
-                  vendorsState[activeVendor][activeTarget].apiKey = apiKey
+            <!-- Target Selection using SmartSelect -->
+            <SmartSelect
+              label="Config Target (Agent Layer)"
+              bind:value={activeTarget}
+              options={[
+                { value: 'main', label: 'Main Agent', description: 'Pengaturan utama yang digunakan saat turn prompt diajukan' },
+                { value: 'subagent', label: 'Sub-Agent (Optional Override)', description: activeVendor === 'enpii' ? 'Model & endpoint untuk sub-agent terisolasi di EnStudio' : 'Model sekunder untuk vendor CLI (otomatis fallback ke Main Agent jika tidak diisi)' },
+              ]}
+              disabled={saving}
+              hint={activeTarget === 'subagent' && activeVendor !== 'enpii' ? 'Vendor CLI akan otomatis menggunakan Main Model jika Sub-Agent tidak diisi' : ''}
+              onchange={(val) => {
+                vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
+                vendorsState[activeVendor][activeTarget].model = model
+                vendorsState[activeVendor][activeTarget].models = models
+                vendorsState[activeVendor][activeTarget].dialect = dialect
+                vendorsState[activeVendor][activeTarget].apiKey = apiKey
 
-                  activeTarget = 'subagent'
-                  const targetState = vendorsState[activeVendor].subagent
-                  baseUrl = targetState.baseUrl || vendorsState[activeVendor].main.baseUrl
-                  model = targetState.model || vendorsState[activeVendor].main.model
-                  models = targetState.models.length ? targetState.models : vendorsState[activeVendor].main.models
-                  dialect = targetState.dialect || vendorsState[activeVendor].main.dialect
-                  hasKey = targetState.hasKey
-                  apiKey = targetState.apiKey
-                }}
-              >
-                Sub-Agent
-              </button>
-            </div>
+                activeTarget = val as TargetKey
+                const targetState = vendorsState[activeVendor][activeTarget]
+                baseUrl = targetState.baseUrl || (activeTarget === 'subagent' ? vendorsState[activeVendor].main.baseUrl : '')
+                model = targetState.model || (activeTarget === 'subagent' ? vendorsState[activeVendor].main.model : '')
+                models = targetState.models.length ? targetState.models : (activeTarget === 'subagent' ? vendorsState[activeVendor].main.models : [])
+                dialect = targetState.dialect || vendorsState[activeVendor].main.dialect
+                hasKey = targetState.hasKey
+                apiKey = targetState.apiKey
+              }}
+            />
 
             <TextInput
-              label={`${activeVendor.toUpperCase()} ${activeTarget === 'subagent' ? 'Sub-Agent' : 'Main Agent'} ${t('settings.provider.baseUrl')}`}
+              label={`${activeVendor.toUpperCase()} (${activeTarget === 'subagent' ? 'Sub-Agent' : 'Main Agent'}) ${t('settings.provider.baseUrl')}`}
               bind:value={baseUrl}
               placeholder="https://api.openai.com/v1"
               autocomplete="off"
               disabled={saving}
-              hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'OpenAI- or Anthropic-compatible endpoint'}
+              hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'OpenAI- atau Anthropic-compatible endpoint'}
             />
             <TextInput
               label={hasKey ? `${t('settings.provider.apiKey')} (${t('common.ok')})` : t('settings.provider.apiKey')}
