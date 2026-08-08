@@ -50,6 +50,15 @@ const HARD_TIMEOUT_MS = 30_000
 const IDLE_MS = 800
 const LASTEXITCODE_REGEX = /(?:\r?\n|^)\$LASTEXITCODE\s*(?:=|:\s*|=)\s*(-?\d+)/i
 
+function getEnvValue(env: Record<string, string | undefined>, key: string): string {
+  if (!env) return ''
+  const lower = key.toLowerCase()
+  for (const k of Object.keys(env)) {
+    if (k.toLowerCase() === lower && env[k]) return env[k]!
+  }
+  return ''
+}
+
 function cleanEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
@@ -174,11 +183,30 @@ function resolveExecutablePath(command: string, envPath?: string): string {
     .filter(Boolean)
 
   if (isWin) {
+    const userProfile = process.env.USERPROFILE || process.env.HOME || ''
+    const appData = process.env.APPDATA || (userProfile ? path.join(userProfile, 'AppData', 'Roaming') : '')
+    const localAppData = process.env.LOCALAPPDATA || (userProfile ? path.join(userProfile, 'AppData', 'Local') : '')
     pathDirs.push(
+      path.join(appData, 'npm'),
+      path.join(localAppData, 'pnpm'),
+      path.join(userProfile, '.cargo', 'bin'),
+      path.join(userProfile, '.bun', 'bin'),
+      path.join(localAppData, 'Programs', 'claude'),
+      'C:\\Program Files\\nodejs',
       'C:\\Windows\\System32\\OpenSSH',
       'C:\\Windows\\System32',
       'C:\\Program Files\\Git\\usr\\bin',
-      'C:\\Program Files\\Git\\bin',
+      'C:\\Program Files\\Git\\bin'
+    )
+  } else {
+    const home = process.env.HOME || ''
+    pathDirs.push(
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+      path.join(home, '.cargo', 'bin'),
+      path.join(home, '.bun', 'bin'),
+      path.join(home, '.pnpm-global', 'bin'),
+      path.join(home, '.local', 'bin')
     )
   }
 
@@ -249,8 +277,23 @@ function createSession(payload: TerminalCreateParams | undefined): { id: string 
   // eslint-disable-next-line no-console
   console.log('[terminalWorker spawn]', requested, 'PATH preview:', env.PATH?.slice(0, 150), 'has docker:', env.PATH?.toLowerCase().includes('docker'))
 
-  const spawnBinary = resolveExecutablePath(requested, env.PATH)
-  const terminal = pty.spawn(spawnBinary, args, {
+  const pathVal = getEnvValue(env, 'PATH') || getEnvValue(process.env, 'PATH')
+  if (pathVal) {
+    env.PATH = pathVal
+    env.Path = pathVal
+  }
+
+  const spawnBinary = resolveExecutablePath(requested, pathVal)
+  if (requested !== defaultShell() && !fs.existsSync(spawnBinary)) {
+    throw new Error(`Command "${requested}" was not found in system PATH or standard binary locations.`)
+  }
+  let finalBinary = spawnBinary
+  let finalArgs = args
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(spawnBinary)) {
+    finalBinary = defaultShell()
+    finalArgs = ['/c', spawnBinary, ...args]
+  }
+  const terminal = pty.spawn(finalBinary, finalArgs, {
     name: 'xterm-256color',
     cwd,
     cols: clampTerminalCols(payload?.cols),

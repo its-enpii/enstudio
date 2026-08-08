@@ -67,6 +67,15 @@ type PendingReply = {
   reject: (err: Error) => void
 }
 
+function getEnvValue(env: Record<string, string | undefined>, key: string): string {
+  if (!env) return ''
+  const lower = key.toLowerCase()
+  for (const k of Object.keys(env)) {
+    if (k.toLowerCase() === lower && env[k]) return env[k]!
+  }
+  return ''
+}
+
 export class TerminalHost {
   private readonly sessions = new Map<string, Snapshot>()
   private readonly eventJournalLimit: number
@@ -178,8 +187,13 @@ export class TerminalHost {
       const envObj = Object.fromEntries(
         Object.entries(liveEnv).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
       )
+      const pathStr = getEnvValue(envObj, 'PATH') || getEnvValue(process.env as Record<string, string>, 'PATH')
+      if (pathStr) {
+        envObj.PATH = pathStr
+        envObj.Path = pathStr
+      }
       // eslint-disable-next-line no-console
-      console.log('[terminalHost] posting init with', Object.keys(envObj).length, 'env keys, PATH chars:', envObj.PATH?.length, 'has docker:', envObj.PATH?.toLowerCase().includes('docker'))
+      console.log('[terminalHost] posting init with', Object.keys(envObj).length, 'env keys, PATH chars:', pathStr.length, 'has docker:', pathStr.toLowerCase().includes('docker'))
       this.worker?.postMessage({
         type: 'init',
         correlationId,

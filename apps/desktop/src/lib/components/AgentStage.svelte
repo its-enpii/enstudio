@@ -65,11 +65,34 @@
     return n === 1 ? base : `${base} ${n}`
   }
 
+  async function waitVendorHostSize(tries = 20): Promise<boolean> {
+    let lastW = 0
+    let lastH = 0
+    let stable = 0
+    for (let i = 0; i < tries; i++) {
+      if (vendorHost && vendorHost.clientWidth > 100 && vendorHost.clientHeight > 100) {
+        if (vendorHost.clientWidth === lastW && vendorHost.clientHeight === lastH) {
+          stable += 1
+          if (stable >= 2) return true
+        } else {
+          stable = 0
+          lastW = vendorHost.clientWidth
+          lastH = vendorHost.clientHeight
+        }
+      }
+      await tick()
+      await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    }
+    return false
+  }
+
   function measureVendorHost(): { cols: number; rows: number } {
-    const cellW = 7.2
-    const cellH = 15
-    const cols = Math.max(40, Math.floor((vendorHost?.clientWidth || 800) / cellW))
-    const rows = Math.max(12, Math.floor((vendorHost?.clientHeight || 400) / cellH))
+    const w = vendorHost?.clientWidth || vendorHost?.getBoundingClientRect()?.width || 1100
+    const h = vendorHost?.clientHeight || vendorHost?.getBoundingClientRect()?.height || 600
+    const cellW = 8.5
+    const cellH = 16
+    const cols = Math.max(115, Math.floor((Math.max(w, 1000) - 16) / cellW))
+    const rows = Math.max(25, Math.floor((Math.max(h, 500) - 16) / cellH))
     return { cols, rows }
   }
 
@@ -100,13 +123,28 @@
     }, 80)
   }
 
+  function refitVendorUntilStable(maxFrames = 12): void {
+    let frame = 0
+    const check = () => {
+      fitVendor(true)
+      frame++
+      if (frame < maxFrames) requestAnimationFrame(check)
+    }
+    requestAnimationFrame(check)
+  }
+
   async function mountVendorTerm(cliId: string): Promise<void> {
     if (!vendorHost) return
     const entry = vendorTerms.get(cliId)
     if (!entry) return
-    if (!entry.term.element) entry.term.open(vendorHost)
-    else if (vendorHost.firstElementChild !== entry.term.element) vendorHost.replaceChildren(entry.term.element)
-    fitVendor(true)
+    vendorHost.replaceChildren()
+    if (!entry.term.element) {
+      entry.term.open(vendorHost)
+    } else {
+      vendorHost.appendChild(entry.term.element)
+    }
+    await tick()
+    refitVendorUntilStable(12)
     entry.term.focus()
   }
 
@@ -121,24 +159,15 @@
     if (!cli) return
     vendorBusy = true
     vendorError = ''
+    vendorHost?.replaceChildren()
     try {
       await tick()
-      const seed = measureVendorHost()
-      const created = await termApi.create(app.activeProject.path, seed.cols, seed.rows, {
-        projectId: app.activeProject.id,
-        purpose: 'vendor',
-        command: cli.command,
-        args: cli.args,
-        injectProvider: true,
-        provider,
-      })
-      if (vendorDestroyed) {
-        await termApi.kill(created.id)
-        return
-      }
+      await waitVendorHostSize()
+      if (!vendorHost) return
+
       const term = new Terminal({
-        cols: seed.cols,
-        rows: seed.rows,
+        cols: 80,
+        rows: 24,
         cursorBlink: true,
         cursorStyle: 'bar',
         fontFamily: fontStack(app.ui.fontFamily),
@@ -150,6 +179,27 @@
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
+      term.open(vendorHost)
+      try { await document.fonts?.ready } catch { /* ignore */ }
+      await tick()
+      fit.fit()
+      const cols = Math.max(40, term.cols || 120)
+      const rows = Math.max(10, term.rows || 30)
+
+      const created = await termApi.create(app.activeProject.path, cols, rows, {
+        projectId: app.activeProject.id,
+        purpose: 'vendor',
+        command: cli.command,
+        args: cli.args,
+        injectProvider: true,
+        provider,
+      })
+      if (vendorDestroyed) {
+        await termApi.kill(created.id)
+        term.dispose()
+        return
+      }
+
       term.onData((data) => void termApi.write(created.id, data))
       const buffered = vendorPending.get(created.id)
       if (buffered) {
@@ -160,7 +210,7 @@
         ptyId: created.id,
         term,
         fit,
-        size: { cols: seed.cols, rows: seed.rows },
+        size: { cols, rows },
         kind,
       })
       await mountVendorTerm(tabId)
@@ -187,22 +237,36 @@ void tick().then(() => focusComposer())
     Boolean(app.provider?.baseUrl?.trim() && app.provider?.model?.trim() && app.provider?.hasKey),
   )
 
+  const DEFAULT_VENDOR_MODELS: Record<VendorKind, string[]> = {
+    claude: ['claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku', 'claude-3-opus'],
+    codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-4o'],
+    opencode: ['gpt-5.4', 'gpt-5.4-mini', 'claude-3-7-sonnet'],
+    gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    enpii: [],
+  }
+
   const vendorModelOptions = $derived.by(() => {
-    const list = app.provider?.models?.length
-      ? app.provider.models
-      : app.provider?.model
-        ? [app.provider.model]
-        : []
+    const kind = vendorConfigKind
+    if (!kind) return []
+    const defaults = DEFAULT_VENDOR_MODELS[kind] ?? []
+    const vendorSetting = app.provider?.vendors?.[kind]?.main
+    const customList = vendorSetting?.models?.length ? vendorSetting.models : defaults
+    const activeModel = vendorSetting?.model?.trim()
+    const rawList = activeModel ? [activeModel, ...customList] : customList
     const out: string[] = []
-    for (const m of list) if (m && !out.includes(m)) out.push(m)
+    for (const m of rawList) {
+      if (m && typeof m === 'string' && !out.includes(m)) out.push(m)
+    }
     return out.map((m) => ({ value: m, label: m }))
   })
 
   function openVendorConfig(kind: VendorKind): void {
     if (!app.activeProject) return
     vendorConfigKind = kind
+    const vendorSetting = app.provider?.vendors?.[kind]?.main
+    const activeModel = vendorSetting?.model?.trim()
     vendorConfig = {
-      model: app.provider?.model ?? vendorModelOptions[0]?.value ?? '',
+      model: activeModel || DEFAULT_VENDOR_MODELS[kind]?.[0] || '',
     }
     vendorConfigOpen = true
   }
@@ -271,7 +335,7 @@ void tick().then(() => focusComposer())
         return
       }
     })
-    vendorResizeObs = new ResizeObserver(() => fitVendor(false))
+    vendorResizeObs = new ResizeObserver(() => refitVendorUntilStable(6))
     if (vendorHost) vendorResizeObs.observe(vendorHost)
     return () => {
       offData()

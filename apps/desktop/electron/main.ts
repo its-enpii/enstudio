@@ -155,6 +155,14 @@ function readProviderLite(cwd: string, vendorName?: string, target: 'main' | 'su
 }
 
 /** Env + argv flags so vendor CLIs follow enpii Settings (base URL / model / key). */
+function isValidVendorModelName(model?: string): boolean {
+  if (!model) return false
+  const m = model.trim().toLowerCase()
+  if (!m) return false
+  const invalid = ['workspace', 'read_only', 'ask', 'autopilot_workspace', 'full', 'default']
+  return !invalid.includes(m)
+}
+
 function vendorProviderInject(
   command: string,
   cwd: string,
@@ -176,10 +184,12 @@ function vendorProviderInject(
 
   const file = readProviderLite(cwd, vendorName, 'main')
   const subFile = readProviderLite(cwd, vendorName, 'subagent')
+  const rawModel = override?.model?.trim() || file.model
+  const validModel = isValidVendorModelName(rawModel) ? rawModel : undefined
   const cfg = {
     baseUrl: override?.baseUrl?.trim() || file.baseUrl,
     apiKey: override?.apiKey?.trim() || file.apiKey,
-    model: override?.model?.trim() || file.model,
+    model: validModel,
   }
   const env: Record<string, string> = {}
 

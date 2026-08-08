@@ -709,161 +709,48 @@
       <div class="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
         {#if section === 'provider'}
           <div class="flex flex-col gap-5">
-            <!-- Information Banner explaining Vendor-Specific Overrides -->
-            <div class="rounded-lg border border-studio-purple/30 bg-studio-purple/10 p-3.5 text-xs text-studio-text">
-              <div class="font-semibold text-studio-purple">Vendor CLI Environment Overrides</div>
-              <div class="mt-1 text-studio-text-dim">
-                Pengaturan di bawah meng-override Environment Variables resmi untuk masing-masing Vendor CLI secara otomatis saat PTY Terminal dijalankan di EnStudio.
-              </div>
-            </div>
-
-            <!-- Vendor Selection using SmartSelect -->
-            <SmartSelect
-              label="Agent Vendor / CLI Engine"
-              bind:value={activeVendor}
-              options={[
-                { value: 'enpii', label: 'Enpii Agent (Native Engine)', description: 'Engine native EnStudio (Main Agent & Sub-Agent terisolasi)' },
-                { value: 'claude', label: 'Claude Code CLI', description: 'Terminal harness resmi Anthropic (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_MODEL)' },
-                { value: 'codex', label: 'Codex CLI', description: 'Terminal harness OpenAI Codex (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL)' },
-                { value: 'opencode', label: 'OpenCode CLI', description: 'Terminal harness OpenCode (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL)' },
-                { value: 'gemini', label: 'Gemini CLI', description: 'Terminal harness Google Gemini (GEMINI_API_KEY, GEMINI_BASE_URL, GEMINI_MODEL)' },
-              ]}
-              disabled={saving}
-              hint="Pilih vendor agent yang ingin dikonfigurasi"
-              onchange={(val) => {
-                vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
-                vendorsState[activeVendor][activeTarget].model = model
-                vendorsState[activeVendor][activeTarget].models = models
-                vendorsState[activeVendor][activeTarget].dialect = dialect
-                vendorsState[activeVendor][activeTarget].apiKey = apiKey
-                vendorsState[activeVendor][activeTarget].sonnetModel = sonnetModel
-                vendorsState[activeVendor][activeTarget].haikuModel = haikuModel
-                vendorsState[activeVendor][activeTarget].opusModel = opusModel
-                vendorsState[activeVendor][activeTarget].maxThinkingTokens = maxThinkingTokens
-                vendorsState[activeVendor][activeTarget].customModelEnv = customModelEnv
-                vendorsState[activeVendor][activeTarget].customCliFlags = customCliFlags
-
-                activeVendor = val as VendorKey
-                activeTarget = 'main'
-                const targetState = vendorsState[activeVendor].main
-                baseUrl = targetState.baseUrl || (activeVendor === 'enpii' ? baseUrl : '')
-                model = targetState.model || (activeVendor === 'enpii' ? model : '')
-                models = targetState.models.length ? targetState.models : (activeVendor === 'enpii' ? models : [])
-                dialect = targetState.dialect || (activeVendor === 'claude' ? 'anthropic' : 'openai')
-                hasKey = targetState.hasKey || (activeVendor === 'enpii' ? hasKey : false)
-                apiKey = targetState.apiKey
-                sonnetModel = targetState.sonnetModel ?? ''
-                haikuModel = targetState.haikuModel ?? ''
-                opusModel = targetState.opusModel ?? ''
-                maxThinkingTokens = targetState.maxThinkingTokens ?? ''
-                customModelEnv = targetState.customModelEnv ?? ''
-                customCliFlags = targetState.customCliFlags ?? ''
-              }}
-            />
-
-            <!-- For Enpii & Claude, support Target selection (Enpii: Main/Subagent, Claude: Primary/Haiku Override) -->
-            {#if activeVendor === 'enpii' || activeVendor === 'claude'}
-              <SmartSelect
-                label={activeVendor === 'claude' ? "Claude Model Specification" : "Config Target (Agent Layer)"}
-                bind:value={activeTarget}
-                options={
-                  activeVendor === 'claude'
-                    ? [
-                        { value: 'main', label: 'Primary Model (CLAUDE_MODEL)', description: 'Model utama untuk analisis & coding (e.g. claude-3-7-sonnet)' },
-                        { value: 'subagent', label: 'Default Haiku Model (ANTHROPIC_DEFAULT_HAIKU_MODEL)', description: 'Model cepat resmi Anthropic untuk background tasks (e.g. claude-3-5-haiku)' },
-                      ]
-                    : [
-                        { value: 'main', label: 'Main Agent', description: 'Model utama EnStudio untuk eksekusi prompt utama' },
-                        { value: 'subagent', label: 'Sub-Agent (Worktree Isolated)', description: 'Model khusus sub-agent terisolasi di Git worktree' },
-                      ]
-                }
-                disabled={saving}
-                onchange={(val) => {
-                  vendorsState[activeVendor][activeTarget].baseUrl = baseUrl
-                  vendorsState[activeVendor][activeTarget].model = model
-                  vendorsState[activeVendor][activeTarget].models = models
-                  vendorsState[activeVendor][activeTarget].dialect = dialect
-                  vendorsState[activeVendor][activeTarget].apiKey = apiKey
-                  vendorsState[activeVendor][activeTarget].sonnetModel = sonnetModel
-                  vendorsState[activeVendor][activeTarget].haikuModel = haikuModel
-                  vendorsState[activeVendor][activeTarget].opusModel = opusModel
-                  vendorsState[activeVendor][activeTarget].maxThinkingTokens = maxThinkingTokens
-                  vendorsState[activeVendor][activeTarget].customModelEnv = customModelEnv
-                  vendorsState[activeVendor][activeTarget].customCliFlags = customCliFlags
-
-                  activeTarget = val as TargetKey
-                  const targetState = vendorsState[activeVendor][activeTarget]
-                  baseUrl = targetState.baseUrl || (activeTarget === 'subagent' ? vendorsState[activeVendor].main.baseUrl : '')
-                  model = targetState.model || (activeTarget === 'subagent' ? vendorsState[activeVendor].main.model : '')
-                  models = targetState.models.length ? targetState.models : (activeTarget === 'subagent' ? vendorsState[activeVendor].main.models : [])
-                  dialect = targetState.dialect || vendorsState[activeVendor].main.dialect
-                  hasKey = targetState.hasKey
-                  apiKey = targetState.apiKey
-                  sonnetModel = targetState.sonnetModel ?? ''
-                  haikuModel = targetState.haikuModel ?? ''
-                  opusModel = targetState.opusModel ?? ''
-                  maxThinkingTokens = targetState.maxThinkingTokens ?? ''
-                  customModelEnv = targetState.customModelEnv ?? ''
-                  customCliFlags = targetState.customCliFlags ?? ''
-                }}
-              />
-            {/if}
-
+            <!-- Main EnStudio Provider Settings -->
             <TextInput
-              label={
-                activeVendor === 'claude'
-                  ? 'ANTHROPIC_BASE_URL (Base URL)'
-                  : activeVendor === 'codex' || activeVendor === 'opencode'
-                    ? 'OPENAI_BASE_URL (Base URL)'
-                    : activeVendor === 'gemini'
-                      ? 'GEMINI_BASE_URL (Base URL)'
-                      : `ENPII ${activeTarget === 'subagent' ? 'Sub-Agent' : 'Main Agent'} Base URL`
-              }
+              label={t('settings.provider.baseUrl')}
               bind:value={baseUrl}
-              placeholder={activeVendor === 'claude' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'}
+              placeholder="https://api.openai.com/v1"
               autocomplete="off"
               disabled={saving}
-              hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'Endpoint API gateway / proxy'}
+              hint={envOverrides.baseUrl ? 'env ENPII_BASE_URL active' : 'OpenAI- atau Anthropic-compatible endpoint'}
             />
             <TextInput
-              label={
-                activeVendor === 'claude'
-                  ? `ANTHROPIC_API_KEY ${hasKey ? ' (Key OK)' : ''}`
-                  : activeVendor === 'codex' || activeVendor === 'opencode'
-                    ? `OPENAI_API_KEY ${hasKey ? ' (Key OK)' : ''}`
-                    : activeVendor === 'gemini'
-                      ? `GEMINI_API_KEY ${hasKey ? ' (Key OK)' : ''}`
-                      : hasKey ? `${t('settings.provider.apiKey')} (${t('common.ok')})` : t('settings.provider.apiKey')
-              }
+              label={hasKey ? `${t('settings.provider.apiKey')} (${t('common.ok')})` : t('settings.provider.apiKey')}
               type="password"
               bind:value={apiKey}
               placeholder={hasKey ? t('settings.provider.apiKeySet') : 'sk-…'}
               autocomplete="off"
               disabled={saving}
-              hint={envOverrides.apiKey ? 'env active' : ''}
+              hint={envOverrides.apiKey ? 'env ENPII_API_KEY active' : ''}
             />
             <SmartSelect
               label={t('settings.provider.dialect')}
               bind:value={dialect}
               options={dialectOpts}
               disabled={saving}
-              hint={envOverrides.dialect ? 'env ENPII_DIALECT active' : 'Wire format untuk API endpoint'}
+              hint={envOverrides.dialect ? 'env ENPII_DIALECT active' : 'Wire format for the endpoint'}
             />
             <SmartSelect
-              label={
-                activeVendor === 'claude'
-                  ? activeTarget === 'subagent' ? 'ANTHROPIC_DEFAULT_HAIKU_MODEL' : 'CLAUDE_MODEL / ANTHROPIC_MODEL'
-                  : activeVendor === 'codex' || activeVendor === 'opencode'
-                    ? 'OPENAI_MODEL'
-                    : activeVendor === 'gemini'
-                      ? 'GEMINI_MODEL'
-                      : t('settings.provider.model')
-              }
+              label="Main Agent Model"
               bind:value={model}
               options={models.map((m) => ({ value: m, label: m }))}
               disabled={saving || !models.length}
               placeholder={models.length ? 'Select…' : t('settings.provider.addModel')}
-              hint={envOverrides.model ? 'env active' : ''}
+              hint={envOverrides.model ? 'env ENPII_MODEL active' : 'Model utama untuk eksekusi prompt EnStudio'}
+            />
+            <SmartSelect
+              label="Sub-Agent Model"
+              bind:value={vendorsState.enpii.subagent.model}
+              options={[
+                { value: '', label: 'Sama dengan Main Agent Model (Default)' },
+                ...models.map((m) => ({ value: m, label: m }))
+              ]}
+              disabled={saving}
+              hint="Model ringan/cepat untuk sub-task terisolasi di EnStudio"
             />
             <div class="flex flex-col gap-2">
               <div class="text-xs font-medium text-studio-text-dim">{t('settings.provider.models')}</div>
@@ -900,7 +787,7 @@
                   class="min-w-0 flex-1"
                   label={t('settings.provider.addModel')}
                   bind:value={modelDraft}
-                  placeholder="e.g. gpt-5.4-mini or claude-3-5-haiku"
+                  placeholder="gpt-4.1 / claude-opus-4"
                   autocomplete="off"
                   disabled={saving}
                   onkeydown={(e) => {
@@ -920,75 +807,117 @@
               </div>
             </div>
 
-            <!-- Vendor Specific Model Specification & Advanced Overrides -->
-            {#if activeVendor === 'claude'}
-              <div class="flex flex-col gap-4 border-t border-border-subtle pt-4">
-                <div class="text-xs font-semibold text-studio-purple">Claude Model Tier Overrides</div>
-                <TextInput
-                  label="Sonnet Model Specification (ANTHROPIC_DEFAULT_SONNET_MODEL)"
-                  bind:value={sonnetModel}
-                  placeholder="e.g. claude-3-7-sonnet-20241022"
+            <!-- Advanced Collapsible Section for External Vendor CLI Overrides -->
+            <details open class="group rounded-xl border border-border-subtle bg-studio-dark/40 p-4 transition-all">
+              <summary class="flex cursor-pointer items-center justify-between font-medium text-xs text-studio-text-dim hover:text-studio-text">
+                <span class="flex items-center gap-2 font-semibold">
+                  <span>?? Vendor CLI Harness Overrides (Claude, Codex, OpenCode, Gemini)</span>
+                </span>
+                <span class="text-[10px] uppercase text-studio-text-dim group-open:rotate-180 transition-transform">?</span>
+              </summary>
+              <div class="mt-4 flex flex-col gap-4 border-t border-border-subtle pt-4">
+                <p class="m-0 text-xs text-studio-text-dim">
+                  Secara default, PTY Terminal CLI vendor (Claude, Codex, Gemini) meng-inherit provider utama EnStudio. Gunakan opsi di bawah jika Anda ingin meng-override Base URL, API Key, Model, atau Flag khusus untuk CLI vendor tertentu.
+                </p>
+                <SmartSelect
+                  label="Select Vendor CLI Engine"
+                  bind:value={activeVendor}
+                  options={[
+                    { value: 'claude', label: 'Claude Code CLI (claude)', description: 'Terminal harness Anthropic' },
+                    { value: 'codex', label: 'Codex CLI (codex)', description: 'Terminal harness OpenAI Codex' },
+                    { value: 'opencode', label: 'OpenCode CLI (opencode)', description: 'Terminal harness OpenCode' },
+                    { value: 'gemini', label: 'Gemini CLI (gemini)', description: 'Terminal harness Google Gemini' },
+                  ]}
                   disabled={saving}
-                  hint="Override spesifik rilis Sonnet yang digunakan Claude Code"
+                  onchange={(val) => {
+                    activeVendor = val as VendorKey
+                    activeTarget = 'main'
+                  }}
                 />
-                <TextInput
-                  label="Haiku / Fast Model Specification (ANTHROPIC_DEFAULT_HAIKU_MODEL)"
-                  bind:value={haikuModel}
-                  placeholder="e.g. claude-3-5-haiku-20241022"
-                  disabled={saving}
-                  hint="Override spesifik rilis Haiku untuk pencarian & sub-tasks"
-                />
-                <TextInput
-                  label="Opus / Heavy Model Specification (ANTHROPIC_DEFAULT_OPUS_MODEL)"
-                  bind:value={opusModel}
-                  placeholder="e.g. claude-3-opus-20240229"
-                  disabled={saving}
-                  hint="Override spesifik rilis Opus yang digunakan untuk tugas berat"
-                />
-                <TextInput
-                  label="Extended Thinking Budget (MAX_THINKING_TOKENS)"
-                  bind:value={maxThinkingTokens}
-                  placeholder="e.g. 4000"
-                  disabled={saving}
-                  hint="Batas token reasoning / thinking untuk model Claude 3.7 Sonnet"
-                />
-              </div>
-            {/if}
+                {#if activeVendor !== 'enpii'}
+                  <TextInput
+                    label={`${activeVendor.toUpperCase()} Base URL Override`}
+                    bind:value={vendorsState[activeVendor].main.baseUrl}
+                    placeholder="Biarkan kosong untuk memakai main Base URL"
+                    disabled={saving}
+                    hint="Base URL khusus untuk vendor CLI ini"
+                  />
+                  <TextInput
+                    label={`${activeVendor.toUpperCase()} API Key Override`}
+                    type="password"
+                    bind:value={vendorsState[activeVendor].main.apiKey}
+                    placeholder="Biarkan kosong untuk memakai main API Key"
+                    disabled={saving}
+                    hint="API Key khusus untuk vendor CLI ini"
+                  />
+                  <TextInput
+                    label={`${activeVendor.toUpperCase()} Main Model Override`}
+                    bind:value={vendorsState[activeVendor].main.model}
+                    placeholder="Biarkan kosong untuk memakai main Model"
+                    disabled={saving}
+                    hint="Model utama untuk CLI ini (misal: claude-3-7-sonnet / gpt-5.4)"
+                  />
+                  <TextInput
+                    label={`${activeVendor.toUpperCase()} Sub-Agent Model Override`}
+                    bind:value={vendorsState[activeVendor].subagent.model}
+                    placeholder="Biarkan kosong untuk memakai default"
+                    disabled={saving}
+                    hint="Model sub-agent ringan/cepat khusus untuk CLI ini (misal: claude-3-5-haiku / gpt-5.4-mini)"
+                  />
 
-            <div class="flex flex-col gap-4 border-t border-border-subtle pt-4">
-              <div class="text-xs font-semibold text-studio-purple">Custom Model Environment Variables & Flags</div>
-              <Textarea
-                label="Custom Model Environment Variables (KEY=VALUE)"
-                bind:value={customModelEnv}
-                placeholder="TEMPERATURE=0.2
-OPENAI_ORGANIZATION=org-xxx"
-                disabled={saving}
-                hint="Environment variables model/API tambahan (satu pasangan KEY=VALUE per baris)"
-              />
-              <TextInput
-                label="Custom CLI Execution Flags"
-                bind:value={customCliFlags}
-                placeholder="e.g. --verbose --thinking-budget=4000"
-                disabled={saving}
-                hint="Flag argumen CLI tambahan yang diteruskan langsung ke executable CLI"
-              />
-            </div>
+                  {#if activeVendor === 'claude'}
+                    <div class="flex flex-col gap-3 rounded-lg border border-border-subtle/60 bg-black/20 p-3">
+                      <div class="text-xs font-semibold text-studio-purple">Claude Specific Model Overrides</div>
+                      <TextInput
+                        label="Default Sonnet Model (ANTHROPIC_DEFAULT_SONNET_MODEL)"
+                        bind:value={vendorsState.claude.main.sonnetModel}
+                        placeholder="claude-3-7-sonnet"
+                        disabled={saving}
+                      />
+                      <TextInput
+                        label="Default Haiku Model (ANTHROPIC_DEFAULT_HAIKU_MODEL)"
+                        bind:value={vendorsState.claude.main.haikuModel}
+                        placeholder="claude-3-5-haiku"
+                        disabled={saving}
+                      />
+                      <TextInput
+                        label="Default Opus Model (ANTHROPIC_DEFAULT_OPUS_MODEL)"
+                        bind:value={vendorsState.claude.main.opusModel}
+                        placeholder="claude-3-opus"
+                        disabled={saving}
+                      />
+                      <TextInput
+                        label="Extended Thinking Budget (MAX_THINKING_TOKENS)"
+                        bind:value={vendorsState.claude.main.maxThinkingTokens}
+                        placeholder="e.g. 4000"
+                        disabled={saving}
+                        hint="Batas token reasoning / thinking untuk model Claude"
+                      />
+                    </div>
+                  {/if}
+
+                  <div class="flex flex-col gap-3 rounded-lg border border-border-subtle/60 bg-black/20 p-3">
+                    <div class="text-xs font-semibold text-studio-purple">Custom Model Environment Variables & Flags</div>
+                    <Textarea
+                      label="Custom Model Environment Variables (KEY=VALUE)"
+                      bind:value={vendorsState[activeVendor].main.customModelEnv}
+                      rows={3}
+                      placeholder="TEMPERATURE=0.2&#10;OPENAI_ORGANIZATION=org-xxx"
+                      disabled={saving}
+                      hint="Environment variables model/API tambahan (satu pasangan KEY=VALUE per baris)"
+                    />
+                    <TextInput
+                      label="Custom CLI Execution Flags"
+                      bind:value={vendorsState[activeVendor].main.customCliFlags}
+                      placeholder="e.g. --verbose --thinking-budget=4000"
+                      disabled={saving}
+                      hint="Flag argumen CLI tambahan yang diteruskan langsung ke executable CLI"
+                    />
+                  </div>
+                {/if}
+              </div>
+            </details>
           </div>
-          <div class="flex flex-col gap-5 border-t border-border-subtle pt-4">
-              <NumberInput
-                label={t('settings.permissions.maxTurns')}
-                bind:value={maxTurns}
-                min={1}
-                max={200}
-                step={1}
-                disabled={saving}
-              />
-              <Switch
-                bind:checked={streamTokens}
-                label={t('settings.permissions.streamTokens')}
-                description={t('settings.permissions.streamTokensDesc')}
-              />
-            </div>
         {:else if section === 'permissions'}
           <div class="flex flex-col gap-5">
             <SmartSelect
