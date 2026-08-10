@@ -2,7 +2,7 @@
   "name": "@enstudio/desktop",
   "version": "0.1.1",
   "private": true,
-  "description": "Personal agentic coding workspace \u00e2\u20ac\u201d enpii on your own endpoint",
+  "description": "Personal agentic coding workspace â€” enpii on your own endpoint",
   "author": {
     "name": "enpii",
     "email": "noreply@enpii.studio"
@@ -51,7 +51,9 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.9",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/addon-canvas": "^0.8.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
@@ -70,7 +72,7 @@
   "build": {
     "appId": "studio.enpii.app",
     "productName": "EnStudio",
-    "copyright": "Copyright \u00c2\u00a9 enpii",
+    "copyright": "Copyright Â© enpii",
     "directories": {
       "output": "release",
       "buildResources": "build"
