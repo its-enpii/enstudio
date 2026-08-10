@@ -171,6 +171,7 @@
         cursorBlink: true,
         cursorStyle: 'bar',
         fontFamily: fontStack(app.ui.fontFamily),
+        letterSpacing: 0,
         fontSize: EDITOR_FONT_SIZE,
         lineHeight: 1.25,
         scrollback: 5_000,

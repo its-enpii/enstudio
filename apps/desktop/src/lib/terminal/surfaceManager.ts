@@ -27,6 +27,7 @@ export class SurfaceManager {
       disableStdin: true,
       cursorStyle: 'bar',
       fontFamily,
+      letterSpacing: 0,
       fontSize,
       lineHeight: 1.25,
       scrollback: 5_000,
