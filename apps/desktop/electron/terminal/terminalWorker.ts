@@ -298,11 +298,9 @@ function createSession(payload: TerminalCreateParams | undefined): { id: string 
     cwd,
     cols: clampTerminalCols(payload?.cols),
     rows: clampTerminalRows(payload?.rows),
-    // ConPTY on Windows lets native subprocesses (Docker, ssh, etc.) bypass
-    // the PTY pipe and write directly to the host console. That silently
-    // drops their output from our renderer. WinPTY funnels every byte
-    // through the pipe so docker compose ps / git / etc. show up.
-    useConpty: false,
+    // ConPTY for vendor CLI (reliable resizing & TUI Node.js/text apps).
+    // WinPTY kept for raw terminal (docker/git native subprocesses need pipe passthrough).
+    useConpty: purpose === 'vendor',
     env,
   })
 
