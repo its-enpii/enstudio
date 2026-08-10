@@ -337,10 +337,15 @@ void tick().then(() => focusComposer())
     })
     vendorResizeObs = new ResizeObserver(() => refitVendorUntilStable(6))
     if (vendorHost) vendorResizeObs.observe(vendorHost)
+
+    const onZoomApplied = () => refitVendorUntilStable(6)
+    window.addEventListener('enpiistudio:zoom-applied', onZoomApplied)
+
     return () => {
       offData()
       offExit()
       vendorResizeObs?.disconnect()
+      window.removeEventListener('enpiistudio:zoom-applied', onZoomApplied)
     }
   })
 
@@ -351,15 +356,13 @@ void tick().then(() => focusComposer())
     return () => vendorResizeObs?.unobserve(host)
   })
 
-  // Live mono family + re-fit after UI zoom.
+  // Live mono family update.
   $effect(() => {
     const family = fontStack(app.ui.fontFamily)
-    void app.ui.uiZoom
     for (const entry of vendorTerms.values()) {
       entry.term.options.fontFamily = family
       entry.term.options.fontSize = EDITOR_FONT_SIZE
     }
-    fitVendor(true)
   })
 
   // Drop vendor PTYs when project changes (not on every render).
