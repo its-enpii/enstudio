@@ -79,6 +79,12 @@
 }
 
 @layer base {
+  /* xterm.js: reset inherited letter-spacing that breaks DOM renderer cell-width calculations */
+  .xterm,
+  .xterm * {
+    letter-spacing: normal !important;
+  }
+
   *,
   *::before,
   *::after {
@@ -327,3 +333,10 @@
   }
 }
 
+
+/* xterm DOM renderer letter-spacing reset */
+.xterm-rows span,
+.xterm-screen span,
+[class*="xterm"] span {
+  letter-spacing: 0px !important;
+}

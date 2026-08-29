@@ -385,23 +385,20 @@
 
   async function mountActiveSurface(ptyId: string): Promise<void> {
     if (!activeSurfaceHost) return
-    if (mountedSessionId === ptyId) return
-    unmountActiveSurface()
     const terminal = surfaces.terminals.get(ptyId)
     if (!terminal) return
     mountedSessionId = ptyId
-    activeSurfaceHost.style.opacity = '0'
-    if (!terminal.element) terminal.open(activeSurfaceHost)
-    else if (activeSurfaceHost.firstElementChild !== terminal.element) {
+    activeSurfaceHost.style.opacity = '1'
+    if (!terminal.element) {
+      terminal.open(activeSurfaceHost)
+    } else if (activeSurfaceHost.firstElementChild !== terminal.element) {
       activeSurfaceHost.replaceChildren(terminal.element)
     }
+    try {
+      terminal.refresh(0, Math.max(0, terminal.rows - 1))
+    } catch { /* ignore */ }
     await waitHostSize()
-    try { await document.fonts?.ready } catch { /* ignore */ }
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
     fitActiveSurface(true)
-    await new Promise<void>((r) => requestAnimationFrame(() => r()))
-    fitActiveSurface(true)
-    activeSurfaceHost.style.opacity = '1'
     terminal.focus()
     refitUntilStable()
   }
@@ -515,7 +512,7 @@
     await tick()
     const tab = store.findTab(tabId)
     if (!tab) return
-    if (tab.runningCommandId && surfaces.terminals.has(tabId)) {
+    if (surfaces.terminals.has(tabId)) {
       await mountActiveSurface(tabId)
     } else {
       unmountActiveSurface()

@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { xtermTheme } from '../theme'
 import type { TerminalApi } from './types'
 
@@ -28,6 +29,8 @@ export class SurfaceManager {
       cursorStyle: 'bar',
       fontFamily,
             fontSize,
+      letterSpacing: 0,
+      allowProposedApi: true,
       lineHeight: 1.0,
       customGlyphs: true,
       scrollback: 5_000,
@@ -36,6 +39,11 @@ export class SurfaceManager {
     })
     const fit = new FitAddon()
     terminal.loadAddon(fit)
+    try {
+      terminal.loadAddon(new CanvasAddon())
+    } catch (err) {
+      console.warn('[xterm] CanvasAddon load error:', err)
+    }
     this.terminals.set(id, terminal)
     this.fitAddons.set(id, fit)
     this.terminalSizes.set(id, { cols, rows })
@@ -95,6 +103,9 @@ export class SurfaceManager {
         const proposed = fit.proposeDimensions()
         if (!proposed || proposed.cols < 40 || proposed.rows < 10) return
         fit.fit()
+        try {
+          terminal.refresh(0, Math.max(0, terminal.rows - 1))
+        } catch { /* ignore */ }
         this.terminalSizes.set(ptyId, { cols: terminal.cols, rows: terminal.rows })
         void this.api?.resize(ptyId, terminal.cols, terminal.rows)
         host.style.opacity = '1'

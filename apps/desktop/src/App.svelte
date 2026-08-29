@@ -120,9 +120,9 @@
 
     <main class="min-h-0 min-w-0 bg-studio-dark select-text" data-selectable>
       <div class="grid h-full min-h-0 overflow-hidden select-text" style="grid-template-rows: minmax(0, 1fr) auto">
-        {#if state.mode === 'agent'}
+        <div class="h-full min-h-0 {state.mode !== 'agent' ? 'hidden' : ''}">
           <AgentStage />
-        {/if}
+        </div>
         <div class="h-full min-h-0 {state.mode !== 'code' ? 'hidden' : ''}">
           <CodeStage />
         </div>

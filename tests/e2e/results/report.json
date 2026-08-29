@@ -1,0 +1,718 @@
+{
+  "config": {
+    "argv": [
+      "F:\\Workspace\\nodeJs\\node.exe",
+      "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "tests/e2e/specs/03-git-terminal-code-browser.spec.ts",
+      "--config",
+      "tests/e2e/playwright.config.ts"
+    ],
+    "configFile": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\playwright.config.ts",
+    "rootDir": "F:/Workspace/Enpii Studio/projects/enpiistudio/tests/e2e/specs",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "F:/Workspace/Enpii Studio/projects/enpiistudio/tests/e2e/results/artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "F:/Workspace/Enpii Studio/projects/enpiistudio/tests/e2e/specs",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 120000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\report.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 1,
+    "webServer": {
+      "command": "node ../../node_modules/vite/bin/vite.js --strictPort",
+      "cwd": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\apps\\desktop",
+      "url": "http://localhost:5173",
+      "reuseExistingServer": true,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "03-git-terminal-code-browser.spec.ts",
+      "file": "03-git-terminal-code-browser.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Git stage",
+          "file": "03-git-terminal-code-browser.spec.ts",
+          "line": 56,
+          "column": 6,
+          "specs": [
+            {
+              "title": "branch manager lists current branch and search filters",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 31275,
+                      "error": {
+                        "message": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header button[aria-expanded]')\u001b[22m\n",
+                        "stack": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header button[aria-expanded]')\u001b[22m\n\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:66:21",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 21,
+                          "line": 66
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 64 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m600\u001b[39m) \u001b[90m// let git status IPC settle\u001b[39m\n \u001b[90m 65 |\u001b[39m     \u001b[36mconst\u001b[39m branchBtn \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mlocator(\u001b[32m'header button[aria-expanded]'\u001b[39m)\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 66 |\u001b[39m     \u001b[36mawait\u001b[39m branchBtn\u001b[33m.\u001b[39mclick()\n \u001b[90m    |\u001b[39m                     \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 67 |\u001b[39m     \u001b[36mconst\u001b[39m manager \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mgetByRole(\u001b[32m'dialog'\u001b[39m\u001b[33m,\u001b[39m { name\u001b[33m:\u001b[39m \u001b[32m'Branch manager'\u001b[39m })\n \u001b[90m 68 |\u001b[39m     \u001b[36mawait\u001b[39m expect(manager)\u001b[33m.\u001b[39mtoBeVisible()\n \u001b[90m 69 |\u001b[39m     \u001b[36mawait\u001b[39m page\u001b[33m.\u001b[39mkeyboard\u001b[33m.\u001b[39mtype(\u001b[32m'main'\u001b[39m\u001b[33m,\u001b[39m { delay\u001b[33m:\u001b[39m \u001b[35m30\u001b[39m })\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 21,
+                            "line": 66
+                          },
+                          "message": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header button[aria-expanded]')\u001b[22m\n\n\n  64 |     await humanDelay(600) // let git status IPC settle\n  65 |     const branchBtn = page.locator('header button[aria-expanded]')\n> 66 |     await branchBtn.click()\n     |                     ^\n  67 |     const manager = page.getByRole('dialog', { name: 'Branch manager' })\n  68 |     await expect(manager).toBeVisible()\n  69 |     await page.keyboard.type('main', { delay: 30 })\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:66:21"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:54:06.430Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0ab71-t-branch-and-search-filters\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0ab71-t-branch-and-search-filters\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0ab71-t-branch-and-search-filters\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0ab71-t-branch-and-search-filters\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 21,
+                        "line": 66
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-1c5224068018d23b35dc",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 62,
+              "column": 7
+            },
+            {
+              "title": "unstaged section shows dirty file and staging works end-to-end",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 16079,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('button', { name: 'Stage all' })\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: 'Stage all' })\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('button', { name: 'Stage all' })\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: 'Stage all' })\u001b[22m\n\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:81:28",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 28,
+                          "line": 81
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 79 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m600\u001b[39m)\n \u001b[90m 80 |\u001b[39m     \u001b[36mconst\u001b[39m stageAll \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mgetByRole(\u001b[32m'button'\u001b[39m\u001b[33m,\u001b[39m { name\u001b[33m:\u001b[39m \u001b[32m'Stage all'\u001b[39m })\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 81 |\u001b[39m     \u001b[36mawait\u001b[39m expect(stageAll)\u001b[33m.\u001b[39mtoBeVisible({ timeout\u001b[33m:\u001b[39m \u001b[35m15000\u001b[39m })\n \u001b[90m    |\u001b[39m                            \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 82 |\u001b[39m     \u001b[36mawait\u001b[39m stageAll\u001b[33m.\u001b[39mclick()\n \u001b[90m 83 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m500\u001b[39m)\n \u001b[90m 84 |\u001b[39m     \u001b[90m// After staging all, \"Unstage all\" appears in the staged section.\u001b[39m\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 28,
+                            "line": 81
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('button', { name: 'Stage all' })\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: 'Stage all' })\u001b[22m\n\n\n  79 |     await humanDelay(600)\n  80 |     const stageAll = page.getByRole('button', { name: 'Stage all' })\n> 81 |     await expect(stageAll).toBeVisible({ timeout: 15000 })\n     |                            ^\n  82 |     await stageAll.click()\n  83 |     await humanDelay(500)\n  84 |     // After staging all, \"Unstage all\" appears in the staged section.\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:81:28"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:54:39.945Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-b78dc-nd-staging-works-end-to-end\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-b78dc-nd-staging-works-end-to-end\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-b78dc-nd-staging-works-end-to-end\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-b78dc-nd-staging-works-end-to-end\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 28,
+                        "line": 81
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-8b26a8764d60fd543823",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 77,
+              "column": 7
+            },
+            {
+              "title": "commit flow creates a real commit in the fixture repo",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 16235,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('textarea[placeholder=\"Commit message\"]')\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for locator('textarea[placeholder=\"Commit message\"]')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('textarea[placeholder=\"Commit message\"]')\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for locator('textarea[placeholder=\"Commit message\"]')\u001b[22m\n\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:98:28",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 28,
+                          "line": 98
+                        },
+                        "snippet": "\u001b[0m \u001b[90m  96 |\u001b[39m     \u001b[36mconst\u001b[39m msg \u001b[33m=\u001b[39m \u001b[32m`e2e commit ${Date.now()}`\u001b[39m\n \u001b[90m  97 |\u001b[39m     \u001b[36mconst\u001b[39m textarea \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mlocator(\u001b[32m'textarea[placeholder=\"Commit message\"]'\u001b[39m)\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m  98 |\u001b[39m     \u001b[36mawait\u001b[39m expect(textarea)\u001b[33m.\u001b[39mtoBeVisible({ timeout\u001b[33m:\u001b[39m \u001b[35m15000\u001b[39m })\n \u001b[90m     |\u001b[39m                            \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m  99 |\u001b[39m     \u001b[36mawait\u001b[39m textarea\u001b[33m.\u001b[39mfill(msg)\n \u001b[90m 100 |\u001b[39m     \u001b[36mconst\u001b[39m commitBtn \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mgetByRole(\u001b[32m'button'\u001b[39m\u001b[33m,\u001b[39m { name\u001b[33m:\u001b[39m \u001b[35m/commit/i\u001b[39m })\u001b[33m.\u001b[39mlast()\n \u001b[90m 101 |\u001b[39m     \u001b[36mawait\u001b[39m commitBtn\u001b[33m.\u001b[39mclick()\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 28,
+                            "line": 98
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('textarea[placeholder=\"Commit message\"]')\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for locator('textarea[placeholder=\"Commit message\"]')\u001b[22m\n\n\n   96 |     const msg = `e2e commit ${Date.now()}`\n   97 |     const textarea = page.locator('textarea[placeholder=\"Commit message\"]')\n>  98 |     await expect(textarea).toBeVisible({ timeout: 15000 })\n      |                            ^\n   99 |     await textarea.fill(msg)\n  100 |     const commitBtn = page.getByRole('button', { name: /commit/i }).last()\n  101 |     await commitBtn.click()\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:98:28"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "buffer": ""
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:54:57.542Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-695ac--commit-in-the-fixture-repo\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-695ac--commit-in-the-fixture-repo\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-695ac--commit-in-the-fixture-repo\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-695ac--commit-in-the-fixture-repo\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 28,
+                        "line": 98
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-30145b62ee50316a0367",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 92,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "Terminal stage",
+          "file": "03-git-terminal-code-browser.spec.ts",
+          "line": 112,
+          "column": 6,
+          "specs": [
+            {
+              "title": "new terminal tab opens and echoes a command round-trip",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 3,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 20606,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByLabel('Terminal command')\nExpected: visible\nTimeout: 20000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 20000ms\u001b[22m\n\u001b[2m  - waiting for getByLabel('Terminal command')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByLabel('Terminal command')\nExpected: visible\nTimeout: 20000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 20000ms\u001b[22m\n\u001b[2m  - waiting for getByLabel('Terminal command')\u001b[22m\n\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:116:28",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 28,
+                          "line": 116
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 114 |\u001b[39m     \u001b[36mawait\u001b[39m page\u001b[33m.\u001b[39mgetByRole(\u001b[32m'tab'\u001b[39m\u001b[33m,\u001b[39m { name\u001b[33m:\u001b[39m \u001b[35m/Terminal/i\u001b[39m })\u001b[33m.\u001b[39mclick()\n \u001b[90m 115 |\u001b[39m     \u001b[36mconst\u001b[39m composer \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mgetByLabel(\u001b[32m'Terminal command'\u001b[39m)\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 116 |\u001b[39m     \u001b[36mawait\u001b[39m expect(composer)\u001b[33m.\u001b[39mtoBeVisible({ timeout\u001b[33m:\u001b[39m \u001b[35m20000\u001b[39m })\n \u001b[90m     |\u001b[39m                            \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 117 |\u001b[39m     \u001b[90m// Wait until PTY prompt is ready: composer enabled.\u001b[39m\n \u001b[90m 118 |\u001b[39m     \u001b[36mawait\u001b[39m composer\u001b[33m.\u001b[39mclick()\n \u001b[90m 119 |\u001b[39m     \u001b[36mawait\u001b[39m page\u001b[33m.\u001b[39mkeyboard\u001b[33m.\u001b[39mtype(\u001b[32m'echo enpii-e2e-$((21*2))'\u001b[39m\u001b[33m,\u001b[39m { delay\u001b[33m:\u001b[39m \u001b[35m25\u001b[39m })\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 28,
+                            "line": 116
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByLabel('Terminal command')\nExpected: visible\nTimeout: 20000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 20000ms\u001b[22m\n\u001b[2m  - waiting for getByLabel('Terminal command')\u001b[22m\n\n\n  114 |     await page.getByRole('tab', { name: /Terminal/i }).click()\n  115 |     const composer = page.getByLabel('Terminal command')\n> 116 |     await expect(composer).toBeVisible({ timeout: 20000 })\n      |                            ^\n  117 |     // Wait until PTY prompt is ready: composer enabled.\n  118 |     await composer.click()\n  119 |     await page.keyboard.type('echo enpii-e2e-$((21*2))', { delay: 25 })\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:116:28"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:55:15.245Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-48980-echoes-a-command-round-trip\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-48980-echoes-a-command-round-trip\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-48980-echoes-a-command-round-trip\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-48980-echoes-a-command-round-trip\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 28,
+                        "line": 116
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-57bf81ade5615548f523",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 113,
+              "column": 7
+            },
+            {
+              "title": "second tab can be created and closed independently",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 1407,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m1\u001b[39m\nReceived:   \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m1\u001b[39m\nReceived:   \u001b[31m1\u001b[39m\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:136:24",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 24,
+                          "line": 136
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 134 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m800\u001b[39m)\n \u001b[90m 135 |\u001b[39m     \u001b[36mconst\u001b[39m afterCount \u001b[33m=\u001b[39m \u001b[36mawait\u001b[39m sessions\u001b[33m.\u001b[39mlocator(\u001b[32m'[role=\"tab\"], button'\u001b[39m)\u001b[33m.\u001b[39mcount()\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 136 |\u001b[39m     expect(afterCount)\u001b[33m.\u001b[39mtoBeGreaterThan(beforeCount)\n \u001b[90m     |\u001b[39m                        \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 137 |\u001b[39m     \u001b[90m// Close the new tab.\u001b[39m\n \u001b[90m 138 |\u001b[39m     \u001b[36mconst\u001b[39m closeTab \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mlocator(\u001b[32m'button[aria-label^=\"Close \"]'\u001b[39m)\u001b[33m.\u001b[39mlast()\n \u001b[90m 139 |\u001b[39m     \u001b[36mawait\u001b[39m closeTab\u001b[33m.\u001b[39mclick()\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 24,
+                            "line": 136
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m1\u001b[39m\nReceived:   \u001b[31m1\u001b[39m\n\n  134 |     await humanDelay(800)\n  135 |     const afterCount = await sessions.locator('[role=\"tab\"], button').count()\n> 136 |     expect(afterCount).toBeGreaterThan(beforeCount)\n      |                        ^\n  137 |     // Close the new tab.\n  138 |     const closeTab = page.locator('button[aria-label^=\"Close \"]').last()\n  139 |     await closeTab.click()\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:136:24"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:55:37.364Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0cd11-ed-and-closed-independently\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0cd11-ed-and-closed-independently\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0cd11-ed-and-closed-independently\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-0cd11-ed-and-closed-independently\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 24,
+                        "line": 136
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-83c75a97bcb15bf2f8a2",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 127,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "Code stage",
+          "file": "03-git-terminal-code-browser.spec.ts",
+          "line": 146,
+          "column": 6,
+          "specs": [
+            {
+              "title": "file tree lists fixture files and opening one loads the editor",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 5,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 16252,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('README.md', { exact: true }).first()\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('README.md', { exact: true }).first()\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('README.md', { exact: true }).first()\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('README.md', { exact: true }).first()\u001b[22m\n\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:152:31",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 31,
+                          "line": 152
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 150 |\u001b[39m     \u001b[90m// Click README.md anywhere in the tree.\u001b[39m\n \u001b[90m 151 |\u001b[39m     \u001b[36mconst\u001b[39m readmeEntry \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mgetByText(\u001b[32m'README.md'\u001b[39m\u001b[33m,\u001b[39m { exact\u001b[33m:\u001b[39m \u001b[36mtrue\u001b[39m })\u001b[33m.\u001b[39mfirst()\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 152 |\u001b[39m     \u001b[36mawait\u001b[39m expect(readmeEntry)\u001b[33m.\u001b[39mtoBeVisible({ timeout\u001b[33m:\u001b[39m \u001b[35m15000\u001b[39m })\n \u001b[90m     |\u001b[39m                               \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 153 |\u001b[39m     \u001b[36mawait\u001b[39m readmeEntry\u001b[33m.\u001b[39mclick()\n \u001b[90m 154 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m500\u001b[39m)\n \u001b[90m 155 |\u001b[39m     \u001b[90m// Editor content shows fixture text.\u001b[39m\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 31,
+                            "line": 152
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('README.md', { exact: true }).first()\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('README.md', { exact: true }).first()\u001b[22m\n\n\n  150 |     // Click README.md anywhere in the tree.\n  151 |     const readmeEntry = page.getByText('README.md', { exact: true }).first()\n> 152 |     await expect(readmeEntry).toBeVisible({ timeout: 15000 })\n      |                               ^\n  153 |     await readmeEntry.click()\n  154 |     await humanDelay(500)\n  155 |     // Editor content shows fixture text.\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:152:31"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:55:40.260Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-3a960-pening-one-loads-the-editor\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-3a960-pening-one-loads-the-editor\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-3a960-pening-one-loads-the-editor\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-3a960-pening-one-loads-the-editor\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 31,
+                        "line": 152
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-42d34b65b5a3eb393a22",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 147,
+              "column": 7
+            },
+            {
+              "title": "editing a file persists to disk after save",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 6,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 16293,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('edit-me.txt', { exact: true }).first()\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('edit-me.txt', { exact: true }).first()\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('edit-me.txt', { exact: true }).first()\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('edit-me.txt', { exact: true }).first()\u001b[22m\n\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:167:25",
+                        "location": {
+                          "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                          "column": 25,
+                          "line": 167
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 165 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m700\u001b[39m)\n \u001b[90m 166 |\u001b[39m     \u001b[36mconst\u001b[39m entry \u001b[33m=\u001b[39m page\u001b[33m.\u001b[39mgetByText(\u001b[32m'edit-me.txt'\u001b[39m\u001b[33m,\u001b[39m { exact\u001b[33m:\u001b[39m \u001b[36mtrue\u001b[39m })\u001b[33m.\u001b[39mfirst()\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 167 |\u001b[39m     \u001b[36mawait\u001b[39m expect(entry)\u001b[33m.\u001b[39mtoBeVisible({ timeout\u001b[33m:\u001b[39m \u001b[35m15000\u001b[39m })\n \u001b[90m     |\u001b[39m                         \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 168 |\u001b[39m     \u001b[36mawait\u001b[39m entry\u001b[33m.\u001b[39mclick()\n \u001b[90m 169 |\u001b[39m     \u001b[36mawait\u001b[39m humanDelay(\u001b[35m500\u001b[39m)\n \u001b[90m 170 |\u001b[39m     \u001b[36mawait\u001b[39m page\u001b[33m.\u001b[39mkeyboard\u001b[33m.\u001b[39mpress(\u001b[32m'Control+a'\u001b[39m)\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                            "column": 25,
+                            "line": 167
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('edit-me.txt', { exact: true }).first()\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('edit-me.txt', { exact: true }).first()\u001b[22m\n\n\n  165 |     await humanDelay(700)\n  166 |     const entry = page.getByText('edit-me.txt', { exact: true }).first()\n> 167 |     await expect(entry).toBeVisible({ timeout: 15000 })\n      |                         ^\n  168 |     await entry.click()\n  169 |     await humanDelay(500)\n  170 |     await page.keyboard.press('Control+a')\n    at F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts:167:25"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:55:57.968Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-037be-persists-to-disk-after-save\\error-context.md"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-037be-persists-to-disk-after-save\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-037be-persists-to-disk-after-save\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\results\\artifacts\\03-git-terminal-code-brows-037be-persists-to-disk-after-save\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "F:\\Workspace\\Enpii Studio\\projects\\enpiistudio\\tests\\e2e\\specs\\03-git-terminal-code-browser.spec.ts",
+                        "column": 25,
+                        "line": 167
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-6e97277f5a045fd4bd36",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 161,
+              "column": 7
+            }
+          ]
+        },
+        {
+          "title": "Browser stage",
+          "file": "03-git-terminal-code-browser.spec.ts",
+          "line": 180,
+          "column": 6,
+          "specs": [
+            {
+              "title": "browser mode renders its inspector and address UI without crashing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 7,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1392,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-24T10:56:15.781Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "be9f2cd4de3a0c02f086-4e7921f3c83fd5a38474",
+              "file": "03-git-terminal-code-browser.spec.ts",
+              "line": 181,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-24T10:54:03.758Z",
+    "duration": 134620.306,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 7,
+    "flaky": 0
+  }
+}

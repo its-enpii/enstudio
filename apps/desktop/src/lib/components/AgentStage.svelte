@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onDestroy, onMount, tick } from 'svelte'
+  import { onDestroy, onMount, tick, untrack } from 'svelte'
   import { Terminal } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
-  import '@xterm/xterm/css/xterm.css'
+import { CanvasAddon } from '@xterm/addon-canvas'
+    import '@xterm/xterm/css/xterm.css'
   import { state as app, COMPOSER_MODES, fontStack, EDITOR_FONT_SIZE, type ChatMessage, type ComposerAttachment, type ComposerMode, type PermissionMode } from '../store.svelte'
   import { t } from '../i18n/index.svelte'
   import { approveDiskPlan, compactSession, exportSessionMarkdown, getAgentCheckpoints, newSession, openSession, readProjectFile, refreshDraftPlan, refreshSessionList, refreshTeamSurface, rejectDiskPlan, respondApproval, respondAsk, saveProviderConfig, searchProjectFiles, sendPrompt, setSessionPlanMode, stopAgentTurn, undoCompactSession, visibleApprovals } from '../enpii'
@@ -99,10 +100,16 @@
   function fitVendor(immediate = false): void {
     if (agentPane === 'enpii') return
     const entry = vendorTerms.get(agentPane)
-    if (!entry || !vendorHost || vendorHost.clientWidth <= 0) return
+    if (!entry || !vendorHost || vendorHost.clientWidth <= 80 || vendorHost.clientHeight <= 40) return
     const apply = () => {
       try {
+        if (!vendorHost || vendorHost.clientWidth <= 80 || vendorHost.clientHeight <= 40) return
+        const proposed = entry.fit.proposeDimensions()
+        if (!proposed || proposed.cols < 40 || proposed.rows < 10) return
         entry.fit.fit()
+        try {
+          entry.term.refresh(0, Math.max(0, entry.term.rows - 1))
+        } catch { /* ignore */ }
         if (entry.size.cols === entry.term.cols && entry.size.rows === entry.term.rows) return
         entry.size = { cols: entry.term.cols, rows: entry.term.rows }
         void termApi?.resize(entry.ptyId, entry.term.cols, entry.term.rows)
@@ -137,13 +144,15 @@
     if (!vendorHost) return
     const entry = vendorTerms.get(cliId)
     if (!entry) return
-    vendorHost.replaceChildren()
     if (!entry.term.element) {
       entry.term.open(vendorHost)
-    } else {
-      vendorHost.appendChild(entry.term.element)
+    } else if (vendorHost.firstElementChild !== entry.term.element) {
+      vendorHost.replaceChildren(entry.term.element)
     }
     await tick()
+    try {
+      entry.term.refresh(0, Math.max(0, entry.term.rows - 1))
+    } catch { /* ignore */ }
     refitVendorUntilStable(12)
     entry.term.focus()
   }
@@ -172,6 +181,8 @@
         cursorStyle: 'bar',
         fontFamily: fontStack(app.ui.fontFamily),
                 fontSize: EDITOR_FONT_SIZE,
+        letterSpacing: 0,
+        allowProposedApi: true,
         lineHeight: 1.0,
         customGlyphs: true,
         scrollback: 5_000,
@@ -180,6 +191,11 @@
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
+      try {
+        term.loadAddon(new CanvasAddon())
+      } catch (err) {
+        console.warn('[xterm] CanvasAddon load error:', err)
+      }
       term.open(vendorHost)
       try { await document.fonts?.ready } catch { /* ignore */ }
       await tick()
@@ -187,13 +203,21 @@
       const cols = Math.max(40, term.cols || 120)
       const rows = Math.max(10, term.rows || 30)
 
-      const created = await termApi.create(app.activeProject.path, cols, rows, {
-        projectId: app.activeProject.id,
+      const plainProvider = provider
+        ? {
+            baseUrl: provider.baseUrl ? String(provider.baseUrl) : undefined,
+            apiKey: provider.apiKey ? String(provider.apiKey) : undefined,
+            model: provider.model ? String(provider.model) : undefined,
+          }
+        : undefined
+
+      const created = await termApi.create(String(app.activeProject.path), cols, rows, {
+        projectId: String(app.activeProject.id),
         purpose: 'vendor',
-        command: cli.command,
-        args: cli.args,
+        command: String(cli.command),
+        args: cli.args ? Array.from(cli.args).map(String) : [],
         injectProvider: true,
-        provider,
+        provider: plainProvider,
       })
       if (vendorDestroyed) {
         await termApi.kill(created.id)
@@ -1576,6 +1600,15 @@ void tick().then(() => focusComposer())
   }
 
   /** Type-to-composer: printable keys land in composer without permanent autofocus. */
+  
+  $effect(() => {
+    if (app.mode === 'agent' && agentPane !== 'enpii') {
+      untrack(() => {
+        void selectAgentPane(agentPane)
+      })
+    }
+  })
+
   function onWindowKeydown(event: KeyboardEvent): void {
     if (app.mode !== 'agent' || agentPane !== 'enpii' || !app.activeProject) return
 
@@ -2766,3 +2799,10 @@ void tick().then(() => focusComposer())
 <!-- Floating Action Required lives in App-level ApprovalOverlay (survives mode/pane switch). -->
 
 <svelte:window onkeydown={onWindowKeydown} />
+
+<style>
+  :global(.xterm-rows span),
+  :global(.xterm-screen span) {
+    letter-spacing: 0px !important;
+  }
+</style>
